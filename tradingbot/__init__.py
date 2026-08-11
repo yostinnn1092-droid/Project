@@ -4,6 +4,9 @@ Pipeline:  data -> strategy -> risk -> execution -> metrics
 """
 
 from .backtest import BacktestResult, Costs, run
+# NOTE: kronos_signal is NOT imported here — it needs torch + the Kronos
+# source, which the core package deliberately does not depend on. Import it
+# explicitly: `from tradingbot.kronos_signal import KronosSignal`.
 from .broker import Broker, Fill, PaperBroker
 from .data import load_csv, synthetic, train_test_split, validate
 from .risk import RiskLimits, RiskManager, position_size_from_stop

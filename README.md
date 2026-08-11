@@ -166,6 +166,51 @@ first — each item is a real way people have lost real money:
 
 ---
 
+## Kronos as a signal source
+
+`tradingbot/kronos_signal.py` wraps [Kronos](https://github.com/shiyu-coder/Kronos)
+(AAAI 2026), a generative foundation model for candlesticks, as a `Strategy`.
+
+```bash
+git clone https://github.com/shiyu-coder/Kronos && pip install -r Kronos/requirements.txt
+python run_kronos.py --kronos-repo /path/to/Kronos            # needs HF checkpoints
+python run_kronos.py --kronos-repo /path/to/Kronos --smoke    # wiring only
+```
+
+Kronos is *generative*: it samples plausible futures rather than emitting one
+number. The design exploits that — draw N paths, and use their **agreement on
+direction** to size the position. Unanimous → full size; split → flat. Note
+`KronosPredictor.predict()` averages over `sample_count` internally and
+discards the spread, so paths are drawn one at a time to keep it.
+
+Three things this integration gets right, and one it can't:
+
+- **No lookahead.** Future bar timestamps are *synthesised* by extrapolating
+  the bar interval, never read from future dataframe rows. Reading them would
+  work in backtest and be impossible live — the exact shape of a lookahead bug.
+- **Throttled inference.** One forecast is ~3s; 20,000 bars × every-bar
+  inference is hours. `predict_every` re-forecasts every k bars and holds
+  between, which is also how you'd really deploy it.
+- **No silent fallback.** `load_kronos()` raises if checkpoints are missing
+  rather than degrading to random weights. An untrained Kronos emits
+  well-formed candles and a tidy, meaningless equity curve.
+- **It is unvalidated.** The checkpoints could not be fetched in the
+  environment this was written in, so the signal has never run against a
+  trained model. The wiring is verified; the edge is entirely unmeasured.
+
+**Verified limitation of the conviction metric:** with random weights the model
+predicted −4.0% on *every* forecast with *100%* path agreement — maximally
+confident, completely wrong. Agreement measures internal consistency, not
+correctness. It is a useful veto, never evidence of skill.
+
+And the caveat that outranks all of the above: **forecast accuracy is not
+alpha.** Kronos's published benchmarks measure candle reconstruction, not
+trading profit. A model can be right about the level and useless about
+direction, or right about direction and still lose to the spread. Nothing in
+its training objective rewards profitable trading.
+
+---
+
 ## Known rough edges (deliberate — good first exercises)
 
 - The dust threshold in `Broker.rebalance_to_weight` (0.01% of equity) is
