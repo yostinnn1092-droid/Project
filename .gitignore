@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+backtest.png
+
+# Never commit credentials. Exchange keys belong in env vars or a secrets
+# manager — a leaked key with trade permissions is someone else's bot.
+.env
+*.key
+secrets.*

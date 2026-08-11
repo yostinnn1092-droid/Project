@@ -1,0 +1,6 @@
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.7
+
+# Live trading (optional — only needed once you leave the backtester)
+# ccxt>=4.0        # unified API across ~100 crypto exchanges
