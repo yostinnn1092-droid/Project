@@ -223,6 +223,76 @@ would look worse.
 
 ---
 
+## XAUUSD production system — built, tested, did not pass
+
+The `xauusd/` package: a full H4-regime / H1-pullback system with
+broker-spec sizing, MT5 and paper adapters, and a decision journal. See
+[`xauusd/__init__.py`](xauusd/__init__.py) for the module map.
+
+```bash
+python fetch_stocks.py --gold
+python run_xauusd_backtest.py     # single backtest + no-trade diagnosis
+python run_xauusd_gates.py        # the two gates before paper trading
+```
+
+### The journal earned its place on the first run
+
+Version one took **1 trade in 10,640 bars**. Unusable — and the no-trade log
+said exactly why. Two structural faults, invisible without it:
+
+- the rejection required the dip *and* the recovery close on **one candle**
+  (a rare shape) → now a 3-bar window
+- the stop searched **120 bars** for structure, so most stops breached the
+  ATR cap (329–619 `no valid stop placement` rejections) → now a dedicated
+  30-bar stop window
+
+Calibrated for **trade frequency, not returns**. That distinction is the
+difference between fixing a bug and fitting the data.
+
+### Gate 1 — walk-forward, 19 windows
+
+```
+profitable            : 8/19
+beat buy-and-hold     : 4/19
+mean return           : +0.07%
+mean excess over B&H  : -2.33%
+distinct param sets   : 7/19        (reasonably stable)
+95% CI (excess)       : [-4.75%, +0.29%]
+P(excess > 0)         : 3.8%
+```
+
+### Gate 2 — search noise
+
+```
+strategy              : -1.87%  (25 trades)
+random mean/best      : +1.25% / +7.91%
+beat random on        : 6/20 seeds
+beat the BEST random  : NO
+```
+
+**Both gates FAIL. The strategy does not proceed to paper trading.**
+
+### What the numbers actually say
+
+Mean window return is **+0.07%** — the system is not losing money, it is
+barely doing anything. 25 trades in two years, flat most of the time. Gold
+rose 67% across the period, so "loses to buy-and-hold" here mostly means
+"sat in cash during a bull market", which is the expected behaviour of a
+filter this selective and not a malfunction.
+
+One pattern is worth recording *and* discounting: in the 5 windows where
+buy-and-hold lost money, the strategy beat it in 4. That is the classic
+trend-following shape — flat or positive when the market falls. It is also a
+5-window post-hoc subgroup, which is precisely the kind of slice that
+manufactures false findings. Noted, not believed.
+
+**No edge was demonstrated and none is claimed.** The engineering is sound —
+risk budget respected, every decision logged, no lookahead, demo-gated. The
+hypothesis it encodes did not pay on gold over this period, and finding that
+out cost an afternoon rather than an account.
+
+---
+
 ## The strategy search — and the answer to "what's most profitable?"
 
 `run_search.py`. 20 strategies across four structurally different families
