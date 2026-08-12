@@ -223,6 +223,60 @@ would look worse.
 
 ---
 
+## Timeframes — where the cost wall actually breaks
+
+`run_timeframes.py`. Same data, same strategies, resampled to five bar sizes.
+Cost per trade never changes; the number of trades and the size of the move
+you are chasing both do.
+
+```bash
+python run_timeframes.py
+```
+
+**Trend following (SMA 20/60), retail costs:**
+
+| timeframe | bars | trades | return | sharpe | max dd | fees |
+|---|---|---|---|---|---|---|
+| 5min | 20,000 | 260 | −3.72% | −0.08 | −20.4% | **7.36%** |
+| 15min | 7,274 | 52 | +16.28% | 0.81 | −20.3% | 1.58% |
+| **1h** | 2,426 | 18 | **+23.87%** | **1.08** | **−12.99%** | **0.49%** |
+| 4h | 912 | 12 | +20.04% | 0.78 | −20.1% | 0.36% |
+| 1D | 305 | 4 | +0.40% | 0.11 | −22.7% | 0.08% |
+
+**H1 is the sweet spot.** Identical logic; fees fall 15x (7.36% → 0.49%) and
+a −3.72% loser becomes a +23.87% winner with the smallest drawdown of the
+five. This is the constructive half of the scalping lesson: you do not beat
+the cost wall by predicting better, you beat it by trading less often for
+bigger moves.
+
+**Mean reversion runs the opposite way** — best at 5min (+14.98%), steadily
+worse out to 1D (−25.49%). The two are mirror images, and that is a real
+market property rather than an artefact: short horizons revert, long horizons
+trend. Match the strategy to the horizon where its effect actually lives.
+
+**H1 out-of-sample** (tune on first 70%, judge on last 30%): best train
+config `fast=10 slow=50` at Sharpe 2.57 → **1.45 out-of-sample, +14.02%**,
+against buy-and-hold's −18.85% over the same stretch. The in-sample-to-OOS
+drop (2.57 → 1.45) is the usual and expected direction.
+
+### One result that looked good and was not
+
+The 4h scalper row showed **+14.26% return alongside −1.14bp net expectancy**
+— a contradiction, so it got checked rather than reported. The cause:
+
+```
+mean |close -> next open| gap at 4h : 0.51%
+scalper take_profit                : 0.30%
+```
+
+The price jump between deciding and filling is **larger than the entire
+profit target**. The target and stop barely bind, and the outcome is decided
+by gap luck rather than by the strategy. That +14.26% is noise over 108
+trades, not a working scalper, and holding 3 bars at 4h is 12 hours — not
+scalping in any case. `Scalper.trade_report()` now documents the limit.
+
+---
+
 ## Kronos as a signal source
 
 `tradingbot/kronos_signal.py` wraps [Kronos](https://github.com/shiyu-coder/Kronos)

@@ -132,6 +132,46 @@ def synthetic(
     )
 
 
+def resample(df: pd.DataFrame, rule: str) -> pd.DataFrame:
+    """Aggregate bars to a coarser timeframe ('15min', '1h', '4h', '1D').
+
+    Each field aggregates differently, and getting one wrong silently
+    corrupts every downstream result:
+
+        open   -> first    (price at the start of the period)
+        high   -> max      (highest point reached)
+        low    -> min      (lowest point reached)
+        close  -> last     (price at the end)
+        volume -> sum      (total traded)
+
+    Empty periods are dropped rather than forward-filled. For an instrument
+    with trading sessions — equities, futures, FX — resampling to 1h spans
+    the overnight gap and produces bars for hours the market was shut. A
+    forward-filled bar has open == high == low == close and zero volume; it
+    is not a real bar, and leaving it in adds fake zero-return periods that
+    deflate volatility and inflate Sharpe.
+
+    Note the resulting bars are not uniformly spaced in wall-clock time (the
+    last bar of a session is followed by the first of the next day). That is
+    correct and intentional: the backtester's annualisation is derived from
+    actual elapsed calendar time, so it handles the gaps.
+    """
+    out = (
+        df.set_index("timestamp")
+        .resample(rule)
+        .agg({
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+            "volume": "sum",
+        })
+        .dropna(subset=["open", "high", "low", "close"])
+        .reset_index()
+    )
+    return validate(out)
+
+
 def train_test_split(
     df: pd.DataFrame, test_frac: float = 0.3
 ) -> tuple[pd.DataFrame, pd.DataFrame]:

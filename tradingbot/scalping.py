@@ -223,6 +223,22 @@ class Scalper(Strategy):
         average gross gain per round trip, minus the round-trip cost. If that
         is negative, the strategy loses by arithmetic, and trading it more
         only loses faster.
+
+        ACCURACY LIMIT — check this before trusting the output. Returns here
+        are measured close-to-close at the moment of decision, while the
+        backtester fills at the NEXT bar's open. Those agree only while the
+        close-to-next-open gap is small relative to your profit target.
+
+        Measured on this repo's sample data at 4h bars, the mean gap is
+        0.51% against a 0.30% target — the jump between deciding and filling
+        is larger than the entire prize. At that point the target and stop
+        barely bind, outcomes are decided by gap luck rather than by the
+        strategy, and this report and the equity curve disagree (it reported
+        -1.14bp net expectancy while the run returned +14.26%).
+
+        Rule of thumb: if the median close-to-next-open gap approaches your
+        take_profit, you are no longer testing your strategy. Either use a
+        finer timeframe, widen the target, or model limit-order entries.
         """
         if not self.round_trips:
             return {"n_trades": 0}
