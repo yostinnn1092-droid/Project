@@ -71,6 +71,19 @@ class ORFadeConfig:
     allow_long: bool = True
     allow_short: bool = True
 
+    # ---- optional enhancements (all OFF by default) ------------------
+    #: Only fade in the direction of the longer-term trend: longs require
+    #: close above the EMA, shorts below. 0 disables.
+    trend_ema: int = 0
+    #: Skip days whose opening range is outside this band, measured as a
+    #: multiple of the trailing range average. A range far wider than normal
+    #: means the "sweep" is just noise; far narrower means the level is not
+    #: meaningful. 0 disables either bound.
+    min_range_ratio: float = 0.0
+    max_range_ratio: float = 0.0
+    #: Restrict ENTRIES to these New York hours. Empty tuple disables.
+    entry_hours: tuple = ()
+
 
 @dataclass
 class ORTrade:
@@ -104,6 +117,7 @@ class OpeningRangeFade(Strategy):
         self._days_seen = 0
         self._days_with_signal = 0
         self._signalled_today = False
+        self._ny_hour = 0
 
     def sync_position(self, actual_weight: float) -> None:
         if actual_weight == 0.0 and self._pos != 0.0:
@@ -131,6 +145,7 @@ class OpeningRangeFade(Strategy):
         hi = float(hist["high"].iloc[-1])
         lo = float(hist["low"].iloc[-1])
         close = float(hist["close"].iloc[-1])
+        self._ny_hour = ny.hour
 
         # ---- build the opening range ----
         if in_range_window:
@@ -152,12 +167,41 @@ class OpeningRangeFade(Strategy):
         height = self._hi - self._lo
         buf = height * self.cfg.min_breakout_frac
 
+        # ---- optional filters ----
+        if self.cfg.entry_hours and self._ny_hour not in self.cfg.entry_hours:
+            return 0.0
+
+        if self.cfg.min_range_ratio > 0 or self.cfg.max_range_ratio > 0:
+            # Compare today's opening range to recent typical bar range, so
+            # "unusually wide" is measured against the instrument's own
+            # volatility rather than an absolute price figure.
+            recent = hist.iloc[-288:]
+            typical = float((recent["high"] - recent["low"]).mean())
+            if typical > 0:
+                ratio = height / (typical * 48)  # 48 five-min bars per 4H
+                if self.cfg.min_range_ratio > 0 and ratio < self.cfg.min_range_ratio:
+                    return 0.0
+                if self.cfg.max_range_ratio > 0 and ratio > self.cfg.max_range_ratio:
+                    return 0.0
+
+        trend_ok_long = trend_ok_short = True
+        if self.cfg.trend_ema > 0:
+            e = hist["close"].ewm(span=self.cfg.trend_ema, adjust=False,
+                                  min_periods=self.cfg.trend_ema).mean()
+            ev = e.iloc[-1]
+            if pd.isna(ev):
+                return 0.0
+            trend_ok_long = close > float(ev)
+            trend_ok_short = close < float(ev)
+
         # ---- failed breakout DOWN -> long ----
-        if self.cfg.allow_long and lo < self._lo - buf and close > self._lo:
+        if (self.cfg.allow_long and trend_ok_long
+                and lo < self._lo - buf and close > self._lo):
             return self._open(1, close, lo, ts, day_key)
 
         # ---- failed breakout UP -> short ----
-        if self.cfg.allow_short and hi > self._hi + buf and close < self._hi:
+        if (self.cfg.allow_short and trend_ok_short
+                and hi > self._hi + buf and close < self._hi):
             return self._open(-1, close, hi, ts, day_key)
 
         return 0.0
