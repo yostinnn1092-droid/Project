@@ -223,6 +223,66 @@ would look worse.
 
 ---
 
+## H1 across 21 stocks — the definitive answer
+
+`fetch_stocks.py` + `run_h1_stocks.py`. The original H1 finding came from ONE
+stock over 15 months. This runs it over **21 instruments and ~73,000 hourly
+bars**, judged on **excess over buy-and-hold** — because in a rising market
+any long-biased strategy looks good, and the only real question is whether it
+beat simply owning the asset.
+
+```bash
+python fetch_stocks.py && python run_h1_stocks.py
+```
+
+### Pooled walk-forward: 231 windows, 21 stocks
+
+```
+mean window return   :  +1.72%
+mean excess over B&H :  -1.87%
+windows beating B&H  :  83/231  (36%)
+stocks with +excess  :  3/21
+95% CI (mean excess) :  [-2.86%, -0.90%]     <- entirely BELOW zero
+P(mean excess > 0)   :   0.0%
+
+VERDICT: SIGNIFICANTLY NEGATIVE — reliably worse than buy-and-hold
+```
+
+**This is a confident negative, not an inconclusive one.** The confidence
+interval does not straddle zero, it sits wholly beneath it. H1 SMA trend
+following does not merely fail to beat buy-and-hold on stocks — it reliably
+*loses* to it, by about 1.9 percentage points per window. Only 3 of 21 stocks
+showed any positive excess.
+
+The fixed-parameter run (20/50, no tuning at all) is genuinely inconclusive by
+comparison — 6/21 beat buy-and-hold, mean excess −2.62%, CI [−11.79%, +7.14%]
+— but it points the same way with less power.
+
+So the original **+23.87% was that one stock's story, not an effect.** More
+data did not sharpen it; it reversed it.
+
+### A reporting bug worth keeping
+
+The first version of this script printed *"NOT SIGNIFICANT — CI includes
+zero"* for the pooled result. The CI was `[-2.86%, -0.90%]`, which does not
+include zero at all.
+
+Collapsing "significantly negative" into "inconclusive" throws away the
+strongest finding a test can produce, and would have let a reliably losing
+strategy be recorded as merely unproven. `verdict()` now returns three
+outcomes rather than two, so the case cannot vanish silently again.
+
+### Survivorship bias, stated plainly
+
+All 21 tickers are companies listed **today**. Firms that went bankrupt or
+were delisted are absent, because you cannot download data for something that
+stopped trading. The basket is therefore pre-filtered for survival, which
+flatters buy-and-hold — the very benchmark the strategy lost to. Names with
+long bad stretches (INTC, PFE, BA, NKE, VZ) are included to blunt this; it
+cannot be removed without a point-in-time constituent list.
+
+---
+
 ## Maker orders — the rescue that wasn't
 
 `tradingbot/maker.py` + `run_maker.py`. The scalper had a real +3.14bp gross
