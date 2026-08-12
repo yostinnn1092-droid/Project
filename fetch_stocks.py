@@ -33,6 +33,7 @@ from pathlib import Path
 import pandas as pd
 
 OUT = Path(__file__).parent / "data" / "stocks_h1"
+FX_OUT = Path(__file__).parent / "data" / "forex_h1"
 UA = "Mozilla/5.0 (compatible; tradingbot-research/1.0)"
 URL = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=2y&interval=1h"
 
@@ -94,17 +95,27 @@ def fetch(sym: str) -> pd.DataFrame | None:
     return None
 
 
+FX_TICKERS = [
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X",
+    "NZDUSD=X", "USDCHF=X", "EURGBP=X", "EURJPY=X", "GBPJPY=X",
+]
+
+
 def main() -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
+    import sys
+    forex = "--forex" in sys.argv
+    out = FX_OUT if forex else OUT
+    tickers = FX_TICKERS if forex else TICKERS
+    out.mkdir(parents=True, exist_ok=True)
     ok, failed = 0, []
-    for sym in TICKERS:
+    for sym in tickers:
         df = fetch(sym)
         if df is None or len(df) < 500:
             failed.append(sym)
             print(f"  {sym:<6} FAILED")
         else:
-            df.to_csv(OUT / f"{sym}.csv", index=False)
-            print(f"  {sym:<6} {len(df):>5,} bars  "
+            df.to_csv(out / f"{sym.replace('=X', '')}.csv", index=False)
+            print(f"  {sym:<9} {len(df):>6,} bars  "
                   f"{df['timestamp'].iloc[0]:%Y-%m-%d} -> {df['timestamp'].iloc[-1]:%Y-%m-%d}")
             ok += 1
         time.sleep(1.5)  # be polite; Yahoo throttles bursts

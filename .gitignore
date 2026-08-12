@@ -11,3 +11,4 @@ secrets.*
 
 # Fetched market data — regenerate with fetch_stocks.py / fetch_forex.py
 data/stocks_h1/
+data/forex_h1/
