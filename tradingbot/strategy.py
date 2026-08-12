@@ -98,6 +98,53 @@ class SmaCrossover(Strategy):
         return -1.0 if self.allow_short else 0.0
 
 
+class Breakout(Strategy):
+    """Donchian channel: go long on a new N-bar high, short on a new N-bar low.
+
+    A third family, structurally different from both an SMA crossover (which
+    reacts to an average) and a z-score fade (which reacts to a deviation).
+    Breakouts react to an *extreme*, which is the classic trend-following
+    entry and the basis of the original Turtle system.
+
+    Included so the strategy search spans genuinely different ideas rather
+    than three re-parameterisations of the same one — a search over near-
+    identical strategies mostly measures noise.
+    """
+
+    def __init__(self, entry: int = 20, exit: int = 10, allow_short: bool = True):
+        self.entry = entry
+        self.exit = exit
+        self.allow_short = allow_short
+        self.warmup = max(entry, exit) + 1
+        self._pos = 0.0
+
+    def sync_position(self, actual_weight: float) -> None:
+        self._pos = 0.0 if actual_weight == 0 else (1.0 if actual_weight > 0 else -1.0)
+
+    def on_bar(self, history: pd.DataFrame) -> float:
+        h = history["high"]
+        l = history["low"]
+        c = float(history["close"].iloc[-1])
+
+        # Channels exclude the current bar: comparing today's high against a
+        # window that contains today's high guarantees a breakout every bar.
+        hi = float(h.iloc[-self.entry - 1 : -1].max())
+        lo = float(l.iloc[-self.entry - 1 : -1].min())
+        x_hi = float(h.iloc[-self.exit - 1 : -1].max())
+        x_lo = float(l.iloc[-self.exit - 1 : -1].min())
+
+        if self._pos == 0.0:
+            if c > hi:
+                self._pos = 1.0
+            elif c < lo and self.allow_short:
+                self._pos = -1.0
+        elif self._pos > 0 and c < x_lo:
+            self._pos = 0.0
+        elif self._pos < 0 and c > x_hi:
+            self._pos = 0.0
+        return self._pos
+
+
 class MeanReversion(Strategy):
     """Fade stretched moves: short when price is far above its mean, long
     when far below, measured in standard deviations (a z-score).
