@@ -1,0 +1,60 @@
+{
+  "regime": {
+    "ema_fast": 50,
+    "ema_slow": 200,
+    "adx_period": 14,
+    "adx_min": 20.0,
+    "adx_max": 50.0
+  },
+  "entry": {
+    "ema_trend": 200,
+    "ema_fast": 20,
+    "ema_slow": 50,
+    "zone_atr_mult": 0.75,
+    "pullback_max_bars": 12,
+    "rejection_window": 3,
+    "rsi_period": 14,
+    "use_rsi_filter": true,
+    "rsi_long_min": 40.0,
+    "rsi_long_max": 65.0,
+    "rsi_short_min": 35.0,
+    "rsi_short_max": 60.0,
+    "min_body_fraction": 0.35
+  },
+  "structure": {
+    "swing_lookback": 3,
+    "lookback_bars": 120,
+    "zone_merge_atr": 0.5,
+    "stop_swing_window": 30,
+    "min_headroom_r": 1.5
+  },
+  "risk": {
+    "atr_period": 14,
+    "atr_stop_mult": 1.8,
+    "swing_buffer_atr": 0.25,
+    "max_stop_atr_mult": 3.5,
+    "take_profit_1_r": 1.5,
+    "take_profit_2_r": 2.5,
+    "tp1_close_fraction": 0.5,
+    "breakeven_after_tp1": true,
+    "breakeven_offset_r": 0.05,
+    "risk_per_trade_pct": 0.5,
+    "max_total_exposure": 1.0,
+    "max_concurrent_positions": 1,
+    "max_drawdown_halt_pct": 20.0,
+    "daily_loss_halt_pct": 4.0,
+    "max_hold_bars": 72
+  },
+  "execution": {
+    "symbol": "XAUUSD",
+    "timeframe": "H1",
+    "confirm_timeframe": "H4",
+    "mode": "demo",
+    "live_confirm": "",
+    "max_spread_mult": 2.0,
+    "max_spread_points": 50.0,
+    "deviation_points": 20,
+    "magic_number": 20260812,
+    "trade_on_bar_close_only": true
+  }
+}

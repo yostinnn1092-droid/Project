@@ -95,6 +95,9 @@ def fetch(sym: str) -> pd.DataFrame | None:
     return None
 
 
+GOLD_TICKERS = ["GC=F"]   # COMEX gold front-month; the free proxy for XAUUSD
+GOLD_OUT = Path(__file__).parent / "data" / "gold_h1"
+
 FX_TICKERS = [
     "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X",
     "NZDUSD=X", "USDCHF=X", "EURGBP=X", "EURJPY=X", "GBPJPY=X",
@@ -104,8 +107,9 @@ FX_TICKERS = [
 def main() -> None:
     import sys
     forex = "--forex" in sys.argv
-    out = FX_OUT if forex else OUT
-    tickers = FX_TICKERS if forex else TICKERS
+    gold = "--gold" in sys.argv
+    out = GOLD_OUT if gold else (FX_OUT if forex else OUT)
+    tickers = GOLD_TICKERS if gold else (FX_TICKERS if forex else TICKERS)
     out.mkdir(parents=True, exist_ok=True)
     ok, failed = 0, []
     for sym in tickers:
@@ -114,7 +118,7 @@ def main() -> None:
             failed.append(sym)
             print(f"  {sym:<6} FAILED")
         else:
-            df.to_csv(out / f"{sym.replace('=X', '')}.csv", index=False)
+            df.to_csv(out / f"{sym.replace('=X', '').replace('=F', '')}.csv", index=False)
             print(f"  {sym:<9} {len(df):>6,} bars  "
                   f"{df['timestamp'].iloc[0]:%Y-%m-%d} -> {df['timestamp'].iloc[-1]:%Y-%m-%d}")
             ok += 1
