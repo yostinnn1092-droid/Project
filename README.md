@@ -166,6 +166,63 @@ first — each item is a real way people have lost real money:
 
 ---
 
+## Scalping
+
+`tradingbot/scalping.py` + `run_scalper.py`. A mean-reversion scalper with an
+explicit exit state machine (target / stop / timeout), plus the cost
+arithmetic that decides whether any scalper can work at all.
+
+```bash
+python run_scalper.py
+```
+
+**Read the cost wall before writing a signal.** A scalp is a round trip, so
+you pay costs twice. At retail rates (4bp fee + 2bp slippage per side) that
+is **12bp per trade**, and the required win rate follows directly:
+
+| target | required win rate (retail) | required win rate (pro, 2bp) |
+|---|---|---|
+| 5 bp | **170%** — impossible | 70% |
+| 10 bp | **110%** — impossible | 60% |
+| 20 bp | 80% — implausible | 55% |
+| 50 bp | 62% — hard | 52% |
+| 100 bp | 56% — plausible | 51% |
+
+Targets below ~12bp are not "hard", they are **arithmetically closed**: costs
+exceed the entire profit target, so no win rate can save them.
+
+### What the run actually shows
+
+The scalper found a **real edge — and still lost**, which is the most useful
+outcome this repo produces. Over 2,031 round trips:
+
+| | retail | professional | zero (fantasy) |
+|---|---|---|---|
+| win rate | 45.9% | 45.9% | 45.9% |
+| gross expectancy | **+3.14 bp** | +3.14 bp | +3.14 bp |
+| round-trip cost | −12.0 bp | −2.0 bp | 0 bp |
+| **net expectancy** | **−8.86 bp** | **+1.14 bp** | +3.14 bp |
+| return | **−18.87%** | −1.16% | +8.72% |
+
+The signal is **identical** in all three columns — only the toll booth
+changed. It genuinely predicts something (positive gross expectancy, stable
+at 2.4–4.7bp across every target tested). It is simply worth less than the
+cost of acting on it. The retail run hit the 25% drawdown kill switch.
+
+Widening the target does not escape: gross expectancy rises only from 2.4bp
+to 4.7bp while the 12bp cost stays fixed. The lines never cross.
+
+**The lesson generalises past scalping.** Once net expectancy per trade is
+negative, nothing downstream fixes it — not position sizing, not scheduling,
+not an AI layer, not more capital. More activity just loses faster. The only
+real levers are *lower costs* or *a much bigger edge*.
+
+And note this result is **optimistic**: bar data assumes stops fill at exactly
+the stop price. Real stops gap through, and gaps go against you. On ticks it
+would look worse.
+
+---
+
 ## Kronos as a signal source
 
 `tradingbot/kronos_signal.py` wraps [Kronos](https://github.com/shiyu-coder/Kronos)
