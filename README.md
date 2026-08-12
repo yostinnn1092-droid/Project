@@ -194,9 +194,50 @@ Three things this integration gets right, and one it can't:
 - **No silent fallback.** `load_kronos()` raises if checkpoints are missing
   rather than degrading to random weights. An untrained Kronos emits
   well-formed candles and a tidy, meaningless equity curve.
-- **It is unvalidated.** The checkpoints could not be fetched in the
-  environment this was written in, so the signal has never run against a
-  trained model. The wiring is verified; the edge is entirely unmeasured.
+### Measured results (real pretrained weights)
+
+`NeoQuasar/Kronos-small`, 24,741,376 params, snapshot `901c26c1…` — the same
+revision pinned in Kronos's own regression test.
+
+**Step 1 — can it forecast?** 40 random windows, 256-bar context, 12-bar
+horizon, identical windows across every config:
+
+| config | draws | mean abs error | vs naive | direction |
+|---|---|---|---|---|
+| **naive** (assume no change) | — | **0.4663%** | — | — |
+| Kronos T=0.7 | 8 | 0.5004% | **+7.3% worse** | 47.5% |
+| Kronos T=1.0 | 8 | 0.5205% | +11.6% worse | 42.5% |
+| Kronos T=1.0 | 1 | 0.6156% | +32.0% worse | 60.0% |
+
+Averaging draws helps materially (0.62% → 0.50%), so use `sample_count > 1`
+for point forecasts. But at its best the model is still **worse than assuming
+price does not move**, and every direction accuracy falls inside the
+coin-flip band (34.5%–65.5% at n=40).
+
+**Step 2 — can it trade?** 1,500 bars, forecast every 24 bars, 8 paths:
+
+| | Kronos | BuyAndHold |
+|---|---|---|
+| total return | **−0.83%** | +35.72% |
+| Sharpe | −1.14 | 5.34 |
+| trades | 185 | 2 |
+| fees paid | 0.21% of start | 0.04% |
+
+The most informative line is not the return, it is this: **mean path
+dispersion (0.75%) exceeded the mean predicted move (0.60%)**, and direction
+agreement averaged 53.9%. The model's uncertainty about its own forecast is
+larger than the forecast itself. It was, correctly, flat 82.7% of the time.
+Costs were not the problem here (0.21%); there was simply no edge to collect.
+
+**Read the comparison fairly in both directions.** That test window is one
+month in which the instrument rose 35%, so buy-and-hold wins almost any
+contest inside it — this is not evidence Kronos is worse than buy-and-hold in
+general. (The 3916% CAGR the harness prints for buy-and-hold is annualisation
+of a 0.08-year window; ignore it.) Equally, one instrument, one horizon and
+40 windows is not evidence Kronos is useless: short-horizon equity prices are
+close to a random walk, which makes naive a genuinely strong baseline, and
+Kronos-small is the second-smallest checkpoint. The honest conclusion is
+narrow — **no edge was demonstrated here**, so there is nothing to trade yet.
 
 **Verified limitation of the conviction metric:** with random weights the model
 predicted −4.0% on *every* forecast with *100%* path agreement — maximally
