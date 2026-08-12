@@ -277,6 +277,67 @@ scalping in any case. `Scalper.trade_report()` now documents the limit.
 
 ---
 
+## Walk-forward — the strongest test in this repo
+
+`tradingbot/walkforward.py` + `run_walkforward.py`. Re-tune on the past, trade
+the next stretch blind, roll forward, repeat. Nine windows on H1 data.
+
+```bash
+python run_walkforward.py
+```
+
+| # | test period | params | return | buy & hold | excess |
+|---|---|---|---|---|---|
+| 0 | Sep–Oct 2024 | 20/200 | +5.49% | +4.28% | +1.21% |
+| 1 | Oct–Dec 2024 | 10/50 | −3.23% | **−14.10%** | **+10.87%** |
+| 2 | Dec–Jan 2025 | 10/50 | +0.80% | −2.88% | +3.68% |
+| 3 | Jan–Feb 2025 | 10/50 | **+65.19%** | **+66.67%** | −1.48% |
+| 4 | Feb–Apr 2025 | 40/200 | −2.19% | −1.08% | −1.11% |
+| 5 | Apr–May 2025 | 20/50 | **+18.32%** | **−2.64%** | **+20.96%** |
+| 6 | May–Jun 2025 | 20/50 | −8.21% | −8.24% | +0.03% |
+| 7 | Jun–Jul 2025 | 20/50 | +7.76% | +3.49% | +4.27% |
+| 8 | Jul–Aug 2025 | 40/200 | −5.92% | +1.25% | −7.17% |
+
+**Encouraging:**
+- Beat buy-and-hold in **6 of 9** windows
+- Parameters reasonably stable — 4 distinct sets, and `10/50` + `20/50`
+  account for 6 of 9, i.e. one family rather than a random walk
+- The excess **survives removing the biggest window**. Drop window 3 and the
+  strategy still returns **+10.82% while buy-and-hold loses −19.44%** — a
+  30-point excess with the outlier gone. The headline is not one lucky month.
+- The value comes from **downside protection**, the classic trend-following
+  profile: window 1 (−3.23% vs −14.10%) and window 5 (+18.32% vs −2.64%).
+  In the huge rally of window 3 it merely kept pace.
+
+**Not proven:**
+
+```
+mean window return : +8.67%
+95% CI (bootstrap) : [-2.25%, +24.68%]   <- includes zero
+P(mean > 0)        : 89.7%               <- below the 95% bar
+verdict            : NOT SIGNIFICANT
+```
+
+Nine windows, one instrument, 15 months. The test cannot distinguish this
+from luck. That is *not* evidence it fails — it is evidence this experiment is
+too small to rule. Honest verdict: **worth paper trading, not worth funding.**
+
+### A bug this section caught
+
+The first walk-forward run reported buy-and-hold making **exactly 0.00%** in
+three separate windows, which is impossible. Cause: `walk_forward` built a
+default `RiskManager()`, whose 5% daily-loss limit halted the *benchmark*,
+flattened it to cash, and left it there — its equity froze at a constant
+through a 14% decline.
+
+So the benchmark was not buy-and-hold, it was "buy, panic once, sit in cash",
+and every excess figure was inflated against a crippled comparison. Fixed by
+adding `risk_factory`, defaulting to limits that never fire, applied
+**identically to strategy and benchmark**. Evaluate the strategy first; add
+risk limits deliberately, and always to both sides.
+
+---
+
 ## Kronos as a signal source
 
 `tradingbot/kronos_signal.py` wraps [Kronos](https://github.com/shiyu-coder/Kronos)
