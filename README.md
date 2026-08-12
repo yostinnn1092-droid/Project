@@ -223,6 +223,96 @@ would look worse.
 
 ---
 
+## ICT on forex — the first result that didn't collapse
+
+`tradingbot/ict.py` + `run_ict.py`. A mechanical reading of the canonical ICT
+setup — liquidity sweep → market structure shift → Fair Value Gap entry, stop
+beyond the sweep, fixed 2R target, killzone filter — over 10 pairs and
+~123,000 hourly bars.
+
+```bash
+python fetch_stocks.py --forex && python run_ict.py
+```
+
+### vs the control (identical risk management, random entries)
+
+| pair | ICT | random | ICT win% | rand win% | edge |
+|---|---|---|---|---|---|
+| NZDUSD | +7.30% | −0.37% | 58.3% | 37.8% | **+7.67%** |
+| GBPUSD | +4.41% | −1.74% | 54.2% | 36.3% | **+6.15%** |
+| EURUSD | +3.12% | −2.73% | 53.1% | 31.9% | **+5.85%** |
+| AUDUSD | +0.12% | −2.24% | 51.1% | 33.3% | +2.36% |
+| USDCAD | +0.30% | −0.18% | 66.7% | 35.6% | +0.48% |
+| USDCHF | −0.34% | −0.64% | 33.3% | 34.7% | +0.30% |
+| EURJPY | −0.85% | −1.06% | 45.5% | 36.5% | +0.21% |
+| EURGBP | −0.58% | −0.19% | 45.0% | 39.9% | −0.39% |
+| GBPJPY | −2.14% | −0.85% | 33.3% | 35.1% | −1.29% |
+| USDJPY | −4.75% | −1.85% | 32.3% | 35.0% | −2.90% |
+
+```
+ICT beat random on    : 7/10
+mean edge over random : +1.84%
+95% CI                : [-0.14%, +3.99%]   <- barely includes zero
+P(edge > 0)           : 96.4%
+```
+
+**Borderline, not proven.** A one-sided read clears the 95% bar; the
+two-sided interval misses it by 0.14pp. This is the only result in this repo
+that got that close. The win-rate gap is the striking part — ICT averages
+~47% against random's ~35% under *identical* stop and target logic.
+
+### Both ICT filters earn their keep
+
+| variant | trades | win% | expectancy | mean return |
+|---|---|---|---|---|
+| **full setup** | 348 | **47.3%** | **+0.91 bp** | **+0.66%** |
+| no FVG requirement | 2,993 | 45.4% | +0.25 bp | −2.68% |
+| no killzone filter | 1,132 | 39.4% | **−3.61 bp** | −4.07% |
+| neither filter | 4,569 | 44.4% | −0.68 bp | −7.52% |
+| 1R target | 357 | 53.6% | +0.27 bp | +0.49% |
+| 3R target | 346 | 45.6% | +0.91 bp | +0.45% |
+
+Removing either filter hurts, and not merely by trading more: **per-trade
+expectancy** falls too (+0.91bp → −3.61bp without killzones). The session
+filter is selecting better trades, not just fewer. That is a concrete,
+checkable claim of ICT's that survived testing.
+
+### Why it is still not a green light
+
+**Split by time, the edge is unstable:**
+
+```
+half 1 (2024-08 -> 2025-08) : mean -0.07%   positive 3/10
+half 2 (2025-08 -> 2026-08) : mean +0.70%   positive 6/10
+pairs positive in BOTH halves: 3/10
+```
+
+The whole result lives in the second year. Only EURUSD, GBPUSD and NZDUSD
+worked in both halves — and those are exactly the three carrying the headline.
+
+**The 10 pairs are not 10 independent tests.** USD appears in 7 of them, EUR
+in 4, JPY in 3. Bootstrapping across them treats correlated samples as
+independent and therefore *overstates* the confidence above. The effective
+sample is meaningfully smaller than 10, which alone could explain the
+borderline p-value.
+
+**And the edge is small:** +0.91bp per trade over 348 trades in two years.
+
+So: genuinely the most interesting thing tested here, and nowhere near
+fundable. The honest next step is more history, more non-USD crosses, and a
+significance test that accounts for cross-pair correlation.
+
+### What this test cannot settle
+
+This is ONE mechanical reading. Real ICT adds higher-timeframe bias and
+discretion about which liquidity pool matters. A fair reading is "the
+mechanical core shows a weak signal", not "ICT is proven" — nor would a
+negative have meant "every practitioner is wrong". But the converse deserves
+equal weight: an edge that lives entirely in unstated discretion cannot be
+verified by anyone, including the person trading it.
+
+---
+
 ## H1 across 21 stocks — the definitive answer
 
 `fetch_stocks.py` + `run_h1_stocks.py`. The original H1 finding came from ONE
