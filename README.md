@@ -223,6 +223,71 @@ would look worse.
 
 ---
 
+## The strategy search — and the answer to "what's most profitable?"
+
+`run_search.py`. 20 strategies across four structurally different families
+(SMA crossover, Donchian breakout, z-score mean reversion, adaptive regime
+switching, ICT) over 31 instruments — 10 forex pairs and 21 stocks, hourly.
+Scored **out-of-sample only** (last 40% of each series) on **excess over
+buy-and-hold**.
+
+```bash
+python run_search.py
+```
+
+### The full ranking
+
+| rank | strategy | forex | stocks | combined |
+|---|---|---|---|---|
+| 1 | SMA 40/100 | −0.78% | −4.52% | **−2.65%** |
+| 2 | SMA 20/50 | −2.86% | −3.42% | −3.14% |
+| 3 | SMA 10/50 | −2.32% | −4.82% | −3.57% |
+| 4 | SMA 20/100 | −2.18% | −5.99% | −4.08% |
+| 5 | MeanRev 20/1.5 | −3.18% | −6.18% | −4.68% |
+| … | … | | | |
+| 20 | Adaptive ER>0.45 | −6.09% | −13.26% | −9.67% |
+
+```
+strategies with positive excess : 0/20
+median strategy excess          : -6.83%
+```
+
+**Every single strategy lost to buy-and-hold.** The "winner" is the least
+bad one, not a good one. So the honest answer to *"find the most profitable
+strategy"* is: **buy and hold.** Nothing tested beat it, on either asset
+class, out-of-sample.
+
+### The reality check, and a bug it exposed
+
+The point of the second pass is that a search always produces a winner —
+test 20 worthless strategies and one still finishes first. So 20
+`RandomEntry` strategies ran through the identical pipeline:
+
+```
+random  mean / best : -6.43% / -5.28%
+real    mean / best : -6.64% / -2.65%
+real strategies above the best random: 6/20
+P(no-edge search produces a winner this good): 0.0%
+```
+
+The real strategies **do** contain signal — six of them beat the best of an
+equally large no-edge search, and the SMA family clusters at the top rather
+than scattering randomly. That is a genuine, if small, finding: trend
+following is not noise.
+
+It is also **not enough to matter**, and the first version of this script
+missed that. It checked only "did the winner beat random search?", saw yes,
+and printed *"Worth a proper out-of-sample and walk-forward follow-up"* —
+recommending further work on a strategy that loses 2.65% to a benchmark
+anyone can buy for free.
+
+`run_search.py` now requires **both** conditions: positive excess *and*
+outside search noise. Beating noise while losing to the benchmark means the
+strategy has signal that does not cover its costs and the return forgone by
+not simply holding. That is a distinct outcome and it now says so.
+
+---
+
 ## ICT on forex — the first result that didn't collapse
 
 `tradingbot/ict.py` + `run_ict.py`. A mechanical reading of the canonical ICT

@@ -162,12 +162,31 @@ def main() -> None:
     # How extreme is the observed best against the random-search distribution?
     pct = float((rnd >= real.max()).mean())
     print(f"\n  P(a no-edge search produces a winner this good) : {pct:.1%}")
-    if pct > 0.05:
+
+    # TWO conditions, not one. An earlier version checked only whether the
+    # winner beat the random search, and cheerfully recommended "a proper
+    # walk-forward follow-up" for a strategy that LOST 2.65% to buy-and-hold.
+    # Beating noise while still losing to the benchmark is not a finding —
+    # it means the strategy contains signal but not enough of it to be worth
+    # trading. Both tests have to pass before the result is interesting.
+    beats_noise = pct <= 0.05
+    beats_benchmark = real.max() > 0
+
+    if not beats_benchmark:
+        print(f"  -> The winner LOSES to buy-and-hold ({real.max():.2%}).\n"
+              "     Whether it beats random search is beside the point: the\n"
+              "     benchmark is available to anyone for free and beat all of\n"
+              "     them. No candidate here is worth trading.")
+        if beats_noise:
+            print("     It does carry signal — it beat the best no-edge\n"
+                  "     strategy — just not enough to cover costs and the\n"
+                  "     return you gave up by not simply holding.")
+    elif not beats_noise:
         print("  -> The winner is INSIDE what pure search noise produces.\n"
               "     It is the luckiest of the candidates, not the best of them.")
     else:
-        print("  -> The winner is outside what search noise alone explains.\n"
-              "     Worth a proper out-of-sample and walk-forward follow-up.")
+        print("  -> Positive excess AND outside search noise. This is the only\n"
+              "     combination worth a walk-forward follow-up on fresh data.")
 
     # ---------------------------------------------------------------- 3
     header("3. THE HONEST SUMMARY")

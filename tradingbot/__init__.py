@@ -10,11 +10,12 @@ from .backtest import BacktestResult, Costs, run
 from .broker import Broker, Fill, PaperBroker
 from .data import load_csv, resample, synthetic, train_test_split, validate
 from .risk import RiskLimits, RiskManager, position_size_from_stop
-from .strategy import BuyAndHold, MeanReversion, SmaCrossover, Strategy
+from .strategy import Breakout, BuyAndHold, MeanReversion, SmaCrossover, Strategy
 
 __all__ = [
     "BacktestResult",
     "Broker",
+    "Breakout",
     "BuyAndHold",
     "Costs",
     "Fill",
