@@ -338,6 +338,85 @@ risk limits deliberately, and always to both sides.
 
 ---
 
+## Forex — the result did not replicate
+
+`fetch_forex.py` + `run_forex.py`. 19 years of real EUR/USD daily OHLC (Alpha
+Vantage) plus four ECB pairs. Forex costs ~1bp round trip against equities'
+12bp, so this is also the cheapest venue tested.
+
+```bash
+python fetch_forex.py && python run_forex.py
+```
+
+### The honest headline
+
+| | stock (H1) | **EUR/USD (daily)** |
+|---|---|---|
+| windows | 9 | **17** |
+| history | 15 months | **19 years** |
+| profitable windows | 5/9 | 8/17 |
+| mean window return | +8.67% | **+0.02%** |
+| 95% CI | [−2.25%, +24.68%] | **[−2.91%, +2.90%]** |
+| P(mean > 0) | 89.7% | **51.0%** |
+| distinct params | 4/9 (stable) | **11/17 (unstable)** |
+
+**More evidence moved the answer to a coin flip.** The stock's 89.7% became
+51.0% on a market with twice the windows and fifteen times the history. That
+is exactly what you observe when the original result was noise — a real edge
+gets *clearer* with more data, not fainter.
+
+The parameter instability is the mechanism. On the stock the tuner kept
+picking one family (`10/50`, `20/50`). On forex it changes its mind in 11 of
+17 windows, so "learning from the last window" is chasing randomness.
+
+### Five pairs, one fixed setting, no tuning
+
+If an edge is real it should appear without being fitted per market:
+
+| pair | trades | return | buy & hold |
+|---|---|---|---|
+| EUR/USD | 14 | −9.22% | −5.19% |
+| EUR/GBP | 82 | +2.33% | +15.57% |
+| EUR/JPY | 37 | −18.28% | −13.40% |
+| EUR/AUD | 47 | −9.11% | +1.15% |
+| EUR/CHF | 37 | −18.75% | −17.82% |
+
+**Four of five lost money**, and the one winner still lost badly to buy-and-hold.
+
+### Does adapting help? (`tradingbot/adaptive.py`)
+
+`AdaptiveRegime` measures Kaufman's Efficiency Ratio each bar and switches
+between trend-following and mean-reversion — the timeframe study showed those
+two are mirror images, so the idea is to detect which regime you are in
+rather than guess.
+
+| strategy | return | sharpe |
+|---|---|---|
+| MeanReversion | −19.03% | −0.35 |
+| SmaCrossover 20/50 | −9.22% | −0.21 |
+| **AdaptiveRegime** | **−8.52%** | **−0.14** |
+| BuyAndHold | −5.19% | −0.09 |
+
+The detector genuinely works — 264 mode switches, 21% trend / 79% revert,
+mean ER 0.226 (EUR/USD chops far more than it trends). And it does beat both
+fixed strategies. It still **loses money, and still loses to doing nothing.**
+
+Beating a bad strategy is not an achievement. Adaptivity also *adds*
+parameters (`er_window`, `er_threshold`, `neutral_band`), and every parameter
+makes overfitting easier — so a complex strategy needs to clear a *higher*
+bar than a simple one, not a lower one.
+
+### Two kinds of "learning", kept separate
+
+1. **Online adaptation** (`adaptive.py`) — re-measures the regime every bar,
+   stores nothing, fits nothing, cannot overfit.
+2. **Periodic re-tuning** (`walkforward.py`) — re-fits parameters each
+   window. This is the ML-shaped one, and it carries the matching risk:
+   when the tuner is fitting noise, learning makes things *worse*. Parameter
+   instability is how you detect it, and forex shows it plainly.
+
+---
+
 ## Kronos as a signal source
 
 `tradingbot/kronos_signal.py` wraps [Kronos](https://github.com/shiyu-coder/Kronos)
