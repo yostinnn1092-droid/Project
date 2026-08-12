@@ -156,6 +156,23 @@ class Scalper(Strategy):
         #: closed round trips, as fractional returns before costs
         self.round_trips: list[dict] = []
 
+    def sync_position(self, actual_weight: float) -> None:
+        """Reconcile with reality before deciding.
+
+        Under maker execution an entry may simply not fill. Without this the
+        scalper would believe it is long, start counting bars held, and
+        eventually 'exit' a position that never existed — while never
+        re-entering, because it thinks it is already in.
+        """
+        if actual_weight == 0.0 and self._pos != 0.0:
+            # Intended entry never filled, or the exit filled. Reset cleanly.
+            self._pos = 0.0
+            self._entry_price = None
+            self._held = 0
+        elif actual_weight != 0.0 and self._pos == 0.0:
+            # Holding something the strategy did not think it had; adopt it.
+            self._pos = 1.0 if actual_weight > 0 else -1.0
+
     def on_bar(self, history: pd.DataFrame) -> float:
         price = float(history["close"].iloc[-1])
 

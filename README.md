@@ -223,6 +223,58 @@ would look worse.
 
 ---
 
+## Maker orders — the rescue that wasn't
+
+`tradingbot/maker.py` + `run_maker.py`. The scalper had a real +3.14bp gross
+edge killed by a 12bp taker cost, so this attacks the cost: rest limit orders
+and earn a rebate instead of paying a fee. Mean-reversion scalping *is* market
+making in disguise — you buy when others panic-sell — so the fit is genuine.
+
+```bash
+python run_maker.py
+```
+
+The headline looks like a triumph: **−18.87% → +37.69%, Sharpe 1.24.**
+
+It is not. Splitting the profit settles it:
+
+| | |
+|---|---|
+| total profit | **+$3,769** |
+| rebate income | **+$4,020** |
+| **trading P&L** | **−$250** |
+| notional traded | **$40,196,005** |
+| turnover vs capital | **4,020×** |
+
+**The strategy still loses money trading.** Every dollar of profit is rebate,
+and collecting it needed 4,020× turnover on a $10,000 account. That is not
+better execution rescuing a strategy; it is rebate farming wearing the
+strategy as a costume.
+
+Three independent reasons to reject it:
+
+1. **At a 0bp maker fee it loses** (−2.36%). The signal never became
+   profitable — only the fee schedule changed.
+2. **Returns by limit offset are non-monotonic**: −75%, −51%, **+38%**, −45%,
+   −17% at 0/2/5/10/20bp. A real effect does not spike at one setting and
+   collapse on both sides. That shape is an artifact.
+3. **An 83% fill rate on passive limits is not realistic.** The model fills
+   whenever price trades through the level, with no queue ahead of you and no
+   competition — the two things that actually decide maker fills.
+
+The module still measures adverse selection explicitly (`fwd_move`: average
+move in your favour over 3 bars after each fill) because a maker backtest that
+fills on touch and ignores adverse selection is a machine for imaginary
+profits. `Strategy.sync_position()` was added for the same honesty reason: a
+stateful strategy must be told what it *actually* holds, since limit orders
+often do not fill, and otherwise it manages a phantom position.
+
+**So the scalper is not salvageable this way.** Its edge is smaller than any
+realistic cost of collecting it. That is the final answer on scalping in this
+repo, and it took a suspicious-looking win to get there.
+
+---
+
 ## Timeframes — where the cost wall actually breaks
 
 `run_timeframes.py`. Same data, same strategies, resampled to five bar sizes.

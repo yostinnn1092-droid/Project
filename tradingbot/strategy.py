@@ -43,6 +43,20 @@ class Strategy(ABC):
     def on_bar(self, history: pd.DataFrame) -> float:
         """Return target weight in [-1, 1]. `history` ends at the current bar."""
 
+    def sync_position(self, actual_weight: float) -> None:
+        """Tell the strategy what it ACTUALLY holds, before `on_bar`.
+
+        Market orders always fill, so a strategy can assume it got what it
+        asked for. Limit orders often do not fill, and a stateful strategy
+        that assumes otherwise will manage a position it does not own —
+        tracking stops on a phantom entry, refusing to re-enter because it
+        thinks it is already in.
+
+        Default is a no-op, which is correct for stateless strategies.
+        Any strategy holding its own position state must override this.
+        """
+        return None
+
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         params = ", ".join(
             f"{k}={v}" for k, v in vars(self).items() if not k.startswith("_")
