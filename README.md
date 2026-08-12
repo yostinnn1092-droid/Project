@@ -214,6 +214,31 @@ for point forecasts. But at its best the model is still **worse than assuming
 price does not move**, and every direction accuracy falls inside the
 coin-flip band (34.5%–65.5% at n=40).
 
+**Scaling up does not fix it — and nearly fooled me.** `Kronos-base`
+(102,310,592 params, 4x larger) on the same 40 windows first scored 0.4579%
+MAE, i.e. **1.8% better than naive** — the only time anything beat the
+baseline. Re-running it with identical settings and identical windows gave
+**0.4899%, 5.1% worse**. Kronos samples stochastically, so no two runs agree,
+and the run-to-run spread (0.032pp) is about **4x the apparent edge**
+(0.008pp). A paired bootstrap over per-window differences:
+
+```
+mean difference (naive - Kronos) : -0.024%          negative = Kronos worse
+95% CI                           : [-0.094%, +0.043%]   spans zero
+windows won by Kronos            : 18 / 40
+P(Kronos better)                 : 25.6%
+verdict                          : NOT SIGNIFICANT
+```
+
+Two lessons, both bigger than the Kronos question. **A single run of a
+stochastic model is not a measurement** — `sample_count=8` was not enough to
+stabilise the estimate, and one run of this benchmark is not reproducible.
+And a small unverified edge is the exact thing this repo exists to catch: had
+the first number been reported as-is, "the bigger model beats the baseline"
+would have been a completely false finding produced by nothing but sampling
+noise. Always re-run, always pair, always check whether the confidence
+interval crosses zero.
+
 **Step 2 — can it trade?** 1,500 bars, forecast every 24 bars, 8 paths:
 
 | | Kronos | BuyAndHold |
