@@ -146,16 +146,23 @@ def main() -> None:
     print(f"  Re-running the same {n_var}-variant search on SHUFFLED outcomes,\n"
           f"  where any edge is destroyed by construction. 200 repeats.\n")
     base_R = evaluate(vs["baseline"], files)
+    # Centre the POPULATION once so its true edge is exactly zero, then
+    # bootstrap from it WITHOUT re-centring each draw.
+    #
+    # An earlier version subtracted the mean from every sample, which forces
+    # each draw to exactly 0.000 and destroys the sampling variation the test
+    # exists to measure — it reported a null distribution of 0.000 +/- 0.000
+    # and therefore "P = 0.0%" for any positive result. Centring the
+    # population preserves the noise; centring each sample deletes it.
+    null_pop = base_R - base_R.mean()
     rng = np.random.default_rng(0)
     null_best = []
-    for _ in range(200):
+    for _ in range(2000):
         best_exp = -np.inf
         for _ in range(n_var):
-            # Same trade count as a typical variant, outcomes reshuffled.
-            k = max(int(len(base_R) * rng.uniform(0.4, 1.0)), 20)
-            samp = rng.choice(base_R, k, replace=True)
-            samp = samp - samp.mean()          # force zero true edge
-            best_exp = max(best_exp, samp.mean())
+            # Filtered variants trade less, so sample sizes vary.
+            k = max(int(len(base_R) * rng.uniform(0.3, 1.0)), 20)
+            best_exp = max(best_exp, rng.choice(null_pop, k, replace=True).mean())
         null_best.append(best_exp)
     null_best = np.array(null_best)
 
