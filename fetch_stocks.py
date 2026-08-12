@@ -36,6 +36,8 @@ OUT = Path(__file__).parent / "data" / "stocks_h1"
 FX_OUT = Path(__file__).parent / "data" / "forex_h1"
 UA = "Mozilla/5.0 (compatible; tradingbot-research/1.0)"
 URL = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=2y&interval=1h"
+# Yahoo caps the 5-minute interval at 60 days of history.
+URL_M5 = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=60d&interval=5m"
 
 TICKERS = [
     # broad market / benchmark
@@ -57,10 +59,11 @@ TICKERS = [
 ]
 
 
-def fetch(sym: str) -> pd.DataFrame | None:
+def fetch(sym: str, m5: bool = False) -> pd.DataFrame | None:
+    url = (URL_M5 if m5 else URL).format(sym=sym)
     for attempt in range(3):
         out = subprocess.run(
-            ["curl", "-sS", "--max-time", "60", "-A", UA, URL.format(sym=sym)],
+            ["curl", "-sS", "--max-time", "60", "-A", UA, url],
             capture_output=True, text=True,
         )
         body = out.stdout.strip()
@@ -95,6 +98,10 @@ def fetch(sym: str) -> pd.DataFrame | None:
     return None
 
 
+M5_TICKERS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X",
+              "GC=F", "SI=F", "BTC-USD", "ETH-USD"]
+M5_OUT = Path(__file__).parent / "data" / "m5"
+
 GOLD_TICKERS = ["GC=F"]   # COMEX gold front-month; the free proxy for XAUUSD
 GOLD_OUT = Path(__file__).parent / "data" / "gold_h1"
 
@@ -108,17 +115,18 @@ def main() -> None:
     import sys
     forex = "--forex" in sys.argv
     gold = "--gold" in sys.argv
-    out = GOLD_OUT if gold else (FX_OUT if forex else OUT)
-    tickers = GOLD_TICKERS if gold else (FX_TICKERS if forex else TICKERS)
+    m5 = "--m5" in sys.argv
+    out = M5_OUT if m5 else (GOLD_OUT if gold else (FX_OUT if forex else OUT))
+    tickers = M5_TICKERS if m5 else (GOLD_TICKERS if gold else (FX_TICKERS if forex else TICKERS))
     out.mkdir(parents=True, exist_ok=True)
     ok, failed = 0, []
     for sym in tickers:
-        df = fetch(sym)
+        df = fetch(sym, m5=m5)
         if df is None or len(df) < 500:
             failed.append(sym)
             print(f"  {sym:<6} FAILED")
         else:
-            df.to_csv(out / f"{sym.replace('=X', '').replace('=F', '')}.csv", index=False)
+            df.to_csv(out / f"{sym.replace('=X', '').replace('=F', '').replace('-USD', '')}.csv", index=False)
             print(f"  {sym:<9} {len(df):>6,} bars  "
                   f"{df['timestamp'].iloc[0]:%Y-%m-%d} -> {df['timestamp'].iloc[-1]:%Y-%m-%d}")
             ok += 1
