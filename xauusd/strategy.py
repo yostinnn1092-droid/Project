@@ -314,8 +314,14 @@ class TrendPullbackStrategy(Strategy):
             return self._log_no_trade(hist, f"insufficient headroom: {why}", ctx)
 
         # 8. Size, equity-independent (see module docstring).
-        weight = (c.risk.risk_per_trade_pct / 100.0) * price / risk
-        weight = min(weight, c.risk.max_total_exposure)
+        wanted = (c.risk.risk_per_trade_pct / 100.0) * price / risk
+        weight = min(wanted, c.risk.max_total_exposure)
+        # A binding exposure cap means the position carries LESS risk than
+        # the config states. That is the safe direction, but a silent gap
+        # between configured and actual risk is still a gap, so it is named
+        # in the journal rather than left for someone to discover.
+        capped = wanted > c.risk.max_total_exposure
+        actual_risk_pct = 100.0 * weight * risk / price
 
         tp1 = price + direction * risk * c.risk.take_profit_1_r
         tp2 = price + direction * risk * c.risk.take_profit_2_r
@@ -326,9 +332,14 @@ class TrendPullbackStrategy(Strategy):
             r_distance=risk,
         )
 
+        note = (f"{stop_src}; {why}"
+                + (f"; EXPOSURE CAP BINDING: wanted {wanted:.2f}x equity for "
+                   f"{c.risk.risk_per_trade_pct}% risk, capped to "
+                   f"{weight:.2f}x -> actual risk {actual_risk_pct:.3f}%"
+                   if capped else ""))
         self._log(hist, "enter_long" if direction > 0 else "enter_short",
-                  f"{stop_src}; {why}", ctx, stop=stop, tp1=tp1, tp2=tp2,
-                  weight=weight)
+                  note, ctx, stop=stop, tp1=tp1, tp2=tp2, weight=weight,
+                  actual_risk=actual_risk_pct)
         return direction * weight
 
     # ------------------------------------------------------------------
@@ -434,7 +445,8 @@ class TrendPullbackStrategy(Strategy):
 
     def _log(self, hist, action: str, reason: str, ctx: dict | None,
              stop=None, tp1=None, tp2=None, weight=None,
-             rejections: list[str] | None = None) -> None:
+             rejections: list[str] | None = None,
+             actual_risk: float | None = None) -> None:
         if self.journal is None:
             return
         self.journal.record(Decision(
@@ -447,6 +459,7 @@ class TrendPullbackStrategy(Strategy):
             regime=ctx["regime"] if ctx else None,
             stop=stop, tp1=tp1, tp2=tp2,
             risk_pct_intended=self.cfg.risk.risk_per_trade_pct,
+            risk_pct_actual=actual_risk,
             indicators={
                 k: round(ctx[k], 4) for k in
                 ("atr", "ema_trend", "ema_fast", "ema_slow", "rsi", "body_frac")

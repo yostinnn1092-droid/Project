@@ -104,13 +104,27 @@ class RiskConfig:
     breakeven_after_tp1: bool = True
     breakeven_offset_r: float = 0.05
 
-    #: SPEC WAS TRUNCATED HERE IN THE BRIEF — 0.5% is a documented
-    #: conservative default, not an inferred requirement. Change it
-    #: deliberately.
-    risk_per_trade_pct: float = 0.5
+    #: Set to 1.0% by explicit instruction (the brief was truncated here).
+    #:
+    #: RISK PERCENT SCALES OUTCOMES; IT DOES NOT CREATE EDGE. Doubling this
+    #: roughly doubles returns AND drawdowns, because every trade is sized
+    #: proportionally. On a strategy with positive expectancy that is a
+    #: choice about volatility tolerance. On one with negative expectancy it
+    #: doubles the rate of loss and nothing else — sizing cannot repair a
+    #: signal. This system's expectancy measured -0.035R, so read any change
+    #: here as a change in how fast, not whether.
+    risk_per_trade_pct: float = 1.0
     #: Hard cap on simultaneous exposure, as a multiple of equity. Not a
-    #: target — a ceiling that the sizing logic may never exceed.
-    max_total_exposure: float = 1.0
+    #: target — a ceiling the sizing logic may never exceed.
+    #:
+    #: RAISED TO 2.0 SO THE 1% RISK SETTING IS ACTUALLY DELIVERABLE. Gold
+    #: near $3,400 with a 1.8xATR stop (~$25) needs roughly 1.39x equity of
+    #: notional to put 1% at risk. At a 1.0x cap the sizer silently clipped
+    #: every trade to ~0.72% actual risk — safe, but not what the config
+    #: claimed. 2.0x leaves headroom without permitting real leverage abuse;
+    #: it is notional exposure, not margin, and gold CFDs are typically
+    #: margined far above this.
+    max_total_exposure: float = 2.0
     max_concurrent_positions: int = 1
     #: Refuse to trade once equity is this far below its high-water mark.
     max_drawdown_halt_pct: float = 20.0
