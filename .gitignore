@@ -17,5 +17,6 @@ journal/
 data/m5/
 data/m1/
 
-# Personal permission overrides, not team-wide
-.claude/settings.local.json
+# Local agent tooling config (ECC install, permission overrides).
+# Not project source — reinstalled per machine, never shared.
+.claude/
