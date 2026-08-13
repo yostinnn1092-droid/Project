@@ -292,12 +292,24 @@ class BitgetClient(BitgetPublic):
     accepted as arguments — see the module docstring.
     """
 
-    def __init__(self, live: bool = False, base: str = BASE):
+    def __init__(self, live: bool = False, base: str = BASE, demo: bool = False):
         super().__init__(base)
         self._key = os.environ.get("BITGET_API_KEY", "")
         self._secret = os.environ.get("BITGET_API_SECRET", "")
         self._passphrase = os.environ.get("BITGET_API_PASSPHRASE", "")
         self.live = live
+        #: Demo trading. Bitget routes simulated orders by the `paptrading`
+        #: header in addition to the S-prefixed symbols and SUSDT-FUTURES
+        #: product type.
+        #:
+        #: UNVERIFIED HERE. The public demo endpoints are confirmed working,
+        #: but the signed order path could not be exercised without real
+        #: credentials, and Bitget's own documentation is inconsistent about
+        #: whether demo needs its own API key or accepts a live one. If demo
+        #: orders come back rejected, generate a key from inside Demo mode in
+        #: the Bitget UI and use that. Said plainly rather than presented as
+        #: tested.
+        self.demo = demo
 
         missing = [n for n, v in (
             ("BITGET_API_KEY", self._key),
@@ -344,6 +356,8 @@ class BitgetClient(BitgetPublic):
             "Content-Type": "application/json",
             "locale": "en-US",
         }
+        if self.demo:
+            headers["paptrading"] = "1"
         return _get(f"{self.base}{path}", headers=headers,
                     body=payload.encode() if payload else None, method=method)
 

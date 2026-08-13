@@ -219,6 +219,12 @@ def main() -> None:
     p.add_argument("--symbol", default="XAUUSDT")
     p.add_argument("--tf", default="1h", choices=sorted(INTERVAL_SECONDS))
     p.add_argument("--product", default="USDT-FUTURES")
+    p.add_argument("--demo", action="store_true",
+                   help="Bitget demo trading: SBTCSUSDT on SUSDT-FUTURES, 4h. "
+                        "Fake money, real order flow. Only BTC/ETH/XRP exist "
+                        "on demo — there is no gold.")
+    p.add_argument("--fast", type=int, default=40, help="fast SMA period")
+    p.add_argument("--slow", type=int, default=100, help="slow SMA period")
     p.add_argument("--equity", type=float, default=1_000.0,
                    help="paper starting equity")
     p.add_argument("--poll", type=int, default=30, help="seconds between checks")
@@ -231,8 +237,20 @@ def main() -> None:
         why_not_yet()
         return
 
+    if a.demo:
+        # Demo carries three symbols only. Setting them here rather than as
+        # argparse defaults means --demo cannot be combined with a symbol
+        # that does not exist there and fail confusingly at the first request.
+        a.symbol, a.product, a.tf = "SBTCSUSDT", "SUSDT-FUTURES", "4h"
+
     feed = BitgetPublic()
-    strategy = SmaCrossover(fast=20, slow=60)
+    # SMA 40/100 is the default because it is the only candidate that came
+    # out positive in BOTH halves of a chronological split on this exact
+    # instrument, and it independently won the 20-strategy search in
+    # run_search.py across forex and stocks. Two datasets, same winner.
+    # That is the best evidence available here. It is not proof of an edge:
+    # see --why-not-yet.
+    strategy = SmaCrossover(fast=a.fast, slow=a.slow)
     risk = RiskManager(RiskLimits(max_position=1.0, max_drawdown=0.15,
                                   daily_loss_limit=0.05))
     journal = Journal(JOURNAL / f"bitget_{a.symbol}_{a.tf}.jsonl")
@@ -245,7 +263,7 @@ def main() -> None:
                   f"in the environment.\nRun with --why-not-yet first.")
             sys.exit(1)
         try:
-            client = BitgetClient(live=True)
+            client = BitgetClient(live=True, demo=a.demo)
         except BitgetError as e:
             print(f"REFUSING: {e}")
             sys.exit(1)
@@ -257,7 +275,7 @@ def main() -> None:
     spread = feed.spread_bps(a.symbol, a.product)
     print(f"\n  symbol      : {a.symbol} [{a.product}] {a.tf}")
     print(f"  mode        : {'LIVE' if client else 'PAPER'}")
-    print(f"  strategy    : SmaCrossover(20, 60)   warmup {strategy.warmup} bars")
+    print(f"  strategy    : SmaCrossover({a.fast}, {a.slow})   warmup {strategy.warmup} bars")
     print(f"  clock skew  : {skew:+,} ms")
     print(f"  live spread : {spread:.2f} bp")
     print(f"  journal     : {journal.path}")
