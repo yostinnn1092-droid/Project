@@ -1,0 +1,347 @@
+<title>Demo Bot Runbook</title>
+<style>
+  /* Greenbar ledger paper — the pale-green continuous-feed stock that
+     financial printouts ran on — with oxblood for the red-ink column.
+     Light palette defined here in full; dark redefines tokens only. */
+  :root {
+    --ground:   #F2F5F0;
+    --stripe:   #E7EDE4;
+    --surface:  #FFFFFF;
+    --ink:      #171C17;
+    --muted:    #5B655A;
+    --rule:     #D3DCD0;
+    --accent:   #2E6B4C;
+    --accent-soft: #DCEAE0;
+    --warn:     #8F3A1E;
+    --warn-soft:#F6E5DE;
+    --shadow:   0 1px 2px rgba(23,28,23,.06), 0 8px 24px rgba(23,28,23,.05);
+
+    /* A terminal is dark in every theme; these deliberately do not flip. */
+    --term-bg:  #14180F;
+    --term-ink: #DDE4D4;
+    --term-dim: #7E8A73;
+    --term-cue: #8FC97F;
+
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:   #111410;
+      --stripe:   #171B16;
+      --surface:  #191D18;
+      --ink:      #E6EAE4;
+      --muted:    #98A296;
+      --rule:     #2A312A;
+      --accent:   #71C398;
+      --accent-soft: #1C2C22;
+      --warn:     #DD8058;
+      --warn-soft:#2E1D16;
+      --shadow:   0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:   #111410;
+    --stripe:   #171B16;
+    --surface:  #191D18;
+    --ink:      #E6EAE4;
+    --muted:    #98A296;
+    --rule:     #2A312A;
+    --accent:   #71C398;
+    --accent-soft: #1C2C22;
+    --warn:     #DD8058;
+    --warn-soft:#2E1D16;
+    --shadow:   0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0 20px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+
+  /* ---------- masthead ---------- */
+  header { padding: 56px 0 32px; border-bottom: 2px solid var(--ink); }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-size: clamp(30px, 6vw, 44px);
+    line-height: 1.08;
+    letter-spacing: -.025em;
+    font-weight: 760;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .standfirst { font-size: 17px; color: var(--muted); margin: 0; max-width: 54ch; }
+
+  /* ---------- spec table ---------- */
+  .spec {
+    margin: 32px 0 0;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .spec div {
+    display: flex; justify-content: space-between; gap: 20px;
+    padding: 10px 16px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .spec div:last-child { border-bottom: 0; }
+  .spec div:nth-child(odd) { background: var(--stripe); }
+  .spec dt, .spec span:first-child { color: var(--muted); }
+  .spec span:last-child { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+
+  /* ---------- sections ---------- */
+  h2 {
+    font-size: 13px;
+    font-family: var(--mono);
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    margin: 56px 0 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+  p { margin: 0 0 16px; max-width: 66ch; }
+  strong { font-weight: 660; }
+
+  /* ---------- steps: a real sequence, so numbered ---------- */
+  .step { display: flex; gap: 18px; margin: 0 0 34px; }
+  .num {
+    flex: 0 0 34px; height: 34px;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 14px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .step-body { flex: 1 1 auto; min-width: 0; }
+  .step h3 {
+    font-size: 19px; font-weight: 680; margin: 4px 0 10px;
+    letter-spacing: -.012em; text-wrap: balance;
+  }
+
+  /* ---------- terminal ---------- */
+  pre {
+    background: var(--term-bg);
+    color: var(--term-ink);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.65;
+    padding: 15px 17px;
+    border-radius: 5px;
+    overflow-x: auto;
+    margin: 0 0 16px;
+    tab-size: 2;
+  }
+  pre .c { color: var(--term-dim); }
+  pre .g { color: var(--term-cue); }
+  code {
+    font-family: var(--mono);
+    font-size: .89em;
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+
+  /* ---------- callouts ---------- */
+  .note {
+    border-left: 3px solid var(--warn);
+    background: var(--warn-soft);
+    padding: 14px 18px;
+    margin: 0 0 16px;
+    border-radius: 0 4px 4px 0;
+  }
+  .note p { margin: 0; font-size: 15px; }
+  .note p + p { margin-top: 10px; }
+  .note .label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--warn); display: block; margin-bottom: 6px;
+  }
+
+  /* ---------- data table ---------- */
+  .tw { overflow-x: auto; margin: 0 0 18px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 420px; }
+  th {
+    text-align: left; font-family: var(--mono); font-size: 11px;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+    font-weight: 600; padding: 0 14px 8px 0; border-bottom: 1px solid var(--rule);
+  }
+  td { padding: 10px 14px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td:first-child { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
+
+  /* ---------- gates ---------- */
+  .gates { display: grid; gap: 10px; margin: 0 0 18px; }
+  .gate {
+    display: flex; align-items: baseline; gap: 14px;
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 4px; padding: 12px 16px;
+  }
+  .gate b {
+    font-family: var(--mono); font-size: 12px; color: var(--accent);
+    flex: 0 0 auto; letter-spacing: .04em;
+  }
+  .gate span { font-size: 14.5px; color: var(--muted); }
+
+  footer {
+    margin-top: 64px; padding-top: 26px;
+    border-top: 2px solid var(--ink);
+    font-size: 15px; color: var(--muted);
+  }
+  footer strong { color: var(--ink); }
+  a { color: var(--accent); }
+  a:focus-visible, :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">Bitget · simulated futures</p>
+  <h1>Running the bot on a demo account</h1>
+  <p class="standfirst">Fake money, real order flow, real timing. Nothing in this guide can lose you anything.</p>
+</header>
+
+<div class="spec">
+  <div><span>Strategy</span><span>SmaCrossover(40, 100)</span></div>
+  <div><span>Symbol</span><span>SBTCSUSDT</span></div>
+  <div><span>Timeframe</span><span>4h</span></div>
+  <div><span>Product</span><span>SUSDT-FUTURES</span></div>
+  <div><span>Round-trip cost</span><span>12 bp</span></div>
+</div>
+
+<h2>Why this strategy</h2>
+
+<p>Thirteen candidates were tested on 5,000 4h bars of <em>this exact instrument</em>, split chronologically. SMA 40/100 was the only one positive in <strong>both</strong> halves — +43.9% train, +8.1% test. It also independently won the twenty-strategy search across forex and stocks in <code>run_search.py</code>. Two unrelated datasets, same winner.</p>
+
+<div class="note">
+  <span class="label">Read this before you get excited</span>
+  <p>The test half was a BTC downtrend — buy-and-hold lost 43%. In a downtrend anything that sits in cash "beats the benchmark", and twelve of thirteen strategies did. <strong>That number means nothing.</strong></p>
+  <p>Being positive in both halves is the only part that survives, and it rests on 20 trades.</p>
+</div>
+
+<p>Demo carries three symbols — BTC, ETH and XRP. There is no gold, so the XAUUSD work in this repo cannot be demo-traded here.</p>
+
+<h2>Setup</h2>
+
+<div class="step">
+  <div class="num">1</div>
+  <div class="step-body">
+    <h3>Rent a VPS</h3>
+    <p>The bot holds a connection continuously, so it cannot run on a phone. It needs almost nothing — 1 vCPU and 1GB RAM is plenty. Choose <strong>Ubuntu 24.04</strong>, smallest instance.</p>
+    <div class="tw"><table>
+      <tr><th>Provider</th><th>Plan</th><th>Cost</th></tr>
+      <tr><td>Hetzner</td><td>CX22</td><td>~€4/month, cheapest reliable</td></tr>
+      <tr><td>DigitalOcean</td><td>Basic</td><td>$6/month</td></tr>
+      <tr><td>Vultr</td><td>Cloud Compute</td><td>$5/month</td></tr>
+    </table></div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="num">2</div>
+  <div class="step-body">
+    <h3>Install</h3>
+<pre><code>sudo apt update &amp;&amp; sudo apt install -y python3 python3-venv git tmux
+git clone https://github.com/yostinnn1092-droid/Project.git
+cd Project
+git checkout claude/install-free-claude-code-c3xvuc
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt</code></pre>
+    <p>Confirm it works. This needs no keys and touches no account:</p>
+<pre><code>.venv/bin/python run_bitget.py</code></pre>
+  </div>
+</div>
+
+<div class="step">
+  <div class="num">3</div>
+  <div class="step-body">
+    <h3>Read what the tests found</h3>
+<pre><code>.venv/bin/python bitget_bot.py --why-not-yet</code></pre>
+    <p>Do this before step 4, not after.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="num">4</div>
+  <div class="step-body">
+    <h3>Paper, for weeks</h3>
+<pre><code>tmux new -s bot
+.venv/bin/python -u bitget_bot.py --demo</code></pre>
+    <p>Detach with <code>Ctrl-B</code> then <code>D</code>. Reattach with <code>tmux attach -t bot</code>.</p>
+    <p>No orders go anywhere. It reads the real feed, decides on closed 4h bars, simulates fills, and prints both curves:</p>
+<pre><span class="c">2026-08-13 00:00  63,629.50  w=+1.00  TRADE</span>
+    bot  <span class="g">1,014.20 (+1.42%)</span>   hold  1,031.60 (+3.16%)   BEHIND  -17.40</pre>
+    <p><code>EXCESS</code> is the only number that matters. Everything else in this repo reduces to that one comparison.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="num">5</div>
+  <div class="step-body">
+    <h3>Only then, demo orders</h3>
+    <p>Real order flow against Bitget's simulator. Still fake money.</p>
+    <p>Log into Bitget, switch to <strong>Demo Trading</strong>, then open API Key Management <em>from inside demo mode</em>. Give the key trade permission and leave withdrawals disabled.</p>
+<pre><code>export BITGET_API_KEY=...
+export BITGET_API_SECRET=...
+export BITGET_API_PASSPHRASE=...
+export BITGET_LIVE_CONFIRM="I ACCEPT LIVE TRADING RISK"
+
+.venv/bin/python -u bitget_bot.py --demo --live</code></pre>
+    <p><code>--live</code> here means "send orders", not "real money" — <code>--demo</code> keeps it on the simulator.</p>
+    <div class="note">
+      <span class="label">Unverified</span>
+      <p>The demo order path could not be tested without credentials. The code sends the <code>paptrading: 1</code> header with the S-prefixed symbols, which matches Bitget's documentation — but that documentation contradicts itself on whether demo accepts a live API key. If orders come back rejected, regenerate the key from inside Demo mode.</p>
+    </div>
+  </div>
+</div>
+
+<h2>What to watch for</h2>
+
+<div class="tw"><table>
+  <tr><th>Sign</th><th>Meaning</th></tr>
+  <tr><td>EXCESS falling</td><td>Working as expected. This is what costs look like.</td></tr>
+  <tr><td>EXCESS positive</td><td>After 4+ weeks: interesting. Not yet evidence.</td></tr>
+  <tr><td>STALE</td><td>Feed stalled. The bot correctly held instead of trading a stale price.</td></tr>
+  <tr><td>REFUSING</td><td>A gate did its job. Read the line.</td></tr>
+  <tr><td>Many TRADEs/day</td><td>Wrong timeframe. Costs will eat it.</td></tr>
+</table></div>
+
+<p>Never restart the bot to "reset" a bad run. The journal anchors the benchmark on the first decision precisely so restarts cannot flatter the result.</p>
+
+<h2>Before real money ever</h2>
+
+<div class="gates">
+  <div class="gate"><b>01</b><span>Paper for weeks. Compare EXCESS against buy-and-hold.</span></div>
+  <div class="gate"><b>02</b><span>Demo orders for weeks. Confirms fills, rejections, reconnects.</span></div>
+  <div class="gate"><b>03</b><span>Live at a size where total loss is tuition.</span></div>
+  <div class="gate"><b>04</b><span>Live properly — only if 03 matched 02.</span></div>
+</div>
+
+<p>Going live requires <code>--live</code> <strong>without</strong> <code>--demo</code>, plus the confirmation phrase, plus keys. Three deliberate acts. Nothing in this repo has earned step 03.</p>
+
+<footer>
+  <p>About twenty strategies were tested across stocks, forex, gold, crypto and indices. <strong>Zero beat buy-and-hold.</strong> Every profitable backtest here was eventually traced to a bug — a frozen benchmark, a 24/7 annualisation on a market open 5.5 hours a day, a null distribution centred wrongly, a strategy that took zero trades while reporting 0.00%.</p>
+  <p>The most likely outcome of running this is that <strong>EXCESS</strong> stays negative and you learn that for free. That is a good trade.</p>
+</footer>
+
+</div>
