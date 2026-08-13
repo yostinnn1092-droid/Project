@@ -33,6 +33,7 @@ def load_csv(
     path: str | Path,
     timestamp_col: str = "timestamp",
     tz: str | None = None,
+    repair: bool = False,
 ) -> pd.DataFrame:
     """Load OHLCV bars from a CSV and validate them.
 
@@ -65,11 +66,19 @@ def load_csv(
         raise ValueError(f"missing required columns: {missing}")
 
     df = df[["timestamp", *REQUIRED]].copy()
-    return validate(df)
+    return validate(df, repair=repair)
 
 
-def validate(df: pd.DataFrame) -> pd.DataFrame:
-    """Sort, de-duplicate, and sanity-check bars. Raises on unusable data."""
+def validate(df: pd.DataFrame, repair: bool = False) -> pd.DataFrame:
+    """Sort, de-duplicate, and sanity-check bars. Raises on unusable data.
+
+    `repair=True` clamps high/low to enclose open/close instead of raising.
+    Real vendor feeds contain these — Yahoo's daily gold series has 236 such
+    bars out of 6,511. Repairing is honest for a high/low that is merely
+    inconsistent by a rounding error, and it is NOT a licence to ignore the
+    count: a feed with many broken bars is a feed to distrust, so the number
+    repaired is always reported.
+    """
     df = df.sort_values("timestamp").reset_index(drop=True)
 
     dupes = df["timestamp"].duplicated().sum()
@@ -86,7 +95,13 @@ def validate(df: pd.DataFrame) -> pd.DataFrame:
     lo_ok = df["low"] <= df[["open", "close"]].min(axis=1) + 1e-9
     if not (hi_ok.all() and lo_ok.all()):
         n = int((~(hi_ok & lo_ok)).sum())
-        raise ValueError(f"{n} bars have high/low inconsistent with open/close")
+        if not repair:
+            raise ValueError(
+                f"{n} bars have high/low inconsistent with open/close "
+                f"(pass repair=True to clamp them)")
+        df["high"] = df[["high", "open", "close"]].max(axis=1)
+        df["low"] = df[["low", "open", "close"]].min(axis=1)
+        df.attrs["repaired_bars"] = n
 
     if (df[["open", "high", "low", "close"]] <= 0).any().any():
         raise ValueError("non-positive prices present")

@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .risk import RiskManager
+from .risk import RiskLimits, RiskManager
 from .strategy import Strategy
 
 
@@ -107,7 +107,20 @@ def run(
     if execution not in ("next_open", "same_close"):
         raise ValueError(f"unknown execution model: {execution}")
     costs = costs or Costs()
-    risk = risk or RiskManager()
+    # Default to limits that NEVER fire. A stock RiskManager() halts at a 5%
+    # daily loss and stays halted, which is correct for trading and ruinous
+    # for measurement: it silently converts the run into "trade until the
+    # first bad day, then sit in cash forever".
+    #
+    # This was a real bug. Buy-and-hold on BTC reported -22.5% over a period
+    # the asset rose 138x, because a September 2014 drawdown tripped the halt
+    # on day three and equity froze for the next twelve years. A benchmark
+    # that quietly stops trading makes every comparison against it worthless.
+    #
+    # Risk limits are now opt-in: pass a RiskManager explicitly when you want
+    # a kill switch, and pass the SAME one to both sides of any comparison.
+    risk = risk or RiskManager(RiskLimits(max_position=1.0, max_drawdown=1.0,
+                                          daily_loss_limit=None))
 
     n = len(bars)
     warmup = max(strategy.warmup, 1)

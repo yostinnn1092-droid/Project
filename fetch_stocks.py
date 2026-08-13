@@ -39,6 +39,10 @@ URL = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=2y&interval
 # Yahoo caps the 5-minute interval at 60 days of history.
 URL_M5 = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=60d&interval=5m"
 URL_M1 = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=7d&interval=1m"
+# range=max silently downgrades to MONTHLY bars; explicit period1/period2 keeps
+# the daily interval, which is what long-history regime work needs.
+URL_D1 = ("https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+          "?period1=788918400&period2=4102444800&interval=1d")
 
 TICKERS = [
     # broad market / benchmark
@@ -60,8 +64,11 @@ TICKERS = [
 ]
 
 
-def fetch(sym: str, m5: bool = False, m1: bool = False) -> pd.DataFrame | None:
-    url = (URL_M1 if m1 else (URL_M5 if m5 else URL)).format(sym=sym)
+def fetch(sym: str, m5: bool = False, m1: bool = False,
+          d1: bool = False) -> pd.DataFrame | None:
+    from urllib.parse import quote
+    tmpl = URL_D1 if d1 else (URL_M1 if m1 else (URL_M5 if m5 else URL))
+    url = tmpl.format(sym=quote(sym, safe=""))
     for attempt in range(3):
         out = subprocess.run(
             ["curl", "-sS", "--max-time", "60", "-A", UA, url],
@@ -109,6 +116,9 @@ M1_TICKERS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X",
               "GC=F", "BTC-USD", "ETH-USD"]
 M1_OUT = Path(__file__).parent / "data" / "m1"
 
+D1_TICKERS = ["^GSPC", "^IXIC", "^DJI", "BTC-USD", "ETH-USD", "GC=F", "CL=F", "EURUSD=X"]
+D1_OUT = Path(__file__).parent / "data" / "d1"
+
 GOLD_TICKERS = ["GC=F"]   # COMEX gold front-month; the free proxy for XAUUSD
 GOLD_OUT = Path(__file__).parent / "data" / "gold_h1"
 
@@ -124,17 +134,18 @@ def main() -> None:
     gold = "--gold" in sys.argv
     m5 = "--m5" in sys.argv
     m1 = "--m1" in sys.argv
-    out = M1_OUT if m1 else (M5_OUT if m5 else (GOLD_OUT if gold else (FX_OUT if forex else OUT)))
-    tickers = M1_TICKERS if m1 else (M5_TICKERS if m5 else (GOLD_TICKERS if gold else (FX_TICKERS if forex else TICKERS)))
+    d1 = "--d1" in sys.argv
+    out = D1_OUT if d1 else (M1_OUT if m1 else (M5_OUT if m5 else (GOLD_OUT if gold else (FX_OUT if forex else OUT))))
+    tickers = D1_TICKERS if d1 else (M1_TICKERS if m1 else (M5_TICKERS if m5 else (GOLD_TICKERS if gold else (FX_TICKERS if forex else TICKERS))))
     out.mkdir(parents=True, exist_ok=True)
     ok, failed = 0, []
     for sym in tickers:
-        df = fetch(sym, m5=m5, m1=m1)
+        df = fetch(sym, m5=m5, m1=m1, d1=d1)
         if df is None or len(df) < 500:
             failed.append(sym)
             print(f"  {sym:<6} FAILED")
         else:
-            df.to_csv(out / f"{sym.replace('=X', '').replace('=F', '').replace('-USD', '')}.csv", index=False)
+            df.to_csv(out / f"{sym.replace('=X', '').replace('=F', '').replace('-USD', '').replace('^', '')}.csv", index=False)
             print(f"  {sym:<9} {len(df):>6,} bars  "
                   f"{df['timestamp'].iloc[0]:%Y-%m-%d} -> {df['timestamp'].iloc[-1]:%Y-%m-%d}")
             ok += 1
