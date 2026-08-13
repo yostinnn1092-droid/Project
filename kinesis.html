@@ -1,0 +1,567 @@
+<title>Kinesis</title>
+<style>
+  /* Committed single-theme world: a cold void, a hot psychic force.
+     Every colour painted explicitly so the page holds on any host ground. */
+  :root {
+    --void:      #0B0A14;
+    --void-deep: #06050D;
+    --stone:     #B8AFA0;
+    --stone-dim: #6B6355;
+    --force:     #E94FBF;
+    --force-dim: #7A2A66;
+    --crystal:   #4FE8D0;
+    --ink:       #E8E4F0;
+    --ink-dim:   #7E7894;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--void-deep);
+    color: var(--ink);
+    font-family: var(--sans);
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    overscroll-behavior: none;
+  }
+  #wrap { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    padding: 14px 16px; pointer-events: none; gap: 12px;
+  }
+  .chip {
+    background: rgba(11,10,20,.72);
+    border: 1px solid rgba(232,228,240,.14);
+    border-radius: 4px;
+    padding: 7px 11px;
+    backdrop-filter: blur(6px);
+  }
+  .lbl {
+    font-family: var(--mono); font-size: 9px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--ink-dim); display: block;
+  }
+  .val {
+    font-family: var(--mono); font-size: 17px; font-variant-numeric: tabular-nums;
+    line-height: 1.25;
+  }
+  #focusWrap { flex: 1 1 auto; max-width: 190px; }
+  #focusBar {
+    height: 5px; margin-top: 6px; border-radius: 3px;
+    background: rgba(232,228,240,.13); overflow: hidden;
+  }
+  #focusFill {
+    height: 100%; width: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, var(--force-dim), var(--force));
+    transition: width .08s linear;
+  }
+  #focusFill.spent { background: linear-gradient(90deg, #5A2020, #C4443A); }
+
+  /* ---------- overlays ---------- */
+  #overlay {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    background: radial-gradient(ellipse at center, rgba(11,10,20,.82), rgba(6,5,13,.96));
+    padding: 24px; text-align: center;
+  }
+  #overlay.hide { display: none; }
+  .card { max-width: 380px; }
+  h1 {
+    font-size: clamp(38px, 13vw, 62px);
+    letter-spacing: .22em; text-transform: uppercase;
+    font-weight: 300; margin-bottom: 6px;
+    color: var(--ink);
+    text-shadow: 0 0 26px rgba(233,79,191,.55);
+  }
+  .sub {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .3em;
+    text-transform: uppercase; color: var(--force); margin-bottom: 26px;
+  }
+  .rule { font-size: 14.5px; line-height: 1.65; color: var(--ink-dim); margin-bottom: 10px; }
+  .rule b { color: var(--ink); font-weight: 600; }
+  .rule em { color: var(--crystal); font-style: normal; }
+  button {
+    margin-top: 22px;
+    font-family: var(--mono); font-size: 12px;
+    letter-spacing: .2em; text-transform: uppercase;
+    color: var(--void); background: var(--force);
+    border: 0; border-radius: 4px; padding: 13px 30px;
+    cursor: pointer; pointer-events: auto;
+    transition: transform .12s ease, box-shadow .12s ease;
+    box-shadow: 0 0 22px rgba(233,79,191,.4);
+  }
+  button:hover, button:focus-visible { transform: translateY(-1px); box-shadow: 0 0 32px rgba(233,79,191,.65); }
+  button:active { transform: translateY(1px); }
+  :focus-visible { outline: 2px solid var(--crystal); outline-offset: 3px; }
+
+  #toast {
+    position: absolute; left: 50%; bottom: 8%;
+    transform: translateX(-50%);
+    font-family: var(--mono); font-size: 11px; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--ink-dim);
+    pointer-events: none; opacity: 0; transition: opacity .35s ease;
+    text-align: center; padding: 0 20px;
+  }
+  #toast.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    button { transition: none; }
+    #toast { transition: none; }
+  }
+</style>
+
+<div id="wrap">
+  <canvas id="c"></canvas>
+
+  <div id="hud">
+    <div class="chip"><span class="lbl">Level</span><span class="val" id="lvl">1</span></div>
+    <div class="chip" id="focusWrap">
+      <span class="lbl">Focus</span>
+      <div id="focusBar"><div id="focusFill"></div></div>
+    </div>
+    <div class="chip"><span class="lbl">Crystals</span><span class="val" id="left">0</span></div>
+  </div>
+
+  <div id="toast"></div>
+
+  <div id="overlay">
+    <div class="card">
+      <h1>Kinesis</h1>
+      <p class="sub">Move it with your mind</p>
+      <p class="rule"><b>Hold</b> anywhere to pull nearby rocks toward your grip.</p>
+      <p class="rule"><b>Drag</b> to swing them, <b>let go</b> to hurl.</p>
+      <p class="rule">Shatter every <em>crystal</em>. Slow taps won't break them — they need speed.</p>
+      <p class="rule">Your focus drains while you hold. Let it recover.</p>
+      <button id="startBtn">Begin</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const cv = document.getElementById("c");
+  const ctx = cv.getContext("2d");
+  const overlay = document.getElementById("overlay");
+  const startBtn = document.getElementById("startBtn");
+  const elLvl = document.getElementById("lvl");
+  const elLeft = document.getElementById("left");
+  const elFocus = document.getElementById("focusFill");
+  const elToast = document.getElementById("toast");
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.clientWidth; H = cv.clientHeight;
+    cv.width = Math.floor(W * DPR); cv.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (state.phase !== "menu") buildLevel(state.level, true);
+  }
+  window.addEventListener("resize", resize);
+
+  // ---------------------------------------------------------------- config
+  const G          = 1500;    // gravity px/s^2
+  const GRAB_R     = 130;     // how far the grip reaches
+  const MAX_HELD   = 4;       // rocks liftable at once
+  const PULL_K     = 26;      // spring constant toward the grip
+  const PULL_DAMP  = 6.5;     // velocity damping while held
+  const HOLD_GRAV  = 0.12;    // gravity multiplier while held
+  const REST       = 0.32;    // restitution
+  const AIR        = 0.9992;
+  const SHATTER_V  = 620;     // impact speed needed to break a crystal
+  const FOCUS_DRAIN= 0.42;    // per second, per held rock (scaled)
+  const FOCUS_REGEN= 0.36;
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+
+  // ---------------------------------------------------------------- state
+  const state = {
+    phase: "menu",       // menu | play | won | complete
+    level: 1,
+    rocks: [], crystals: [], parts: [],
+    grip: { x: 0, y: 0, on: false },
+    held: [],
+    focus: 1, spent: false,
+    shake: 0, t: 0,
+  };
+
+  // Levels: crystal placements as fractions of the viewport, so the
+  // layout survives a phone rotating or a desktop window resizing.
+  const LEVELS = [
+    { rocks: 7,  crystals: [[.5,.30],[.28,.22],[.72,.22]] },
+    { rocks: 8,  crystals: [[.18,.18],[.5,.13],[.82,.18],[.5,.42]] },
+    { rocks: 10, crystals: [[.12,.30],[.32,.14],[.5,.34],[.68,.14],[.88,.30]] },
+  ];
+
+  function makeRock(x, y, r) {
+    // A rock's silhouette is baked once as radial offsets — regenerating it
+    // per frame would make it visibly shimmer.
+    const n = 9, shape = [];
+    for (let i = 0; i < n; i++) shape.push(rand(0.82, 1.16));
+    return { x, y, vx: 0, vy: 0, r, m: r * r * 0.011,
+             ang: rand(0, Math.PI * 2), va: rand(-1, 1), shape, held: false, glow: 0 };
+  }
+
+  function buildLevel(n, keepProgress) {
+    const cfg = LEVELS[(n - 1) % LEVELS.length];
+    const prev = keepProgress ? state.crystals.map(c => c.dead) : null;
+
+    state.rocks = [];
+    for (let i = 0; i < cfg.rocks; i++) {
+      state.rocks.push(makeRock(rand(W * .15, W * .85), H - rand(40, 150), rand(15, 27)));
+    }
+    state.crystals = cfg.crystals.map(([fx, fy], i) => ({
+      x: fx * W, y: fy * H, r: 20,
+      dead: prev && prev[i] !== undefined ? prev[i] : false,
+      pulse: rand(0, 6.28),
+    }));
+    state.parts = [];
+    state.held = [];
+    state.focus = 1; state.spent = false;
+    elLvl.textContent = n;
+    updateLeft();
+  }
+
+  const updateLeft = () => {
+    elLeft.textContent = state.crystals.filter(c => !c.dead).length;
+  };
+
+  let toastTimer = 0;
+  function toast(msg, ms = 1900) {
+    elToast.textContent = msg;
+    elToast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => elToast.classList.remove("show"), ms);
+  }
+
+  // ---------------------------------------------------------------- input
+  function pointerPos(e) {
+    const r = cv.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: p.clientX - r.left, y: p.clientY - r.top };
+  }
+
+  function grabAt(x, y) {
+    if (state.spent) return;
+    // Nearest-first so a crowded pile lifts the rocks you actually aimed at.
+    const near = state.rocks
+      .filter(o => Math.hypot(o.x - x, o.y - y) < GRAB_R)
+      .sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))
+      .slice(0, MAX_HELD);
+    near.forEach(o => o.held = true);
+    state.held = near;
+  }
+
+  function release() {
+    state.held.forEach(o => o.held = false);
+    state.held = [];
+    state.grip.on = false;
+  }
+
+  function onDown(e) {
+    if (state.phase !== "play") return;
+    e.preventDefault();
+    const p = pointerPos(e);
+    state.grip.x = p.x; state.grip.y = p.y; state.grip.on = true;
+    grabAt(p.x, p.y);
+  }
+  function onMove(e) {
+    if (!state.grip.on) return;
+    e.preventDefault();
+    const p = pointerPos(e);
+    state.grip.x = p.x; state.grip.y = p.y;
+  }
+  function onUp(e) {
+    if (!state.grip.on) return;
+    e.preventDefault();
+    release();
+  }
+
+  cv.addEventListener("pointerdown", onDown);
+  window.addEventListener("pointermove", onMove, { passive: false });
+  window.addEventListener("pointerup", onUp);
+  window.addEventListener("pointercancel", onUp);
+
+  // ---------------------------------------------------------------- physics
+  function step(dt) {
+    state.t += dt;
+
+    // focus: drains while gripping, recovers when you let go
+    if (state.held.length) {
+      state.focus -= FOCUS_DRAIN * dt * (0.55 + state.held.length * 0.22);
+      if (state.focus <= 0) {
+        state.focus = 0; state.spent = true;
+        release();
+        toast("Focus spent — let it recover");
+      }
+    } else {
+      state.focus = Math.min(1, state.focus + FOCUS_REGEN * dt);
+      if (state.spent && state.focus > 0.45) state.spent = false;
+    }
+    elFocus.style.width = (state.focus * 100) + "%";
+    elFocus.classList.toggle("spent", state.spent);
+
+    for (const o of state.rocks) {
+      if (o.held) {
+        // Spring toward the grip, damped, with gravity mostly suspended.
+        // Damping is what stops a held rock oscillating forever; without it
+        // the spring alone makes everything jitter like a plucked string.
+        const dx = state.grip.x - o.x, dy = state.grip.y - o.y;
+        o.vx += (dx * PULL_K - o.vx * PULL_DAMP * 12) * dt;
+        o.vy += (dy * PULL_K - o.vy * PULL_DAMP * 12) * dt + G * HOLD_GRAV * dt;
+        o.glow = Math.min(1, o.glow + dt * 5);
+        o.va += (Math.abs(o.vx) + Math.abs(o.vy)) * 0.000018;
+      } else {
+        o.vy += G * dt;
+        o.glow = Math.max(0, o.glow - dt * 2.2);
+      }
+      o.vx *= AIR; o.vy *= AIR;
+      o.x += o.vx * dt; o.y += o.vy * dt;
+      o.ang += o.va * dt;
+      o.va *= 0.995;
+
+      // walls
+      if (o.x < o.r)      { o.x = o.r;      o.vx = -o.vx * REST; o.va *= -0.6; }
+      if (o.x > W - o.r)  { o.x = W - o.r;  o.vx = -o.vx * REST; o.va *= -0.6; }
+      if (o.y > H - o.r)  {
+        o.y = H - o.r; o.vy = -o.vy * REST;
+        o.vx *= 0.88; o.va *= 0.75;
+        if (Math.abs(o.vy) < 30) o.vy = 0;
+      }
+      if (o.y < o.r)      { o.y = o.r;      o.vy = -o.vy * REST; }
+    }
+
+    // rock <-> rock
+    const R = state.rocks;
+    for (let i = 0; i < R.length; i++) {
+      for (let j = i + 1; j < R.length; j++) {
+        const a = R[i], b = R[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let d = Math.hypot(dx, dy);
+        const min = a.r + b.r;
+        if (d === 0) { dx = 0.1; d = 0.1; }
+        if (d < min) {
+          const nx = dx / d, ny = dy / d, overlap = min - d;
+          const tm = a.m + b.m;
+          a.x -= nx * overlap * (b.m / tm); a.y -= ny * overlap * (b.m / tm);
+          b.x += nx * overlap * (a.m / tm); b.y += ny * overlap * (a.m / tm);
+
+          const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
+          const sep = rvx * nx + rvy * ny;
+          if (sep < 0) {
+            const imp = -(1 + REST) * sep / (1 / a.m + 1 / b.m);
+            a.vx -= imp * nx / a.m; a.vy -= imp * ny / a.m;
+            b.vx += imp * nx / b.m; b.vy += imp * ny / b.m;
+          }
+        }
+      }
+    }
+
+    // rock <-> crystal
+    for (const c of state.crystals) {
+      if (c.dead) continue;
+      c.pulse += dt * 2.4;
+      for (const o of state.rocks) {
+        const d = Math.hypot(o.x - c.x, o.y - c.y);
+        if (d < o.r + c.r) {
+          const speed = Math.hypot(o.vx, o.vy);
+          if (speed > SHATTER_V) {
+            c.dead = true;
+            shatter(c);
+            state.shake = Math.min(18, state.shake + 11);
+            updateLeft();
+            o.vx *= 0.55; o.vy *= 0.55;
+          } else {
+            // Too slow — bounce off and tell the player why, once.
+            const nx = (o.x - c.x) / (d || 1), ny = (o.y - c.y) / (d || 1);
+            o.x = c.x + nx * (o.r + c.r); o.y = c.y + ny * (o.r + c.r);
+            const sep = o.vx * nx + o.vy * ny;
+            if (sep < 0) { o.vx -= 2 * sep * nx * 0.6; o.vy -= 2 * sep * ny * 0.6; }
+            if (speed > 180 && !c.warned) {
+              c.warned = true;
+              toast("Not fast enough — swing harder");
+            }
+          }
+        }
+      }
+    }
+
+    // particles
+    for (let i = state.parts.length - 1; i >= 0; i--) {
+      const p = state.parts[i];
+      p.vy += G * 0.55 * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.life -= dt;
+      if (p.life <= 0 || p.y > H + 40) state.parts.splice(i, 1);
+    }
+
+    state.shake *= 0.86;
+
+    if (state.phase === "play" && state.crystals.every(c => c.dead)) {
+      state.phase = "won";
+      setTimeout(nextLevel, 900);
+    }
+  }
+
+  function shatter(c) {
+    for (let i = 0; i < 26; i++) {
+      const a = rand(0, Math.PI * 2), s = rand(90, 620);
+      state.parts.push({
+        x: c.x, y: c.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+        life: rand(.45, 1.3), max: 1.3, size: rand(1.6, 4.4),
+      });
+    }
+  }
+
+  function nextLevel() {
+    if (state.level >= LEVELS.length) {
+      state.phase = "complete";
+      overlay.classList.remove("hide");
+      overlay.querySelector(".card").innerHTML =
+        '<h1>Clear</h1><p class="sub">All crystals shattered</p>' +
+        '<p class="rule">You held the whole field in your head and pulled it apart.</p>' +
+        '<button id="againBtn">Again</button>';
+      document.getElementById("againBtn").onclick = () => { state.level = 1; start(); };
+      return;
+    }
+    state.level++;
+    buildLevel(state.level);
+    state.phase = "play";
+    toast("Level " + state.level);
+  }
+
+  // ---------------------------------------------------------------- render
+  function draw() {
+    const sx = state.shake ? rand(-state.shake, state.shake) : 0;
+    const sy = state.shake ? rand(-state.shake, state.shake) : 0;
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    // ground haze
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#06050D");
+    g.addColorStop(0.72, "#0B0A14");
+    g.addColorStop(1, "#141026");
+    ctx.fillStyle = g;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+
+    // floor line
+    ctx.strokeStyle = "rgba(232,228,240,.10)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, H - 1); ctx.lineTo(W, H - 1); ctx.stroke();
+
+    // grip field
+    if (state.grip.on && !state.spent) {
+      const rg = ctx.createRadialGradient(state.grip.x, state.grip.y, 4, state.grip.x, state.grip.y, GRAB_R);
+      rg.addColorStop(0, "rgba(233,79,191,.26)");
+      rg.addColorStop(0.55, "rgba(233,79,191,.07)");
+      rg.addColorStop(1, "rgba(233,79,191,0)");
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(state.grip.x, state.grip.y, GRAB_R, 0, 6.2832); ctx.fill();
+
+      ctx.strokeStyle = "rgba(233,79,191,.30)";
+      ctx.setLineDash([3, 7]);
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(state.grip.x, state.grip.y, GRAB_R, 0, 6.2832); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // tethers
+    for (const o of state.held) {
+      ctx.strokeStyle = "rgba(233,79,191," + (0.16 + 0.3 * o.glow) + ")";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(state.grip.x, state.grip.y); ctx.lineTo(o.x, o.y); ctx.stroke();
+    }
+
+    // crystals
+    for (const c of state.crystals) {
+      if (c.dead) continue;
+      const p = 1 + Math.sin(c.pulse) * 0.12;
+      ctx.save(); ctx.translate(c.x, c.y);
+      const cg = ctx.createRadialGradient(0, 0, 2, 0, 0, c.r * 2.9 * p);
+      cg.addColorStop(0, "rgba(79,232,208,.36)");
+      cg.addColorStop(1, "rgba(79,232,208,0)");
+      ctx.fillStyle = cg;
+      ctx.beginPath(); ctx.arc(0, 0, c.r * 2.9 * p, 0, 6.2832); ctx.fill();
+
+      ctx.rotate(Math.sin(c.pulse * .5) * .12);
+      ctx.beginPath();
+      ctx.moveTo(0, -c.r * 1.35 * p);
+      ctx.lineTo(c.r * .78 * p, 0);
+      ctx.lineTo(0, c.r * 1.35 * p);
+      ctx.lineTo(-c.r * .78 * p, 0);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(79,232,208,.9)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(220,255,250,.95)"; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.restore();
+    }
+
+    // rocks
+    for (const o of state.rocks) {
+      ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.ang);
+      if (o.glow > 0.01) {
+        const og = ctx.createRadialGradient(0, 0, o.r * .4, 0, 0, o.r * 2.5);
+        og.addColorStop(0, "rgba(233,79,191," + (0.35 * o.glow) + ")");
+        og.addColorStop(1, "rgba(233,79,191,0)");
+        ctx.fillStyle = og;
+        ctx.beginPath(); ctx.arc(0, 0, o.r * 2.5, 0, 6.2832); ctx.fill();
+      }
+      ctx.beginPath();
+      const n = o.shape.length;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * 6.2832, rr = o.r * o.shape[i];
+        const px = Math.cos(a) * rr, py = Math.sin(a) * rr;
+        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      }
+      ctx.closePath();
+      const sg = ctx.createLinearGradient(-o.r, -o.r, o.r, o.r);
+      sg.addColorStop(0, o.held ? "#D6A8C8" : "#B8AFA0");
+      sg.addColorStop(1, o.held ? "#7A4A6C" : "#5A5348");
+      ctx.fillStyle = sg; ctx.fill();
+      ctx.strokeStyle = o.held ? "rgba(233,79,191,.85)" : "rgba(0,0,0,.4)";
+      ctx.lineWidth = o.held ? 1.6 : 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // particles
+    for (const p of state.parts) {
+      const a = clamp(p.life / p.max, 0, 1);
+      ctx.fillStyle = "rgba(79,232,208," + a + ")";
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------- loop
+  let last = performance.now();
+  function frame(now) {
+    // Clamp dt so a backgrounded tab doesn't resume with one enormous step
+    // that teleports every rock through a wall.
+    const dt = Math.min((now - last) / 1000, 1 / 30);
+    last = now;
+    if (state.phase === "play" || state.phase === "won") step(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  function start() {
+    overlay.classList.add("hide");
+    buildLevel(state.level);
+    state.phase = "play";
+    last = performance.now();
+    toast("Hold to pull · release to hurl", 2600);
+  }
+
+  startBtn.addEventListener("click", start);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
