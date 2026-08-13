@@ -16,3 +16,6 @@ data/gold_h1/
 journal/
 data/m5/
 data/m1/
+
+# Personal permission overrides, not team-wide
+.claude/settings.local.json
