@@ -33,6 +33,37 @@ Two claims worth internalising:
 Treat the first live version as tuition you are paying to find out what
 your backtest was hiding.
 
+### The bug that rewrote this README
+
+`run()` used to default to `RiskManager()`, which halts at a 5% daily loss
+and **stays halted for the rest of the run**. Sensible for live trading,
+ruinous for measurement: it silently converts every backtest into "trade
+until the first bad day, then sit in cash forever" — including the
+buy-and-hold benchmark.
+
+It surfaced when buy-and-hold on BTC reported **−22.5% over a period the
+asset rose 138x**. A September 2014 drawdown tripped the halt on day three
+and equity froze for the next twelve years.
+
+Fixing it (risk limits are now opt-in; pass the *same* manager to both sides
+of any comparison) changed several results in this file, and reversed two
+conclusions I had already written down:
+
+| | before | after |
+|---|---|---|
+| SmaCrossover, 5min | −3.72% *("a loser after fees")* | **+61.41%** |
+| MeanReversion, 5min | +14.98% *("profitable")* | **−26.70%** |
+| Best timeframe | 1h, +23.87% | **4h, +143.98%** |
+
+Strategies holding large directional positions got frozen; strategies with
+tight per-trade stops never tripped the halt at all, which is why the
+scalper, Fib BOS, ICT, opening-range and H1-stocks results came through
+completely unchanged.
+
+The lesson generalises past this repo: **a benchmark that quietly stops
+trading makes every comparison against it worthless.** When a strategy looks
+good, check that the thing you compared it to was actually running.
+
 ---
 
 ## Architecture
@@ -74,15 +105,20 @@ bars of a liquid HK equity, June 2024 – Sept 2025 (1.23 years).
 
 | | BuyAndHold | SmaCrossover | MeanReversion |
 |---|---|---|---|
-| return, **with** costs | 37.02% | **-3.72%** | 14.98% |
-| return, **zero** costs | 37.18% | **35.71%** | 31.47% |
-| trades | 3 | 274 | ~1,600 |
-| fees as % of start | 0.09% | **7.36%** | **9.70%** |
+| return, **with** costs | 128.76% | 61.41% | **-26.70%** |
+| return, **zero** costs | 128.90% | 101.21% | **+23.24%** |
+| trades | 2 | 539 | 6,464 |
+| fees as % of start | 0.04% | 16.95% | **35.33%** |
 
-SmaCrossover is a 35% winner for free and a **loser** at 4bp+2bp. Nothing
-about the signal changed. Turnover is a cost multiplier, so a strategy's
+MeanReversion is a 23% winner for free and a **−27% loser** at 4bp+2bp.
+Nothing about the signal changed; it trades 6,464 times and pays 35% of the
+starting account in fees. Turnover is a cost multiplier, so a strategy's
 viability depends on frictions you must model *before* you get attached to
 it.
+
+Note that neither strategy beats simply owning the thing (128.76%). That
+comparison is the one that matters, and it is the one this repo keeps
+coming back to.
 
 ### 2. Lookahead bias — and what it really looks like
 
@@ -92,8 +128,8 @@ innocent; the poison went in before the loop started.
 
 | | BuyAndHold | LOOKAHEAD BUG |
 |---|---|---|
-| total return | 37.02% | **71,572,067,681%** |
-| Sharpe | 1.27 | **35.78** |
+| total return | 128.76% | **71,572,067,681%** |
+| Sharpe | 1.62 | **35.78** |
 
 **A Sharpe above ~3 on retail data is a bug report, not a discovery.** This
 is the most valuable pattern in the repo: learn to distrust your own good
@@ -309,17 +345,17 @@ python run_search.py
 
 | rank | strategy | forex | stocks | combined |
 |---|---|---|---|---|
-| 1 | SMA 40/100 | −0.78% | −4.52% | **−2.65%** |
-| 2 | SMA 20/50 | −2.86% | −3.42% | −3.14% |
-| 3 | SMA 10/50 | −2.32% | −4.82% | −3.57% |
-| 4 | SMA 20/100 | −2.18% | −5.99% | −4.08% |
-| 5 | MeanRev 20/1.5 | −3.18% | −6.18% | −4.68% |
+| 1 | SMA 40/100 | −0.78% | −14.71% | **−7.75%** |
+| 2 | MeanRev 100/2.0 | −3.60% | −13.82% | −8.71% |
+| 3 | SMA 10/50 | −2.32% | −16.13% | −9.23% |
+| 4 | SMA 20/100 | −2.18% | −17.14% | −9.66% |
+| 5 | SMA 50/200 | −4.24% | −16.09% | −10.17% |
 | … | … | | | |
-| 20 | Adaptive ER>0.45 | −6.09% | −13.26% | −9.67% |
+| 20 | Adaptive ER>0.45 | −6.09% | −29.50% | −17.79% |
 
 ```
 strategies with positive excess : 0/20
-median strategy excess          : -6.83%
+median strategy excess          : -13.66%
 ```
 
 **Every single strategy lost to buy-and-hold.** The "winner" is the least
@@ -334,13 +370,12 @@ test 20 worthless strategies and one still finishes first. So 20
 `RandomEntry` strategies ran through the identical pipeline:
 
 ```
-random  mean / best : -6.43% / -5.28%
-real    mean / best : -6.64% / -2.65%
-real strategies above the best random: 6/20
-P(no-edge search produces a winner this good): 0.0%
+random  mean / best : -14.04% / -12.90%
+real    mean / best : -13.77% /  -7.75%
+real strategies above the best random: 7/20
 ```
 
-The real strategies **do** contain signal — six of them beat the best of an
+The real strategies **do** contain signal — seven of them beat the best of an
 equally large no-edge search, and the SMA family clusters at the top rather
 than scattering randomly. That is a genuine, if small, finding: trend
 following is not noise.
@@ -348,7 +383,7 @@ following is not noise.
 It is also **not enough to matter**, and the first version of this script
 missed that. It checked only "did the winner beat random search?", saw yes,
 and printed *"Worth a proper out-of-sample and walk-forward follow-up"* —
-recommending further work on a strategy that loses 2.65% to a benchmark
+recommending further work on a strategy that loses 7.75% to a benchmark
 anyone can buy for free.
 
 `run_search.py` now requires **both** conditions: positive excess *and*
@@ -483,8 +518,12 @@ The fixed-parameter run (20/50, no tuning at all) is genuinely inconclusive by
 comparison — 6/21 beat buy-and-hold, mean excess −2.62%, CI [−11.79%, +7.14%]
 — but it points the same way with less power.
 
-So the original **+23.87% was that one stock's story, not an effect.** More
-data did not sharpen it; it reversed it.
+So the single-stock H1 result was **that one stock's story, not an effect.**
+More data did not sharpen it; it reversed it. (That original figure was
++23.87% when this was written; the risk-manager fix later restated it as
++79.03%. The restatement makes the single-stock number *better* and changes
+this conclusion not at all — which is the point of testing across 21 stocks
+and 231 windows instead of admiring one.)
 
 ### A reporting bug worth keeping
 
@@ -574,31 +613,39 @@ python run_timeframes.py
 
 | timeframe | bars | trades | return | sharpe | max dd | fees |
 |---|---|---|---|---|---|---|
-| 5min | 20,000 | 260 | −3.72% | −0.08 | −20.4% | **7.36%** |
-| 15min | 7,274 | 52 | +16.28% | 0.81 | −20.3% | 1.58% |
-| **1h** | 2,426 | 18 | **+23.87%** | **1.08** | **−12.99%** | **0.49%** |
-| 4h | 912 | 12 | +20.04% | 0.78 | −20.1% | 0.36% |
-| 1D | 305 | 4 | +0.40% | 0.11 | −22.7% | 0.08% |
+| 5min | 20,000 | 539 | +61.41% | 1.33 | −27.27% | **16.95%** |
+| 15min | 7,274 | 188 | +65.52% | 1.41 | −29.35% | 6.48% |
+| 1h | 2,426 | 59 | +79.03% | 1.55 | −24.72% | 2.13% |
+| **4h** | 912 | 29 | **+143.98%** | **2.02** | **−22.19%** | 1.16% |
+| 1D | 305 | 10 | +55.74% | 1.07 | −29.76% | 0.21% |
 
-**H1 is the sweet spot.** Identical logic; fees fall 15x (7.36% → 0.49%) and
-a −3.72% loser becomes a +23.87% winner with the smallest drawdown of the
-five. This is the constructive half of the scalping lesson: you do not beat
-the cost wall by predicting better, you beat it by trading less often for
-bigger moves.
+**Return rises as fees fall.** Identical logic; fees drop 15x from 5min to
+4h (16.95% → 1.16%) and the return more than doubles, with the smallest
+drawdown of the five. This is the constructive half of the scalping lesson:
+you do not beat the cost wall by predicting better, you beat it by trading
+less often for bigger moves.
 
-**Mean reversion runs the opposite way** — best at 5min (+14.98%), steadily
-worse out to 1D (−25.49%). The two are mirror images, and that is a real
-market property rather than an artefact: short horizons revert, long horizons
-trend. Match the strategy to the horizon where its effect actually lives.
+Read the 4h row against buy-and-hold's +128.76%, though, before getting
+excited. It clears it by 15 points on one stock over 1.23 years — which is
+well inside the range you get from picking the best of five timeframes after
+the fact. `run_search.py` and `run_h1_stocks.py` exist because this kind of
+single-instrument result does not survive being tested properly.
+
+**Mean reversion loses at every timeframe** — −26.70% at 5min, worsening to
+−57.24% at 4h. Fees explain the 5min number (35% of the account) but not the
+4h one (1.35%), so on this instrument the signal itself is simply backwards:
+it is trending, and fading a trend loses money whatever the bar size.
 
 **H1 out-of-sample** (tune on first 70%, judge on last 30%): best train
-config `fast=10 slow=50` at Sharpe 2.57 → **1.45 out-of-sample, +14.02%**,
-against buy-and-hold's −18.85% over the same stretch. The in-sample-to-OOS
-drop (2.57 → 1.45) is the usual and expected direction.
+config `fast=10 slow=50` at Sharpe 2.49 → **1.45 out-of-sample, +14.02%** —
+against buy-and-hold's **+28.64%** over the same stretch. The tuned strategy
+survived out-of-sample and *still* lost to doing nothing. The in-sample-to-OOS
+drop (2.49 → 1.45) is the usual and expected direction; losing to the
+benchmark anyway is the point.
 
 ### One result that looked good and was not
 
-The 4h scalper row showed **+14.26% return alongside −1.14bp net expectancy**
+The 4h scalper row showed **+10.96% return alongside −1.14bp net expectancy**
 — a contradiction, so it got checked rather than reported. The cause:
 
 ```
@@ -608,7 +655,7 @@ scalper take_profit                : 0.30%
 
 The price jump between deciding and filling is **larger than the entire
 profit target**. The target and stop barely bind, and the outcome is decided
-by gap luck rather than by the strategy. That +14.26% is noise over 108
+by gap luck rather than by the strategy. That +10.96% is noise over 108
 trades, not a working scalper, and holding 3 bars at 4h is 12 hours — not
 scalping in any case. `Scalper.trade_report()` now documents the limit.
 
@@ -723,9 +770,13 @@ If an edge is real it should appear without being fitted per market:
 ### Does adapting help? (`tradingbot/adaptive.py`)
 
 `AdaptiveRegime` measures Kaufman's Efficiency Ratio each bar and switches
-between trend-following and mean-reversion — the timeframe study showed those
-two are mirror images, so the idea is to detect which regime you are in
-rather than guess.
+between trend-following and mean-reversion, on the premise that each works in
+the regime the other fails in, so detecting the regime beats guessing.
+
+(An earlier draft justified this by saying the timeframe study showed the two
+to be mirror images. After the risk-manager fix that is no longer true —
+mean reversion loses at every timeframe on that instrument — so the premise
+here rests on the general argument, not on that result.)
 
 | strategy | return | sharpe |
 |---|---|---|
