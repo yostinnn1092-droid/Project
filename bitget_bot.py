@@ -86,6 +86,28 @@ class Journal:
         with self.path.open("a") as f:
             f.write(json.dumps(fields, default=str) + "\n")
 
+    def anchor(self) -> dict | None:
+        """The first decision ever recorded — the benchmark's start point.
+
+        Buy-and-hold has to be measured from the bar the bot STARTED, not
+        from the bar the current process started, or every restart silently
+        re-anchors the benchmark to the current price and the comparison
+        becomes meaningless. Same failure shape as `last_decided_bar`: state
+        that must outlive the process has to live on disk.
+        """
+        if not self.path.exists():
+            return None
+        for line in self.path.read_text().splitlines():
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("event") == "decision":
+                return {"bar": pd.Timestamp(rec["bar"]),
+                        "price": float(rec["price"]),
+                        "equity": float(rec["equity"])}
+        return None
+
     def last_decided_bar(self) -> pd.Timestamp | None:
         """Newest bar this bot has already acted on, across restarts.
 
@@ -127,6 +149,11 @@ def _closed_bars(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     closes_at = last_open + timedelta(seconds=step)
     now = pd.Timestamp(datetime.now(timezone.utc)).tz_localize(None)
     return df.iloc[:-1] if closes_at > now else df
+
+
+def feed_price(feed: BitgetPublic, args) -> float:
+    """Last traded price, used to value a position synced from the exchange."""
+    return float(feed.ticker(args.symbol, args.product)["lastPr"])
 
 
 def _retry(fn, attempts: int = 4, base: float = 2.0):
@@ -240,17 +267,55 @@ def main() -> None:
 
     # Reconcile against the exchange rather than assuming flat. A restart
     # that forgets an open position will happily open a second one.
+    #
+    # In live mode the PaperBroker still computes the size of each order, so
+    # its idea of the current position must match the exchange's or every
+    # order is sized against a fiction. Printing the exchange position is not
+    # reconciling it — an earlier version of this file did exactly that and
+    # looked complete.
     if client:
-        pos = [q for q in client.positions(a.product)
-               if q["symbol"] == a.symbol and float(q.get("total", 0)) != 0]
-        print(f"  open position on exchange: {pos if pos else 'none'}")
+        try:
+            pos = [q for q in client.positions(a.product)
+                   if q["symbol"] == a.symbol and float(q.get("total", 0)) != 0]
+        except BitgetError as e:
+            # Refusing is the correct outcome, not a fallback. A bot that
+            # cannot read its own position cannot size an order, and
+            # starting anyway would trade against an assumed-flat book.
+            print(f"\n  REFUSING TO START: cannot read position from exchange.\n"
+                  f"  {e}\n"
+                  f"  Live trading requires a verified position. Fix the "
+                  f"credentials and retry.")
+            sys.exit(1)
+        if not pos:
+            print("  exchange position: none (broker starts flat — consistent)")
+        else:
+            held = sum(float(q["total"]) * (1 if q["holdSide"] == "long" else -1)
+                       for q in pos)
+            broker.positions[a.symbol] = held
+            broker.cash = broker.get_equity() - held * feed_price(feed, a)
+            print(f"  exchange position: {held:+g} — synced into the broker")
+            print("  NOTE: divergence DURING a run (partial fills, manual")
+            print("        trades, liquidations) is not detected. Restart the")
+            print("        bot after any manual intervention.")
 
     # Resume where the last run stopped, so a restart cannot re-trade a bar
     # that was already decided. Journal is the source of truth here because
     # it survives the process; in-memory state does not.
     last_bar = journal.last_decided_bar()
+    anchor = journal.anchor()
     if last_bar is not None:
         print(f"  resuming after bar: {last_bar}")
+    if anchor is not None:
+        print(f"  benchmark anchored : {anchor['bar']} @ {anchor['price']:,.2f}")
+        # Restore paper equity too, or the strategy restarts at its opening
+        # balance while the benchmark keeps compounding from the anchor —
+        # which would show a fake loss on every restart.
+        prior = [json.loads(l) for l in journal.path.read_text().splitlines() if l]
+        decisions = [r for r in prior if r.get("event") == "decision"]
+        if decisions:
+            broker.cash = float(decisions[-1]["equity"])
+            print(f"  restored paper cash: {broker.cash:,.2f} "
+                  f"(flat; open positions are not carried across restarts)")
 
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
@@ -289,25 +354,42 @@ def main() -> None:
 
             price = float(bars["close"].iloc[-1])
             broker.set_price(a.symbol, price)
-            equity = broker.get_equity()
-            risk.update(equity, newest)
+            risk.update(broker.get_equity(), newest)
 
             target = float(strategy.on_bar(bars))
             allowed = risk.adjust(target)
             current = broker.get_position(a.symbol)
 
             fill = broker.rebalance_to_weight(a.symbol, allowed)
+            # Mark to market AFTER the rebalance so the cost just paid is
+            # visible in the curve. Comparing a pre-cost strategy number
+            # against a cost-free benchmark would flatter the strategy by
+            # exactly the amount this repo keeps proving matters.
+            equity = broker.get_equity()
+
+            # Anchor the benchmark on the first decision, then never move it.
+            if anchor is None:
+                anchor = {"bar": newest, "price": price, "equity": equity}
+            bench = anchor["equity"] * (price / anchor["price"])
+            excess = equity - bench
+            strat_pct = equity / anchor["equity"] - 1
+            bench_pct = price / anchor["price"] - 1
+
             journal.write(event="decision", bar=newest, price=price,
                           equity=equity, target=target, allowed=allowed,
                           position_before=current,
                           halt=risk.halt_reason,
                           filled=bool(fill),
                           units=fill.units if fill else 0.0,
-                          fill_price=fill.price if fill else None)
+                          fill_price=fill.price if fill else None,
+                          benchmark_equity=bench, excess=excess,
+                          strategy_pct=strat_pct, benchmark_pct=bench_pct)
 
             flag = "TRADE" if fill else "hold "
-            print(f"  {newest:%Y-%m-%d %H:%M}  {price:>10,.2f}  w={allowed:+.2f}  "
-                  f"{flag}  equity {equity:>10,.2f}"
+            lead = "AHEAD" if excess > 0 else "BEHIND"
+            print(f"  {newest:%Y-%m-%d %H:%M}  {price:>9,.2f}  w={allowed:+.2f}  "
+                  f"{flag}  bot {equity:>9,.2f} ({strat_pct:+6.2%})  "
+                  f"hold {bench:>9,.2f} ({bench_pct:+6.2%})  {lead} {excess:+8,.2f}"
                   + (f"  [{risk.halt_reason}]" if risk.halt_reason else ""))
 
             if fill and client:
@@ -332,9 +414,43 @@ def main() -> None:
 
         time.sleep(a.poll)
 
-    print(f"\n  stopped. final paper equity {broker.get_equity():,.2f} "
-          f"from {a.equity:,.2f}")
-    print(f"  {len(broker.fills)} paper fills. Journal: {journal.path}")
+    # ------------------------------------------------------------- verdict
+    print(f"\n{'=' * 74}\n  SESSION SUMMARY\n{'=' * 74}")
+    final = broker.get_equity()
+    print(f"  paper fills this run : {len(broker.fills)}")
+    print(f"  journal              : {journal.path}")
+
+    if anchor is None:
+        print("  no decisions recorded yet — nothing to compare.")
+        return
+
+    last_price = broker._prices.get(a.symbol, anchor["price"])
+    bench = anchor["equity"] * (last_price / anchor["price"])
+    excess = final - bench
+    span = pd.Timestamp(datetime.now(timezone.utc)).tz_localize(None) - anchor["bar"]
+    days = max(span.total_seconds() / 86_400, 1e-9)
+
+    print(f"\n  measured since       : {anchor['bar']}  ({days:.2f} days)")
+    print(f"  {'':22}{'equity':>12}{'return':>10}")
+    print(f"  {'-' * 44}")
+    print(f"  {'BOT':<22}{final:>12,.2f}{final / anchor['equity'] - 1:>10.2%}")
+    print(f"  {'BUY AND HOLD':<22}{bench:>12,.2f}"
+          f"{last_price / anchor['price'] - 1:>10.2%}")
+    print(f"  {'EXCESS':<22}{excess:>12,.2f}"
+          f"{final / bench - 1 if bench else 0:>10.2%}")
+
+    verdict = "AHEAD of buy-and-hold" if excess > 0 else "BEHIND buy-and-hold"
+    print(f"\n  VERDICT: {verdict}")
+
+    # A verdict over a short window is noise, and saying so here is the
+    # whole reason this summary exists rather than just a number.
+    if days < 30:
+        print(f"\n  ...over {days:.1f} days, which decides NOTHING. This repo needed")
+        print("  231 windows across 21 stocks before the H1 result stopped")
+        print("  flipping sign. Weeks of paper trading is the minimum before")
+        print("  this line means anything, and a month of it beating buy-and-")
+        print("  hold is still weaker evidence than the tests that already")
+        print("  said no. Run `--why-not-yet` before you believe a good number.")
 
 
 if __name__ == "__main__":
