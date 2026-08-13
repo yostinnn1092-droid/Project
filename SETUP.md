@@ -14,15 +14,30 @@ Fake money, real order flow, real timing. Nothing here can lose you anything.
 
 **Why this strategy.** Thirteen candidates were tested on 5,000 4h bars of
 this exact instrument, split chronologically. SMA 40/100 was the only one
-positive in *both* halves (+43.9% train, +8.1% test). It also independently
+positive in *both* halves (+43.9% over 1.5yr train, +8.1% over 0.8yr test). It also independently
 won the 20-strategy search across forex and stocks in `run_search.py`. Two
 unrelated datasets, same winner.
 
 **Why that is weaker evidence than it sounds.** The test half was a BTC
-downtrend — buy-and-hold lost 43% — and in a downtrend anything that sits in
+downtrend — buy-and-hold lost 43% over those 9.5 months — and in a downtrend anything that sits in
 cash "beats the benchmark". Twelve of thirteen strategies did. That number
 means nothing. Being positive in both halves is the only part that survives,
 and it rests on 20 trades.
+
+| period | span | buy & hold | SMA 40/100 | strategy max DD |
+|---|---|---|---|---|
+| Train | 1.48 yr | +94.0% | +43.9% | −20.4% |
+| Test | 0.80 yr | −43.0% | +8.1% | −12.0% |
+| **Full** | 2.28 yr | +10.7% | **+43.9%** | −21.9% |
+
+Over the full 2.28 years the strategy returned four times buy-and-hold with a
+−21.9% worst drawdown against −53.5%. That is the strongest result in this
+repo. It also covers one instrument over a period containing a bubble and a
+crash — the exact shape of data that flatters trend-following, since riding
+the up and sitting out the down *is* the thesis. BTC peaked at 125,363 on
+2025-10-06 and the test half starts nineteen days later, so the split landed
+almost exactly on the top by coincidence. A different two years would likely
+look much worse.
 
 **No gold on demo.** Bitget demo carries three symbols: BTC, ETH, XRP. The
 XAUUSD work in this repo cannot be demo-traded here.

@@ -231,13 +231,22 @@
 
 <h2>Why this strategy</h2>
 
-<p>Thirteen candidates were tested on 5,000 4h bars of <em>this exact instrument</em>, split chronologically. SMA 40/100 was the only one positive in <strong>both</strong> halves — +43.9% train, +8.1% test. It also independently won the twenty-strategy search across forex and stocks in <code>run_search.py</code>. Two unrelated datasets, same winner.</p>
+<p>Thirteen candidates were tested on 5,000 4h bars of <em>this exact instrument</em>, split chronologically. SMA 40/100 was the only one positive in <strong>both</strong> halves — +43.9% over the 1.5-year train half, +8.1% over the 0.8-year test half. It also independently won the twenty-strategy search across forex and stocks in <code>run_search.py</code>. Two unrelated datasets, same winner.</p>
 
 <div class="note">
   <span class="label">Read this before you get excited</span>
-  <p>The test half was a BTC downtrend — buy-and-hold lost 43%. In a downtrend anything that sits in cash "beats the benchmark", and twelve of thirteen strategies did. <strong>That number means nothing.</strong></p>
+  <p>The test half was a BTC downtrend — buy-and-hold lost 43% over those 9.5 months. In a downtrend anything that sits in cash "beats the benchmark", and twelve of thirteen strategies did. <strong>That number means nothing.</strong></p>
   <p>Being positive in both halves is the only part that survives, and it rests on 20 trades.</p>
 </div>
+
+<div class="tw"><table>
+  <tr><th>Period</th><th>Span</th><th>Buy &amp; hold</th><th>SMA 40/100</th><th>Max DD</th></tr>
+  <tr><td>Train</td><td>1.48 yr</td><td>+94.0%</td><td>+43.9%</td><td>−20.4%</td></tr>
+  <tr><td>Test</td><td>0.80 yr</td><td>−43.0%</td><td>+8.1%</td><td>−12.0%</td></tr>
+  <tr><td><strong>Full</strong></td><td>2.28 yr</td><td>+10.7%</td><td><strong>+43.9%</strong></td><td>−21.9%</td></tr>
+</table></div>
+
+<p>Over the full 2.28 years the strategy returned four times buy-and-hold with a −21.9% worst drawdown against −53.5%. That is the strongest result in this repo — and it covers one instrument over a period containing a bubble and a crash, which is the exact shape of data that flatters trend-following, because riding the up and sitting out the down <em>is</em> the thesis. BTC peaked at 125,363 on 6 October 2025 and the test half begins nineteen days later, so the split landed almost precisely on the top by coincidence. A different two years would likely look much worse.</p>
 
 <p>Demo carries three symbols — BTC, ETH and XRP. There is no gold, so the XAUUSD work in this repo cannot be demo-traded here.</p>
 
