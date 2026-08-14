@@ -3,7 +3,7 @@
   :root {
     --void:  #0A0912;
     --force: #E94FBF;
-    --crystal: #4FE8D0;
+    --blood: #FF5A3C;
     --ink:   #E8E4F0;
     --dim:   #7E7894;
     --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
@@ -17,139 +17,194 @@
     overscroll-behavior: none;
   }
   #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-
   .hide { display: none !important; }
 
-  /* ───── HUD ───── */
+  /* ───── HUD (landscape-first: hugs the top edge, never the middle) ───── */
   #hud {
     position: fixed; top: 0; left: 0; right: 0; z-index: 5;
     display: flex; align-items: flex-start; justify-content: space-between;
-    gap: 10px; padding: 12px 14px; pointer-events: none;
+    gap: 10px; padding: 10px 14px; pointer-events: none;
   }
   .chip {
-    background: rgba(10,9,18,.66); border: 1px solid rgba(232,228,240,.14);
-    border-radius: 4px; padding: 6px 10px; backdrop-filter: blur(6px);
+    background: rgba(10,9,18,.6); border: 1px solid rgba(232,228,240,.13);
+    border-radius: 4px; padding: 5px 9px; backdrop-filter: blur(6px);
   }
-  .lbl { font-family: var(--mono); font-size: 8.5px; letter-spacing: .18em;
-         text-transform: uppercase; color: var(--dim); display: block; }
-  .val { font-family: var(--mono); font-size: 16px; font-variant-numeric: tabular-nums; }
-  #focusWrap { flex: 1 1 auto; max-width: 170px; }
-  #focusBar { height: 5px; margin-top: 5px; border-radius: 3px;
-              background: rgba(232,228,240,.13); overflow: hidden; }
+  .lbl { font-family: var(--mono); font-size: 8px; letter-spacing: .18em;
+         text-transform: uppercase; color: var(--dim); display: block; margin-bottom: 2px; }
+  .val { font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums; }
+
+  #hp { display: flex; gap: 4px; }
+  #hp i {
+    width: 11px; height: 11px; border-radius: 2px;
+    background: var(--blood); box-shadow: 0 0 7px rgba(255,90,60,.6);
+    transform: rotate(45deg);
+  }
+  #hp i.off { background: rgba(232,228,240,.16); box-shadow: none; }
+
+  #focusWrap { min-width: 120px; max-width: 190px; }
+  #focusBar { height: 5px; border-radius: 3px; background: rgba(232,228,240,.13); overflow: hidden; }
   #focusFill { height: 100%; width: 100%;
                background: linear-gradient(90deg, #7A2A66, var(--force));
                transition: width .08s linear; }
   #focusFill.spent { background: linear-gradient(90deg, #5A2020, #C4443A); }
 
+  /* ───── crosshair ───── */
+  #cross {
+    position: fixed; left: 50%; top: 50%; width: 46px; height: 46px;
+    margin: -23px 0 0 -23px; z-index: 6; pointer-events: none;
+  }
+  #cross i {
+    position: absolute; background: rgba(232,228,240,.55);
+    transition: background .1s ease, transform .12s ease;
+  }
+  /* four ticks around a gap — an open centre keeps the target visible */
+  #cross i:nth-child(1) { left: 50%; top: 0;   width: 1.5px; height: 13px; margin-left: -.75px; }
+  #cross i:nth-child(2) { left: 50%; bottom: 0;width: 1.5px; height: 13px; margin-left: -.75px; }
+  #cross i:nth-child(3) { top: 50%; left: 0;   height: 1.5px; width: 13px; margin-top: -.75px; }
+  #cross i:nth-child(4) { top: 50%; right: 0;  height: 1.5px; width: 13px; margin-top: -.75px; }
+  #cross u {
+    position: absolute; left: 50%; top: 50%; width: 3px; height: 3px;
+    margin: -1.5px 0 0 -1.5px; border-radius: 50%;
+    background: rgba(232,228,240,.7);
+  }
+  #cross.armed i { background: var(--force); }
+  #cross.armed u { background: var(--force); }
+  #cross.lock i { background: var(--blood); transform: scale(1.25); }
+  #cross.lock u { background: var(--blood); }
+
+  /* damage flash */
+  #dmg {
+    position: fixed; inset: 0; z-index: 7; pointer-events: none; opacity: 0;
+    transition: opacity .18s ease;
+    background: radial-gradient(ellipse at center, transparent 45%, rgba(255,60,40,.55));
+  }
+  #dmg.on { opacity: 1; }
+
   /* ───── touch controls ───── */
   #touch { position: fixed; inset: 0; z-index: 4; pointer-events: none; }
   #stick {
-    position: absolute; left: 22px; bottom: 26px;
-    width: 118px; height: 118px; border-radius: 50%;
+    position: absolute; left: 20px; bottom: 18px;
+    width: 112px; height: 112px; border-radius: 50%;
     border: 1.5px solid rgba(232,228,240,.18);
     background: radial-gradient(circle, rgba(232,228,240,.07), rgba(232,228,240,.02));
     pointer-events: auto; touch-action: none;
   }
   #knob {
-    position: absolute; left: 50%; top: 50%; width: 50px; height: 50px;
-    margin: -25px 0 0 -25px; border-radius: 50%;
-    background: rgba(232,228,240,.24);
-    border: 1.5px solid rgba(232,228,240,.4);
+    position: absolute; left: 50%; top: 50%; width: 48px; height: 48px;
+    margin: -24px 0 0 -24px; border-radius: 50%;
+    background: rgba(232,228,240,.24); border: 1.5px solid rgba(232,228,240,.4);
   }
   #force {
-    position: absolute; right: 26px; bottom: 34px;
-    width: 104px; height: 104px; border-radius: 50%;
+    position: absolute; right: 22px; bottom: 22px;
+    width: 96px; height: 96px; border-radius: 50%;
     border: 2px solid var(--force);
     background: radial-gradient(circle, rgba(233,79,191,.24), rgba(233,79,191,.06));
-    color: var(--ink); font-family: var(--mono); font-size: 11px;
+    color: var(--ink); font-family: var(--mono); font-size: 10.5px;
     letter-spacing: .16em; text-transform: uppercase;
     pointer-events: auto; touch-action: none; cursor: pointer;
-    box-shadow: 0 0 24px rgba(233,79,191,.3);
+    box-shadow: 0 0 22px rgba(233,79,191,.3);
     transition: transform .1s ease, box-shadow .1s ease;
   }
   #force.on {
     transform: scale(.94);
     background: radial-gradient(circle, rgba(233,79,191,.5), rgba(233,79,191,.2));
-    box-shadow: 0 0 42px rgba(233,79,191,.7);
+    box-shadow: 0 0 40px rgba(233,79,191,.7);
   }
-  #hint {
-    position: fixed; left: 50%; bottom: 158px; transform: translateX(-50%);
-    font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
-    text-transform: uppercase; color: rgba(126,120,148,.65); z-index: 3;
-    pointer-events: none; text-align: center; max-width: 92vw; line-height: 1.7;
-  }
-  /* Touch devices already have the stick and button on screen; the keyboard
-     half of the hint is noise there. */
-  @media (pointer: coarse) { #kbhint { display: none; } }
-  @media (pointer: fine) { #stick, #force { opacity: .35; } }
+  @media (pointer: fine) { #stick, #force { opacity: .3; } }
 
   #toast {
-    position: fixed; left: 50%; bottom: 15%; transform: translateX(-50%);
-    font-family: var(--mono); font-size: 10.5px; letter-spacing: .2em;
-    text-transform: uppercase; color: var(--ink); z-index: 6;
-    background: rgba(10,9,18,.72); padding: 8px 15px; border-radius: 4px;
+    position: fixed; left: 50%; bottom: 12%; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--ink); z-index: 8;
+    background: rgba(10,9,18,.75); padding: 7px 14px; border-radius: 4px;
     border: 1px solid rgba(232,228,240,.12);
     opacity: 0; transition: opacity .3s ease; pointer-events: none;
-    text-align: center; max-width: 86vw;
+    text-align: center; max-width: 80vw;
   }
   #toast.show { opacity: 1; }
+
+  /* ───── rotate nag ───── */
+  #rotate {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    place-items: center; text-align: center; padding: 30px;
+    background: rgba(6,5,13,.95);
+  }
+  #rotate.show { display: grid; }
+  #rotate .ph {
+    width: 54px; height: 92px; border: 2.5px solid var(--force);
+    border-radius: 8px; margin: 0 auto 22px;
+    animation: turn 2.2s ease-in-out infinite;
+  }
+  @keyframes turn {
+    0%,35% { transform: rotate(0deg); }
+    65%,100% { transform: rotate(-90deg); }
+  }
+  @media (prefers-reduced-motion: reduce) { #rotate .ph { animation: none; transform: rotate(-90deg); } }
 
   /* ───── menu ───── */
   #overlay {
     position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
-    background: radial-gradient(ellipse at center, rgba(10,9,18,.86), rgba(6,5,13,.98));
-    padding: 24px; text-align: center;
+    background: radial-gradient(ellipse at center, rgba(10,9,18,.88), rgba(6,5,13,.98));
+    padding: 20px; text-align: center; overflow-y: auto;
   }
-  #card { max-width: 400px; }
+  #card { max-width: 430px; }
   h1 {
-    font-size: clamp(40px, 14vw, 68px); font-weight: 300;
-    letter-spacing: .24em; text-transform: uppercase; margin-bottom: 6px;
+    font-size: clamp(32px, 8vh, 58px); font-weight: 300;
+    letter-spacing: .24em; text-transform: uppercase; margin-bottom: 5px;
     text-shadow: 0 0 30px rgba(233,79,191,.6);
   }
-  .sub { font-family: var(--mono); font-size: 10px; letter-spacing: .3em;
-         text-transform: uppercase; color: var(--force); margin-bottom: 26px; }
-  .rule { font-size: 14.5px; line-height: 1.7; color: var(--dim); margin-bottom: 9px; }
+  .sub { font-family: var(--mono); font-size: 9.5px; letter-spacing: .28em;
+         text-transform: uppercase; color: var(--force); margin-bottom: 18px; }
+  .rule { font-size: 13.5px; line-height: 1.6; color: var(--dim); margin-bottom: 7px; }
   .rule b { color: var(--ink); font-weight: 600; }
-  .rule em { color: var(--crystal); font-style: normal; }
+  .rule em { color: var(--blood); font-style: normal; }
   button {
-    margin-top: 22px; font-family: var(--mono); font-size: 12px;
+    margin-top: 16px; font-family: var(--mono); font-size: 11.5px;
     letter-spacing: .2em; text-transform: uppercase;
     color: var(--void); background: var(--force); border: 0; border-radius: 4px;
-    padding: 14px 32px; cursor: pointer;
+    padding: 13px 30px; cursor: pointer;
     box-shadow: 0 0 24px rgba(233,79,191,.45);
     transition: transform .12s ease;
   }
-  button:hover { transform: translateY(-1px); }
   button:active { transform: translateY(1px); }
-  :focus-visible { outline: 2px solid var(--crystal); outline-offset: 3px; }
-  @media (prefers-reduced-motion: reduce) { button, #force { transition: none; } }
+  :focus-visible { outline: 2px solid var(--blood); outline-offset: 3px; }
 </style>
 
 <canvas id="gl"></canvas>
 
 <div id="hud" class="hide">
-  <div class="chip"><span class="lbl">Level</span><span class="val" id="lvl">1</span></div>
+  <div class="chip"><span class="lbl">Wave</span><span class="val" id="wave">1</span></div>
+  <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
   <div class="chip" id="focusWrap"><span class="lbl">Focus</span>
     <div id="focusBar"><div id="focusFill"></div></div></div>
-  <div class="chip"><span class="lbl">Crystals</span><span class="val" id="left">0</span></div>
+  <div class="chip"><span class="lbl">Walkers</span><span class="val" id="left">0</span></div>
 </div>
 
+<div id="cross" class="hide"><i></i><i></i><i></i><i></i><u></u></div>
+<div id="dmg"></div>
+
 <div id="touch" class="hide">
-  <div id="hint">drag anywhere to look<span id="kbhint"> · wasd to move · space to lift</span></div>
   <div id="stick"><div id="knob"></div></div>
   <button id="force">Force</button>
 </div>
 
 <div id="toast"></div>
 
+<div id="rotate">
+  <div>
+    <div class="ph"></div>
+    <p class="sub" style="margin:0">Rotate to landscape</p>
+  </div>
+</div>
+
 <div id="overlay">
   <div id="card">
     <h1>Kinesis</h1>
-    <p class="sub">Third person · telekinetic</p>
-    <p class="rule"><b>Move</b> with the stick (or WASD). <b>Drag</b> anywhere to look around.</p>
-    <p class="rule">Hold <b>FORCE</b> near rocks to tear them off the ground — they orbit you while you hold.</p>
-    <p class="rule"><b>Let go</b> to hurl them where the camera points.</p>
-    <p class="rule">Shatter every <em>crystal</em>. They only break on a fast hit.</p>
+    <p class="sub">Best played in landscape</p>
+    <p class="rule"><b>Move</b> with the left stick (or WASD). <b>Drag</b> anywhere to aim.</p>
+    <p class="rule">Hold <b>FORCE</b> to tear rocks off the ground — they orbit you while held.</p>
+    <p class="rule"><b>Let go</b> to hurl them down the crosshair. It turns <em>red</em> when something is lined up.</p>
+    <p class="rule">Survive 5 waves. A slow rock only shoves a <em>walker</em> back — you need speed to put one down.</p>
     <button id="startBtn">Begin</button>
   </div>
 </div>
@@ -4270,20 +4325,26 @@ const T = THREE;
 // ─────────────────────────────────────────────────────────── tuning
 const CFG = {
   gravity:      -26,
-  moveSpeed:    7.2,
+  moveSpeed:    7.6,
   turnLerp:     11,
-  grabRadius:   11,      // how far the mind reaches
+  grabRadius:   12,
   maxHeld:      7,
-  orbitRadius:  3.4,
-  orbitHeight:  3.1,
-  liftSpring:   14,      // pull toward the orbit slot
+  orbitRadius:  4.4,
+  orbitHeight:  5.2,
+  liftSpring:   14,
   liftDamp:     6.5,
-  throwSpeed:   34,
-  shatterSpeed: 17,      // impact speed a crystal needs to break
+  throwSpeed:   38,
+  killSpeed:    13,      // rock speed needed to put a walker down
   focusDrain:   0.30,
   focusRegen:   0.34,
   restitution:  0.34,
   arena:        34,
+  zSpeed:       2.05,    // walker move speed
+  zReach:       1.7,     // how close before it claws you
+  zDamage:      1,
+  zCooldown:    1.15,    // seconds between hits from one walker
+  maxHealth:    5,
+  aimCone:      0.978,   // dot() above this counts as "in the crosshair"
 };
 
 const el = id => document.getElementById(id);
@@ -4299,17 +4360,22 @@ renderer.shadowMap.type = T.PCFSoftShadowMap;
 
 const scene = new T.Scene();
 scene.background = new T.Color(0x0a0912);
-scene.fog = new T.Fog(0x0a0912, 34, 78);
+scene.fog = new T.Fog(0x0a0912, 34, 80);
 
-const camera = new T.PerspectiveCamera(58, 1, 0.1, 200);
+const camera = new T.PerspectiveCamera(62, 1, 0.1, 200);
 
 function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
+  // Landscape is the intended shape. If someone plays in portrait anyway,
+  // widen the FOV so the horizontal view isn't uselessly narrow.
+  camera.fov = w < h ? 74 : 62;
   camera.updateProjectionMatrix();
+  el("rotate").classList.toggle("show", h > w * 1.15 && S.phase !== "menu");
 }
 addEventListener("resize", resize);
+addEventListener("orientationchange", () => setTimeout(resize, 250));
 
 // ─────────────────────────────────────────────────────────── lighting
 scene.add(new T.HemisphereLight(0x7565a8, 0x241d38, 1.5));
@@ -4318,50 +4384,41 @@ const sun = new T.DirectionalLight(0xeae2ff, 2.0);
 sun.position.set(14, 22, 10);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
-const sc = sun.shadow.camera;
-sc.left = -30; sc.right = 30; sc.top = 30; sc.bottom = -30; sc.far = 70;
+Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, far: 70 });
 scene.add(sun);
 
-// The psychic light. Lives on the player and only burns while power is up —
-// it is the main readable signal that the ability is active.
 const psi = new T.PointLight(0xe94fbf, 0, 22, 2);
-psi.position.set(0, 2.4, 0);
 scene.add(psi);
 
 // ─────────────────────────────────────────────────────────── arena
-const groundMat = new T.MeshStandardMaterial({ color: 0x2a2442, roughness: 0.92, metalness: 0.05 });
-const ground = new T.Mesh(new T.CircleGeometry(CFG.arena, 64), groundMat);
+const ground = new T.Mesh(
+  new T.CircleGeometry(CFG.arena, 64),
+  new T.MeshStandardMaterial({ color: 0x2a2442, roughness: 0.92 })
+);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-const ring = new T.Mesh(
-  new T.RingGeometry(CFG.arena - 0.35, CFG.arena, 64),
-  new T.MeshBasicMaterial({ color: 0x3a2f55, side: T.DoubleSide })
-);
-ring.rotation.x = -Math.PI / 2;
-ring.position.y = 0.02;
+const ring = new T.Mesh(new T.RingGeometry(CFG.arena - 0.35, CFG.arena, 64),
+  new T.MeshBasicMaterial({ color: 0x3a2f55, side: T.DoubleSide }));
+ring.rotation.x = -Math.PI / 2; ring.position.y = 0.02;
 scene.add(ring);
 
 const grid = new T.GridHelper(CFG.arena * 2, 34, 0x2a2340, 0x1e1932);
-grid.position.y = 0.01;
-grid.material.transparent = true;
-grid.material.opacity = 0.5;
+grid.position.y = 0.01; grid.material.transparent = true; grid.material.opacity = 0.5;
 scene.add(grid);
 
-// Pillars, purely for parallax — a flat plane gives no sense of motion.
 const pillarMat = new T.MeshStandardMaterial({ color: 0x1b1630, roughness: 0.9 });
 for (let i = 0; i < 16; i++) {
   const a = (i / 16) * Math.PI * 2 + rand(-0.1, 0.1);
-  const d = CFG.arena + rand(3, 11);
-  const h = rand(6, 20);
+  const d = CFG.arena + rand(3, 11), h = rand(6, 20);
   const p = new T.Mesh(new T.BoxGeometry(rand(1.4, 3), h, rand(1.4, 3)), pillarMat);
   p.position.set(Math.cos(a) * d, h / 2, Math.sin(a) * d);
   p.rotation.y = rand(0, 3);
   scene.add(p);
 }
 
-// ─────────────────────────────────────────────────────────── character
+// ─────────────────────────────────────────────────────────── hero
 const HERO = new T.Group();
 scene.add(HERO);
 
@@ -4372,48 +4429,33 @@ const trim  = new T.MeshStandardMaterial({ color: 0xe94fbf, roughness: 0.4,
 
 function part(geo, mat, x, y, z) {
   const m = new T.Mesh(geo, mat);
-  m.position.set(x, y, z);
-  m.castShadow = true;
+  m.position.set(x, y, z); m.castShadow = true;
   return m;
 }
-
-const torso = part(new T.CapsuleGeometry(0.34, 0.62, 6, 12), cloth, 0, 1.32, 0);
-HERO.add(torso);
-
-const head = part(new T.SphereGeometry(0.27, 20, 16), skin, 0, 2.03, 0);
-HERO.add(head);
-
-// A visor rather than a face: readable at distance, and it lights up when
-// the power is active without needing an expression rig.
+HERO.add(part(new T.CapsuleGeometry(0.34, 0.62, 6, 12), cloth, 0, 1.32, 0));
+HERO.add(part(new T.SphereGeometry(0.27, 20, 16), skin, 0, 2.03, 0));
 const visor = part(new T.BoxGeometry(0.42, 0.12, 0.08), trim, 0, 2.05, 0.22);
 HERO.add(visor);
+HERO.add(part(new T.BoxGeometry(0.72, 0.09, 0.42), trim, 0, 1.5, 0));
 
-const sash = part(new T.BoxGeometry(0.72, 0.09, 0.42), trim, 0, 1.5, 0);
-HERO.add(sash);
-
-// Limb pivots at the shoulder/hip so rotation swings the limb, not spins it.
-function limb(len, mat, px, py, pz) {
+function limb(parent, len, mat, px, py, pz, rad = 0.115) {
   const pivot = new T.Group();
   pivot.position.set(px, py, pz);
-  const m = part(new T.CapsuleGeometry(0.115, len, 5, 9), mat, 0, -len / 2 - 0.05, 0);
-  pivot.add(m);
-  HERO.add(pivot);
+  pivot.add(part(new T.CapsuleGeometry(rad, len, 5, 9), mat, 0, -len / 2 - 0.05, 0));
+  parent.add(pivot);
   return pivot;
 }
-const armL = limb(0.56, skin,  -0.44, 1.72, 0);
-const armR = limb(0.56, skin,   0.44, 1.72, 0);
-const legL = limb(0.62, cloth, -0.17, 0.92, 0);
-const legR = limb(0.62, cloth,  0.17, 0.92, 0);
+const armL = limb(HERO, 0.56, skin,  -0.44, 1.72, 0);
+const armR = limb(HERO, 0.56, skin,   0.44, 1.72, 0);
+const legL = limb(HERO, 0.62, cloth, -0.17, 0.92, 0);
+const legR = limb(HERO, 0.62, cloth,  0.17, 0.92, 0);
 
-// Aura shell — grows while channelling.
-const aura = new T.Mesh(
-  new T.SphereGeometry(1.55, 22, 16),
-  new T.MeshBasicMaterial({ color: 0xe94fbf, transparent: true, opacity: 0, side: T.BackSide })
-);
+const aura = new T.Mesh(new T.SphereGeometry(1.55, 22, 16),
+  new T.MeshBasicMaterial({ color: 0xe94fbf, transparent: true, opacity: 0, side: T.BackSide }));
 aura.position.y = 1.3;
 HERO.add(aura);
 
-const hero = { pos: new T.Vector3(0, 0, 8), vel: new T.Vector3(), yaw: 0, walk: 0, r: 0.5 };
+const hero = { pos: new T.Vector3(0, 0, 8), yaw: 0, walk: 0, hp: CFG.maxHealth, hurt: 0 };
 
 // ─────────────────────────────────────────────────────────── rocks
 const rockMat = new T.MeshStandardMaterial({ color: 0xa89e8f, roughness: 0.9, flatShading: true });
@@ -4422,7 +4464,6 @@ const rockHot = new T.MeshStandardMaterial({ color: 0xc98fb8, roughness: 0.6, fl
 const rocks = [];
 
 function spawnRock(x, z, r) {
-  // Deform an icosahedron once so each rock reads as stone, not a ball.
   const geo = new T.IcosahedronGeometry(r, 1);
   const p = geo.attributes.position;
   for (let i = 0; i < p.count; i++) {
@@ -4431,108 +4472,101 @@ function spawnRock(x, z, r) {
   }
   geo.computeVertexNormals();
   const mesh = new T.Mesh(geo, rockMat);
-  mesh.castShadow = true; mesh.receiveShadow = true;
+  mesh.castShadow = mesh.receiveShadow = true;
   scene.add(mesh);
-  const o = {
-    mesh, r,
-    pos: new T.Vector3(x, r, z),
-    vel: new T.Vector3(),
+  rocks.push({ mesh, r, pos: new T.Vector3(x, r, z), vel: new T.Vector3(),
     spin: new T.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)),
-    m: r * r * r * 3.4,
-    held: false, slot: 0,
-  };
-  rocks.push(o);
-  return o;
+    m: r*r*r*3.4, held: false, slot: 0 });
 }
 
-// ─────────────────────────────────────────────────────────── crystals
-const crystalMat = new T.MeshStandardMaterial({
-  color: 0x4fe8d0, roughness: 0.15, metalness: 0.3,
-  emissive: 0x4fe8d0, emissiveIntensity: 0.75,
-});
-const crystals = [];
+// ─────────────────────────────────────────────────────────── walkers
+const zSkin  = new T.MeshStandardMaterial({ color: 0x6f8f5a, roughness: 0.95 });
+const zCloth = new T.MeshStandardMaterial({ color: 0x3a3b30, roughness: 0.95 });
+const zEye   = new T.MeshBasicMaterial({ color: 0xff5a3c });
+const walkers = [];
 
-function spawnCrystal(x, y, z) {
+function spawnWalker(x, z) {
   const g = new T.Group();
-  const body = new T.Mesh(new T.OctahedronGeometry(0.95, 0), crystalMat);
-  body.scale.set(1, 1.7, 1);
-  body.castShadow = true;
+  const body = new T.Group();
   g.add(body);
-  const halo = new T.Mesh(
-    new T.SphereGeometry(1.9, 16, 12),
-    new T.MeshBasicMaterial({ color: 0x4fe8d0, transparent: true, opacity: 0.11, side: T.BackSide })
-  );
-  g.add(halo);
-  const light = new T.PointLight(0x4fe8d0, 2.2, 11, 2);
-  g.add(light);
-  g.position.set(x, y, z);
+
+  body.add(part(new T.CapsuleGeometry(0.32, 0.58, 6, 10), zCloth, 0, 1.24, 0));
+  const head = part(new T.SphereGeometry(0.25, 16, 12), zSkin, 0, 1.9, 0.06);
+  body.add(head);
+  // Eyes are the only bright thing on it — at distance in a dark arena they
+  // are what tells you something is coming, before the silhouette resolves.
+  body.add(part(new T.SphereGeometry(0.055, 8, 6), zEye, -0.1, 1.93, 0.22));
+  body.add(part(new T.SphereGeometry(0.055, 8, 6), zEye,  0.1, 1.93, 0.22));
+
+  const aL = limb(body, 0.54, zSkin, -0.4, 1.62, 0, 0.1);
+  const aR = limb(body, 0.54, zSkin,  0.4, 1.62, 0, 0.1);
+  // Arms locked forward — the reaching pose reads as "walker" instantly.
+  aL.rotation.x = -1.45; aR.rotation.x = -1.45;
+  const lL = limb(body, 0.6, zCloth, -0.16, 0.86, 0, 0.11);
+  const lR = limb(body, 0.6, zCloth,  0.16, 0.86, 0, 0.11);
+
+  g.position.set(x, 0, z);
   scene.add(g);
-  const c = { group: g, body, halo, light, pos: g.position, r: 1.4, dead: false, phase: rand(0, 6.3) };
-  crystals.push(c);
-  return c;
+  walkers.push({ g, body, head, aL, aR, lL, lR,
+    pos: g.position, r: 0.75, walk: rand(0, 6), dead: false,
+    cool: 0, hitFlash: 0 });
 }
 
-// ─────────────────────────────────────────────────────────── shards
-const shardGeo = new T.TetrahedronGeometry(0.3, 0);
-const shardMat = new T.MeshStandardMaterial({ color: 0x4fe8d0, emissive: 0x4fe8d0,
-                                              emissiveIntensity: 0.9, transparent: true });
-const shards = [];
-
-function burst(pos) {
-  for (let i = 0; i < 22; i++) {
-    const m = new T.Mesh(shardGeo, shardMat.clone());
-    m.position.copy(pos);
+// ─────────────────────────────────────────────────────────── gibs
+const gibGeo = new T.TetrahedronGeometry(0.26, 0);
+const gibs = [];
+function burst(pos, color) {
+  for (let i = 0; i < 18; i++) {
+    const m = new T.Mesh(gibGeo, new T.MeshStandardMaterial({ color, roughness: 0.9, transparent: true }));
+    m.position.copy(pos); m.position.y += 1;
     scene.add(m);
-    shards.push({
-      mesh: m,
-      vel: new T.Vector3(rand(-1,1), rand(0.2,1.4), rand(-1,1)).normalize().multiplyScalar(rand(6,20)),
+    gibs.push({ mesh: m,
+      vel: new T.Vector3(rand(-1,1), rand(0.3,1.4), rand(-1,1)).normalize().multiplyScalar(rand(5,16)),
       spin: new T.Vector3(rand(-9,9), rand(-9,9), rand(-9,9)),
-      life: rand(0.8, 1.7), max: 1.7,
-    });
+      life: rand(0.7,1.6), max: 1.6 });
   }
 }
 
-// ─────────────────────────────────────────────────────────── levels
-const LEVELS = [
-  { rocks: 9,  crystals: [[0,3.2,-9],[-7,3.0,-6],[7,3.0,-6]] },
-  { rocks: 11, crystals: [[0,6.5,-11],[-10,3.2,-3],[10,3.2,-3],[0,2.6,-19]] },
-  { rocks: 13, crystals: [[-13,4.5,-8],[-6,8.0,-14],[0,3.0,-20],[6,8.0,-14],[13,4.5,-8]] },
-];
+// ─────────────────────────────────────────────────────────── state
+const S = { phase: "menu", wave: 1, focus: 1, spent: false, held: [], shake: 0, t: 0, kills: 0 };
+const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2 };
 
-const S = {
-  phase: "menu", level: 1, focus: 1, spent: false,
-  held: [], shake: 0, t: 0,
-};
-
-function clearLevel() {
+function clearAll() {
   rocks.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); });
   rocks.length = 0;
-  crystals.forEach(c => scene.remove(c.group));
-  crystals.length = 0;
-  shards.forEach(s => scene.remove(s.mesh));
-  shards.length = 0;
+  walkers.forEach(w => scene.remove(w.g)); walkers.length = 0;
+  gibs.forEach(x => scene.remove(x.mesh)); gibs.length = 0;
   S.held = [];
 }
 
-function buildLevel(n) {
-  clearLevel();
-  const cfg = LEVELS[(n - 1) % LEVELS.length];
-  for (let i = 0; i < cfg.rocks; i++) {
-    const a = rand(0, Math.PI * 2), d = rand(3, 13);
-    spawnRock(Math.cos(a) * d, Math.sin(a) * d + 4, rand(0.55, 0.95));
+function buildWave(n) {
+  clearAll();
+  const count = 3 + n * 2;
+  for (let i = 0; i < 10 + n; i++) {
+    const a = rand(0, Math.PI*2), d = rand(3, 14);
+    spawnRock(Math.cos(a)*d, Math.sin(a)*d + 3, rand(0.42, 0.72));
   }
-  cfg.crystals.forEach(([x, y, z]) => spawnCrystal(x, y, z));
-  hero.pos.set(0, 0, 11); hero.vel.set(0, 0, 0); hero.yaw = Math.PI;
-  cam.yaw = Math.PI; cam.pitch = 0.28;
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2 + rand(-0.3, 0.3);
+    const d = CFG.arena - rand(2, 8);
+    spawnWalker(Math.cos(a)*d, Math.sin(a)*d);
+  }
+  hero.pos.set(0, 0, 0); hero.yaw = Math.PI;
+  cam.yaw = Math.PI; cam.pitch = 0.26;
   S.focus = 1; S.spent = false;
-  el("lvl").textContent = n;
-  updateLeft();
+  el("wave").textContent = n;
+  updateHUD();
 }
 
-const updateLeft = () => { el("left").textContent = crystals.filter(c => !c.dead).length; };
+function updateHUD() {
+  el("left").textContent = walkers.filter(w => !w.dead).length;
+  let h = "";
+  for (let i = 0; i < CFG.maxHealth; i++) h += `<i class="${i < hero.hp ? "" : "off"}"></i>`;
+  el("hp").innerHTML = h;
+}
 
 let toastT = 0;
-function toast(msg, ms = 2100) {
+function toast(msg, ms = 2000) {
   const t = el("toast");
   t.textContent = msg; t.classList.add("show");
   clearTimeout(toastT);
@@ -4540,12 +4574,7 @@ function toast(msg, ms = 2100) {
 }
 
 // ─────────────────────────────────────────────────────────── input
-// Every control tracks its own pointerId, so on a phone the stick, the
-// look-drag and the force button all work at the same time. Sharing one
-// pointer is what makes touch controls feel broken.
 const input = { mx: 0, mz: 0, force: false };
-const cam = { yaw: Math.PI, pitch: 0.28, dist: 8.6 };
-
 const keys = new Set();
 addEventListener("keydown", e => {
   keys.add(e.code);
@@ -4556,63 +4585,54 @@ addEventListener("keyup", e => {
   if (e.code === "Space") input.force = false;
 });
 
-// --- virtual stick
 const stick = el("stick"), knob = el("knob");
-let stickId = null, stickC = { x: 0, y: 0 };
+let stickId = null, sc0 = { x: 0, y: 0 };
 stick.addEventListener("pointerdown", e => {
   stickId = e.pointerId;
   const r = stick.getBoundingClientRect();
-  stickC = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  stick.setPointerCapture(e.pointerId);
-  e.preventDefault();
+  sc0 = { x: r.left + r.width/2, y: r.top + r.height/2 };
+  stick.setPointerCapture(e.pointerId); e.preventDefault();
 });
 stick.addEventListener("pointermove", e => {
   if (e.pointerId !== stickId) return;
-  const dx = e.clientX - stickC.x, dy = e.clientY - stickC.y;
-  const max = 46, d = Math.hypot(dx, dy);
-  const k = d > max ? max / d : 1;
-  knob.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
-  input.mx = (dx * k) / max; input.mz = (dy * k) / max;
+  const dx = e.clientX - sc0.x, dy = e.clientY - sc0.y;
+  const max = 44, d = Math.hypot(dx, dy), k = d > max ? max/d : 1;
+  knob.style.transform = `translate(${dx*k}px, ${dy*k}px)`;
+  input.mx = (dx*k)/max; input.mz = (dy*k)/max;
   e.preventDefault();
 });
 function stickEnd(e) {
   if (e.pointerId !== stickId) return;
-  stickId = null; input.mx = 0; input.mz = 0;
+  stickId = null; input.mx = input.mz = 0;
   knob.style.transform = "translate(0,0)";
 }
 stick.addEventListener("pointerup", stickEnd);
 stick.addEventListener("pointercancel", stickEnd);
 
-// --- force button
 const fbtn = el("force");
 let forceId = null;
 fbtn.addEventListener("pointerdown", e => {
-  forceId = e.pointerId; input.force = true;
-  fbtn.classList.add("on");
-  fbtn.setPointerCapture(e.pointerId);
-  e.preventDefault();
+  forceId = e.pointerId; input.force = true; fbtn.classList.add("on");
+  fbtn.setPointerCapture(e.pointerId); e.preventDefault();
 });
 function forceEnd(e) {
   if (e.pointerId !== forceId) return;
-  forceId = null; input.force = false;
-  fbtn.classList.remove("on");
+  forceId = null; input.force = false; fbtn.classList.remove("on");
 }
 fbtn.addEventListener("pointerup", forceEnd);
 fbtn.addEventListener("pointercancel", forceEnd);
 
-// --- look drag (anywhere not on a control)
-let lookId = null, lookPrev = { x: 0, y: 0 };
+let lookId = null, lp = { x: 0, y: 0 };
 canvas.addEventListener("pointerdown", e => {
   if (lookId !== null) return;
-  lookId = e.pointerId;
-  lookPrev = { x: e.clientX, y: e.clientY };
+  lookId = e.pointerId; lp = { x: e.clientX, y: e.clientY };
   if (e.pointerType === "mouse" && e.button === 0) input.force = true;
 });
 addEventListener("pointermove", e => {
   if (e.pointerId !== lookId) return;
-  cam.yaw   -= (e.clientX - lookPrev.x) * 0.005;
-  cam.pitch  = clamp(cam.pitch + (e.clientY - lookPrev.y) * 0.004, -0.25, 1.05);
-  lookPrev = { x: e.clientX, y: e.clientY };
+  cam.yaw  -= (e.clientX - lp.x) * 0.005;
+  cam.pitch = clamp(cam.pitch + (e.clientY - lp.y) * 0.004, -0.2, 1.0);
+  lp = { x: e.clientX, y: e.clientY };
 });
 function lookEnd(e) {
   if (e.pointerId !== lookId) return;
@@ -4627,35 +4647,34 @@ function tryGrab() {
   if (S.spent || S.held.length) return;
   const near = rocks
     .filter(o => !o.held && o.pos.distanceTo(hero.pos) < CFG.grabRadius)
-    .sort((a, b) => a.pos.distanceTo(hero.pos) - b.pos.distanceTo(hero.pos))
+    .sort((a,b) => a.pos.distanceTo(hero.pos) - b.pos.distanceTo(hero.pos))
     .slice(0, CFG.maxHeld);
-  near.forEach((o, i) => { o.held = true; o.slot = i; o.mesh.material = rockHot; });
+  near.forEach((o,i) => { o.held = true; o.slot = i; o.mesh.material = rockHot; });
   S.held = near;
-  if (near.length) toast(near.length + " lifted — release to hurl", 1300);
 }
 
+const aimDir = new T.Vector3();
 function hurl() {
   if (!S.held.length) return;
-  // Throw along the camera's flat forward vector: the player aims with the
-  // camera, which is the only thing they are actually looking through.
-  const dir = new T.Vector3(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
+  // Throw straight down the crosshair: same flat forward vector the reticle
+  // is tested against, so what the crosshair highlights is what gets hit.
+  aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
   S.held.forEach((o, i) => {
     o.held = false;
     o.mesh.material = rockMat;
-    o.vel.copy(dir).multiplyScalar(CFG.throwSpeed)
-      .add(new T.Vector3(rand(-2,2), rand(1.5, 4.5) - i * 0.25, rand(-2,2)));
+    o.vel.copy(aimDir).multiplyScalar(CFG.throwSpeed)
+      .add(new T.Vector3(rand(-1.2,1.2), rand(1.2,3.0) - i*0.2, rand(-1.2,1.2)));
   });
   S.held = [];
-  S.shake = Math.min(0.5, S.shake + 0.22);
+  S.shake = Math.min(0.5, S.shake + 0.2);
 }
 
-// ─────────────────────────────────────────────────────────── simulation
+// ─────────────────────────────────────────────────────────── sim
 const tmp = new T.Vector3(), tmp2 = new T.Vector3();
 
 function step(dt) {
   S.t += dt;
 
-  // --- focus
   if (S.held.length) {
     S.focus -= CFG.focusDrain * dt * (0.5 + S.held.length * 0.13);
     if (S.focus <= 0) { S.focus = 0; S.spent = true; hurl(); toast("Focus spent"); }
@@ -4663,227 +4682,277 @@ function step(dt) {
     S.focus = Math.min(1, S.focus + CFG.focusRegen * dt);
     if (S.spent && S.focus > 0.4) S.spent = false;
   }
-  el("focusFill").style.width = (S.focus * 100) + "%";
+  el("focusFill").style.width = (S.focus*100) + "%";
   el("focusFill").classList.toggle("spent", S.spent);
 
-  // --- power edge detection
   if (input.force && !S.held.length && !S.spent) tryGrab();
   if (!input.force && S.held.length) hurl();
 
-  // --- movement, relative to where the camera is looking
+  // ---- movement
   let ix = input.mx, iz = input.mz;
   if (keys.has("KeyW") || keys.has("ArrowUp"))    iz -= 1;
   if (keys.has("KeyS") || keys.has("ArrowDown"))  iz += 1;
   if (keys.has("KeyA") || keys.has("ArrowLeft"))  ix -= 1;
   if (keys.has("KeyD") || keys.has("ArrowRight")) ix += 1;
-  const mag = Math.hypot(ix, iz);
-  if (mag > 1) { ix /= mag; iz /= mag; }
+  const mag = Math.min(1, Math.hypot(ix, iz));
+  if (mag > 1e-4) { const l = Math.hypot(ix, iz); ix /= l; iz /= l; }
 
-  const fwd   = new T.Vector3(Math.sin(cam.yaw), 0, Math.cos(cam.yaw));
-  const right = new T.Vector3(fwd.z, 0, -fwd.x);
-  const move  = new T.Vector3()
-    .addScaledVector(fwd, -iz)
-    .addScaledVector(right, ix);
-  const speed = move.length();
-  if (speed > 0.001) {
+  const fwd = tmp.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw));
+  // right = forward x up. The previous build used up x forward, which is the
+  // exact negation — forward/back read correctly and strafe came out mirrored.
+  const right = tmp2.set(-fwd.z, 0, fwd.x);
+  const move = new T.Vector3().addScaledVector(fwd, -iz).addScaledVector(right, ix);
+
+  if (move.lengthSq() > 1e-6) {
     move.normalize();
-    hero.pos.addScaledVector(move, CFG.moveSpeed * Math.min(1, mag || 1) * dt);
+    hero.pos.addScaledVector(move, CFG.moveSpeed * mag * dt);
     const want = Math.atan2(move.x, move.z);
     let d = want - hero.yaw;
-    while (d >  Math.PI) d -= Math.PI * 2;
-    while (d < -Math.PI) d += Math.PI * 2;
+    while (d >  Math.PI) d -= Math.PI*2;
+    while (d < -Math.PI) d += Math.PI*2;
     hero.yaw += d * Math.min(1, CFG.turnLerp * dt);
-    hero.walk += dt * 10 * Math.min(1, mag || 1);
-  } else {
-    hero.walk += (0 - (hero.walk % (Math.PI * 2))) * 0;
+    hero.walk += dt * 10 * mag;
   }
-
-  // keep the hero inside the arena
   const hd = Math.hypot(hero.pos.x, hero.pos.z);
-  if (hd > CFG.arena - 1) {
-    hero.pos.x *= (CFG.arena - 1) / hd;
-    hero.pos.z *= (CFG.arena - 1) / hd;
-  }
-
+  if (hd > CFG.arena - 1) { hero.pos.x *= (CFG.arena-1)/hd; hero.pos.z *= (CFG.arena-1)/hd; }
   HERO.position.copy(hero.pos);
   HERO.rotation.y = hero.yaw;
 
-  // --- limbs
-  const sw = Math.sin(hero.walk) * (speed > 0.001 ? 0.7 : 0);
-  legL.rotation.x =  sw;
-  legR.rotation.x = -sw;
+  const sw = Math.sin(hero.walk) * (mag > 1e-3 ? 0.7 : 0);
+  legL.rotation.x = sw; legR.rotation.x = -sw;
   const channel = S.held.length > 0;
-  // Arms up while channelling — the pose IS the ability's tell.
-  const armTarget = channel ? -2.25 : 0;
-  armL.rotation.x += (armTarget - armL.rotation.x) * Math.min(1, 9 * dt);
-  armR.rotation.x += (armTarget - armR.rotation.x) * Math.min(1, 9 * dt);
-  armL.rotation.z += ((channel ? -0.45 : 0) - armL.rotation.z) * Math.min(1, 9 * dt);
-  armR.rotation.z += ((channel ?  0.45 : 0) - armR.rotation.z) * Math.min(1, 9 * dt);
-  if (!channel) { armL.rotation.x += -sw * 0.55; armR.rotation.x += sw * 0.55; }
+  const at = channel ? -2.25 : 0;
+  const k = Math.min(1, 9*dt);
+  armL.rotation.x += (at - armL.rotation.x) * k;
+  armR.rotation.x += (at - armR.rotation.x) * k;
+  armL.rotation.z += ((channel ? -0.45 : 0) - armL.rotation.z) * k;
+  armR.rotation.z += ((channel ?  0.45 : 0) - armR.rotation.z) * k;
+  if (!channel) { armL.rotation.x += -sw*0.55; armR.rotation.x += sw*0.55; }
 
-  // --- aura + psychic light
-  const auraT = channel ? 0.17 : 0;
-  aura.material.opacity += (auraT - aura.material.opacity) * Math.min(1, 7 * dt);
-  aura.scale.setScalar(1 + Math.sin(S.t * 7) * 0.035 * (channel ? 1 : 0));
-  psi.position.set(hero.pos.x, hero.pos.y + 2.2, hero.pos.z);
-  psi.intensity += ((channel ? 13 : 0) - psi.intensity) * Math.min(1, 8 * dt);
+  aura.material.opacity += ((channel ? 0.17 : 0) - aura.material.opacity) * Math.min(1, 7*dt);
+  psi.position.set(hero.pos.x, 2.2, hero.pos.z);
+  psi.intensity += ((channel ? 13 : 0) - psi.intensity) * Math.min(1, 8*dt);
   visor.material.emissiveIntensity = channel ? 1.5 : 0.35;
 
-  // --- rocks
+  hero.hurt = Math.max(0, hero.hurt - dt);
+
+  // ---- rocks
   for (const o of rocks) {
     if (o.held) {
       const n = Math.max(1, S.held.length);
-      const a = S.t * 1.5 + (o.slot / n) * Math.PI * 2;
-      tmp.set(
-        hero.pos.x + Math.cos(a) * CFG.orbitRadius,
-        hero.pos.y + CFG.orbitHeight + Math.sin(S.t * 2.4 + o.slot) * 0.45,
-        hero.pos.z + Math.sin(a) * CFG.orbitRadius
-      );
-      tmp2.subVectors(tmp, o.pos);
-      o.vel.addScaledVector(tmp2, CFG.liftSpring * dt);
-      o.vel.multiplyScalar(1 - Math.min(1, CFG.liftDamp * dt));
+      const a = S.t*1.5 + (o.slot/n)*Math.PI*2;
+      tmp.set(hero.pos.x + Math.cos(a)*CFG.orbitRadius,
+              CFG.orbitHeight + Math.sin(S.t*2.4 + o.slot)*0.45,
+              hero.pos.z + Math.sin(a)*CFG.orbitRadius);
+      o.vel.addScaledVector(tmp.sub(o.pos), CFG.liftSpring*dt);
+      o.vel.multiplyScalar(1 - Math.min(1, CFG.liftDamp*dt));
       o.spin.set(2.2, 3.1, 1.4);
     } else {
-      o.vel.y += CFG.gravity * dt;
+      o.vel.y += CFG.gravity*dt;
     }
     o.pos.addScaledVector(o.vel, dt);
 
-    // ground
     if (o.pos.y < o.r) {
       o.pos.y = o.r;
-      if (o.vel.y < 0) o.vel.y = -o.vel.y * CFG.restitution;
-      o.vel.x *= 0.9; o.vel.z *= 0.9;
-      o.spin.multiplyScalar(0.93);
+      if (o.vel.y < 0) o.vel.y = -o.vel.y*CFG.restitution;
+      o.vel.x *= 0.9; o.vel.z *= 0.9; o.spin.multiplyScalar(0.93);
       if (Math.abs(o.vel.y) < 0.7) o.vel.y = 0;
     }
-    // arena wall
     const d = Math.hypot(o.pos.x, o.pos.z);
     if (d > CFG.arena - o.r) {
-      const nx = o.pos.x / d, nz = o.pos.z / d;
-      o.pos.x = nx * (CFG.arena - o.r); o.pos.z = nz * (CFG.arena - o.r);
-      const dot = o.vel.x * nx + o.vel.z * nz;
-      o.vel.x -= 2 * dot * nx * CFG.restitution;
-      o.vel.z -= 2 * dot * nz * CFG.restitution;
+      const nx = o.pos.x/d, nz = o.pos.z/d;
+      o.pos.x = nx*(CFG.arena-o.r); o.pos.z = nz*(CFG.arena-o.r);
+      const dot = o.vel.x*nx + o.vel.z*nz;
+      o.vel.x -= 2*dot*nx*CFG.restitution; o.vel.z -= 2*dot*nz*CFG.restitution;
     }
-
     o.mesh.position.copy(o.pos);
-    o.mesh.rotation.x += o.spin.x * dt;
-    o.mesh.rotation.y += o.spin.y * dt;
-    o.mesh.rotation.z += o.spin.z * dt;
+    o.mesh.rotation.x += o.spin.x*dt;
+    o.mesh.rotation.y += o.spin.y*dt;
+    o.mesh.rotation.z += o.spin.z*dt;
   }
 
-  // rock ↔ rock
   for (let i = 0; i < rocks.length; i++) {
-    for (let j = i + 1; j < rocks.length; j++) {
+    for (let j = i+1; j < rocks.length; j++) {
       const a = rocks[i], b = rocks[j];
       tmp.subVectors(b.pos, a.pos);
       const d = tmp.length(), min = a.r + b.r;
       if (d > 0 && d < min) {
         tmp.divideScalar(d);
-        const push = (min - d) * 0.5;
-        a.pos.addScaledVector(tmp, -push);
-        b.pos.addScaledVector(tmp,  push);
+        const push = (min-d)*0.5;
+        a.pos.addScaledVector(tmp, -push); b.pos.addScaledVector(tmp, push);
         tmp2.subVectors(b.vel, a.vel);
         const sep = tmp2.dot(tmp);
         if (sep < 0) {
-          const imp = -(1 + CFG.restitution) * sep / (1 / a.m + 1 / b.m);
-          a.vel.addScaledVector(tmp, -imp / a.m);
-          b.vel.addScaledVector(tmp,  imp / b.m);
+          const imp = -(1+CFG.restitution)*sep/(1/a.m + 1/b.m);
+          a.vel.addScaledVector(tmp, -imp/a.m);
+          b.vel.addScaledVector(tmp,  imp/b.m);
         }
       }
     }
   }
 
-  // rock ↔ crystal
-  for (const c of crystals) {
-    if (c.dead) continue;
-    c.phase += dt;
-    c.group.rotation.y += dt * 0.7;
-    c.body.position.y = Math.sin(c.phase * 1.6) * 0.22;
-    c.light.intensity = 2.2 + Math.sin(c.phase * 3) * 0.5;
+  // ---- walkers
+  let alive = 0;
+  for (const w of walkers) {
+    if (w.dead) continue;
+    alive++;
+    w.cool = Math.max(0, w.cool - dt);
+    w.hitFlash = Math.max(0, w.hitFlash - dt*3);
+
+    tmp.set(hero.pos.x - w.pos.x, 0, hero.pos.z - w.pos.z);
+    const dist = tmp.length();
+    if (dist > 0.01) {
+      tmp.divideScalar(dist);
+      w.pos.addScaledVector(tmp, CFG.zSpeed*dt);
+      w.g.rotation.y = Math.atan2(tmp.x, tmp.z);
+    }
+    w.walk += dt*5.5;
+    // A lurch rather than a walk cycle: sway the whole body, swing the legs
+    // out of phase. Cheap, and it reads as wrong-footed from any distance.
+    w.body.rotation.z = Math.sin(w.walk)*0.13;
+    w.body.position.y = Math.abs(Math.sin(w.walk))*0.07;
+    w.lL.rotation.x =  Math.sin(w.walk)*0.6;
+    w.lR.rotation.x = -Math.sin(w.walk)*0.6;
+    w.aL.rotation.x = -1.45 + Math.sin(w.walk*0.6)*0.12;
+    w.aR.rotation.x = -1.45 - Math.sin(w.walk*0.6)*0.12;
+
+    if (dist < CFG.zReach && w.cool <= 0) {
+      w.cool = CFG.zCooldown;
+      hero.hp -= CFG.zDamage;
+      hero.hurt = 0.5;
+      S.shake = Math.min(1, S.shake + 0.45);
+      el("dmg").classList.add("on");
+      setTimeout(() => el("dmg").classList.remove("on"), 220);
+      updateHUD();
+      if (hero.hp <= 0) { gameOver(); return; }
+    }
+
+    // separate walkers so they don't stack into one body
+    for (const o of walkers) {
+      if (o === w || o.dead) continue;
+      tmp.set(o.pos.x - w.pos.x, 0, o.pos.z - w.pos.z);
+      const d2 = tmp.length();
+      if (d2 > 0 && d2 < 1.4) {
+        tmp.divideScalar(d2).multiplyScalar((1.4-d2)*0.5);
+        w.pos.sub(tmp); o.pos.add(tmp);
+      }
+    }
+
+    // rock impact
     for (const o of rocks) {
-      if (o.pos.distanceTo(c.pos) < o.r + c.r) {
+      if (o.held) continue;
+      tmp.set(o.pos.x - w.pos.x, o.pos.y - 1.2, o.pos.z - w.pos.z);
+      if (tmp.length() < o.r + w.r) {
         const sp = o.vel.length();
-        if (sp > CFG.shatterSpeed && !o.held) {
-          c.dead = true;
-          scene.remove(c.group);
-          burst(c.pos);
-          S.shake = Math.min(0.9, S.shake + 0.5);
-          updateLeft();
-          o.vel.multiplyScalar(0.4);
-        } else if (!o.held) {
-          tmp.subVectors(o.pos, c.pos).normalize();
-          o.pos.copy(c.pos).addScaledVector(tmp, o.r + c.r);
-          const dot = o.vel.dot(tmp);
-          if (dot < 0) o.vel.addScaledVector(tmp, -2 * dot * 0.5);
-          if (sp > 5 && !c.warned) { c.warned = true; toast("Too slow — throw it harder"); }
+        if (sp > CFG.killSpeed) {
+          w.dead = true;
+          scene.remove(w.g);
+          burst(w.pos, 0x6f8f5a);
+          S.kills++;
+          S.shake = Math.min(0.9, S.shake + 0.4);
+          o.vel.multiplyScalar(0.5);
+          updateHUD();
+          break;
+        } else {
+          // Shove it back but do not kill — a slow rock is a nudge.
+          tmp.y = 0; tmp.normalize();
+          w.pos.addScaledVector(tmp, -0.35);
+          w.hitFlash = 1;
+          o.vel.multiplyScalar(0.6);
         }
       }
     }
   }
 
-  // shards
-  for (let i = shards.length - 1; i >= 0; i--) {
-    const s = shards[i];
-    s.vel.y += CFG.gravity * dt;
-    s.mesh.position.addScaledVector(s.vel, dt);
-    s.mesh.rotation.x += s.spin.x * dt;
-    s.mesh.rotation.y += s.spin.y * dt;
-    s.life -= dt;
-    s.mesh.material.opacity = clamp(s.life / s.max, 0, 1);
-    if (s.life <= 0) { scene.remove(s.mesh); s.mesh.material.dispose(); shards.splice(i, 1); }
+  // ---- gibs
+  for (let i = gibs.length-1; i >= 0; i--) {
+    const g = gibs[i];
+    g.vel.y += CFG.gravity*dt;
+    g.mesh.position.addScaledVector(g.vel, dt);
+    if (g.mesh.position.y < 0.15) { g.mesh.position.y = 0.15; g.vel.multiplyScalar(0.4); g.vel.y = Math.abs(g.vel.y)*0.3; }
+    g.mesh.rotation.x += g.spin.x*dt; g.mesh.rotation.y += g.spin.y*dt;
+    g.life -= dt;
+    g.mesh.material.opacity = clamp(g.life/g.max, 0, 1);
+    if (g.life <= 0) { scene.remove(g.mesh); g.mesh.material.dispose(); gibs.splice(i,1); }
   }
 
   S.shake *= 0.88;
 
-  // --- camera
+  // ---- crosshair targeting
+  aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw));
+  let locked = false;
+  for (const w of walkers) {
+    if (w.dead) continue;
+    tmp.set(w.pos.x - hero.pos.x, 0, w.pos.z - hero.pos.z);
+    const d = tmp.length();
+    if (d < 1e-3) continue;
+    if (tmp.divideScalar(d).dot(aimDir) > CFG.aimCone) { locked = true; break; }
+  }
+  el("cross").classList.toggle("lock", locked);
+  el("cross").classList.toggle("armed", S.held.length > 0);
+
+  // ---- camera
   const cd = cam.dist;
-  const cx = hero.pos.x - Math.sin(cam.yaw) * Math.cos(cam.pitch) * cd;
-  const cz = hero.pos.z - Math.cos(cam.yaw) * Math.cos(cam.pitch) * cd;
-  const cy = hero.pos.y + 2.3 + Math.sin(cam.pitch) * cd;
-  camera.position.lerp(tmp.set(cx, cy, cz), Math.min(1, 12 * dt));
+  const cx = hero.pos.x - Math.sin(cam.yaw)*Math.cos(cam.pitch)*cd;
+  const cz = hero.pos.z - Math.cos(cam.yaw)*Math.cos(cam.pitch)*cd;
+  const cy = 3.1 + Math.sin(cam.pitch)*cd;
+  camera.position.lerp(tmp.set(cx, cy, cz), Math.min(1, 12*dt));
   if (S.shake > 0.001) {
     camera.position.x += rand(-S.shake, S.shake);
     camera.position.y += rand(-S.shake, S.shake);
   }
-  camera.lookAt(hero.pos.x, hero.pos.y + 1.7, hero.pos.z);
-
-  sun.position.set(hero.pos.x + 14, 22, hero.pos.z + 10);
+  camera.lookAt(hero.pos.x, 2.9, hero.pos.z);
+  sun.position.set(hero.pos.x+14, 22, hero.pos.z+10);
   sun.target.position.copy(hero.pos);
   sun.target.updateMatrixWorld();
 
-  // --- win
-  if (S.phase === "play" && crystals.every(c => c.dead)) {
-    S.phase = "won";
-    setTimeout(nextLevel, 1100);
+  if (alive === 0 && S.phase === "play") {
+    S.phase = "clear";
+    setTimeout(nextWave, 1200);
   }
 }
 
-function nextLevel() {
-  if (S.level >= LEVELS.length) {
+function nextWave() {
+  S.wave++;
+  if (S.wave > 5) {
     S.phase = "done";
-    el("overlay").classList.remove("hide");
-    el("card").innerHTML =
-      '<h1>Clear</h1><p class="sub">Every crystal shattered</p>' +
-      '<p class="rule">Nothing in the arena was safe from you.</p>' +
-      '<button id="again">Again</button>';
-    el("again").onclick = () => { S.level = 1; start(); };
+    show(`<h1>Survived</h1><p class="sub">5 waves · ${S.kills} put down</p>
+          <p class="rule">Nothing walked away from you.</p>
+          <button id="again">Again</button>`);
+    el("again").onclick = restart;
     return;
   }
-  S.level++;
-  buildLevel(S.level);
+  buildWave(S.wave);
+  hero.hp = Math.min(CFG.maxHealth, hero.hp + 1);
+  updateHUD();
   S.phase = "play";
-  toast("Level " + S.level);
+  toast("Wave " + S.wave);
 }
+
+function gameOver() {
+  S.phase = "dead";
+  show(`<h1>Overrun</h1><p class="sub">Wave ${S.wave} · ${S.kills} put down</p>
+        <p class="rule">They got close enough to touch you.</p>
+        <button id="again">Try again</button>`);
+  el("again").onclick = restart;
+}
+
+function show(html) {
+  el("card").innerHTML = html;
+  el("overlay").classList.remove("hide");
+  el("hud").classList.add("hide");
+  el("touch").classList.add("hide");
+  el("cross").classList.add("hide");
+}
+
+function restart() { S.wave = 1; S.kills = 0; hero.hp = CFG.maxHealth; start(); }
 
 // ─────────────────────────────────────────────────────────── loop
 let last = performance.now();
 function frame(now) {
-  // Clamp dt: a backgrounded tab otherwise resumes with one huge step and
-  // every rock tunnels straight through the floor.
-  const dt = Math.min((now - last) / 1000, 1 / 30);
+  const dt = Math.min((now-last)/1000, 1/30);
   last = now;
-  if (S.phase === "play" || S.phase === "won") step(dt);
+  if (S.phase === "play" || S.phase === "clear") step(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
@@ -4892,10 +4961,12 @@ function start() {
   el("overlay").classList.add("hide");
   el("hud").classList.remove("hide");
   el("touch").classList.remove("hide");
-  buildLevel(S.level);
+  el("cross").classList.remove("hide");
+  buildWave(S.wave);
   S.phase = "play";
   last = performance.now();
-  toast("Hold FORCE near rocks · release to hurl", 3000);
+  resize();
+  toast("Hold FORCE · aim with the crosshair · release", 3200);
 }
 
 el("startBtn").addEventListener("click", start);
