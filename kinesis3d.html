@@ -78,6 +78,31 @@
   }
   @media (prefers-reduced-motion: reduce) { #combo.pop { animation-duration: .5s; } }
 
+  /* ───── upgrade draft ───── */
+  /* The menu card is 430px wide, which forces three upgrades to wrap 2+1.
+     The draft needs its own width. */
+  #card.wide { max-width: 780px; }
+  #draft { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap;
+           justify-content: center; }
+  .upg {
+    flex: 1 1 190px; max-width: 240px; min-height: 132px;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+    padding: 13px 14px; margin: 0; text-align: left;
+    background: rgba(20,17,30,.9); color: var(--ink);
+    border: 1.5px solid rgba(232,228,240,.2); border-radius: 7px;
+    box-shadow: none; cursor: pointer; letter-spacing: 0; text-transform: none;
+    font-family: var(--sans); transition: border-color .14s ease, transform .14s ease;
+  }
+  .upg:hover, .upg:focus-visible {
+    border-color: var(--force); transform: translateY(-3px);
+    box-shadow: 0 0 22px rgba(233,79,191,.3);
+  }
+  .upg .ut { font-family: var(--mono); font-size: 8px; letter-spacing: .2em;
+             text-transform: uppercase; color: var(--force); }
+  .upg b { font-size: 16px; font-weight: 650; }
+  .upg i { font-style: normal; font-size: 12.5px; line-height: 1.5; color: var(--dim); }
+  @media (max-height: 430px) { .upg { min-height: 108px; padding: 10px 11px; } }
+
   /* ───── crosshair ───── */
   #cross {
     position: fixed; left: 50%; top: 50%; width: 46px; height: 46px;
@@ -5139,6 +5164,140 @@ function spawnWalker(type, x, z) {
                  leapT:rand(1,3), vy:0, air:false });
 }
 
+// ─────────────────────────────────────────────────────────── upgrades
+// Every upgrade writes into MOD, and the gameplay code reads MOD. Nothing
+// here special-cases an upgrade by name, so adding one is a table entry.
+const MOD = {
+  singleDmg: 1, burstDmg: 1, allDmg: 1,
+  maxHeld: 0, grabR: 0, focusRegen: 1, hpBonus: 0,
+  berserk: false, gravity: false, voidwell: false,
+  lightning: 0,          // kills between arcs; 0 = off
+  blastR: 1,
+};
+
+const UPGRADES = [
+  { id:"kinetic",  name:"Kinetic Mastery", tag:"Single",
+    desc:"Single-target shots hit 45% harder.",
+    take(){ MOD.singleDmg *= 1.45; } },
+  { id:"swarm",    name:"Swarm",           tag:"Burst",
+    desc:"Carry 3 more objects, and burst throws hit 20% harder.",
+    take(){ MOD.maxHeld += 3; MOD.burstDmg *= 1.2; } },
+  { id:"berserk",  name:"Berserker",       tag:"Risk",
+    desc:"Below 2 health, everything you throw deals double damage.",
+    take(){ MOD.berserk = true; } },
+  { id:"gravity",  name:"Gravity",         tag:"Control",
+    desc:"Impacts drag nearby enemies toward the point of contact.",
+    take(){ MOD.gravity = true; } },
+  { id:"voidwell", name:"Void",            tag:"Control",
+    desc:"Every kill leaves a brief well that pulls the horde together.",
+    take(){ MOD.voidwell = true; } },
+  { id:"storm",    name:"Lightning",       tag:"Chain",
+    desc:"Every 4th kill arcs to three more enemies.",
+    take(){ MOD.lightning = MOD.lightning ? Math.max(2, MOD.lightning-1) : 4; } },
+  { id:"reach",    name:"Long Reach",      tag:"Utility",
+    desc:"Telekinesis reaches 5 metres further.",
+    take(){ MOD.grabR += 5; } },
+  { id:"flow",     name:"Flow State",      tag:"Utility",
+    desc:"Focus recovers 55% faster.",
+    take(){ MOD.focusRegen *= 1.55; } },
+  { id:"hardened", name:"Hardened",        tag:"Defence",
+    desc:"+2 maximum health, and refill now.",
+    take(){ MOD.hpBonus += 2; hero.hp = CFG.maxHealth + MOD.hpBonus; } },
+  { id:"ordnance", name:"Ordnance",        tag:"Explosive",
+    desc:"Every explosion is 40% wider.",
+    take(){ MOD.blastR *= 1.4; } },
+  { id:"heft",     name:"Heft",            tag:"Power",
+    desc:"All thrown objects deal 25% more damage.",
+    take(){ MOD.allDmg *= 1.25; } },
+];
+
+const taken = [];
+
+function offerDraft() {
+  S.phase = "draft";
+  // Three distinct picks, drawn without replacement.
+  const pool = UPGRADES.slice();
+  const picks = [];
+  while (picks.length < 3 && pool.length) {
+    picks.push(pool.splice(Math.floor(Math.random()*pool.length), 1)[0]);
+  }
+  el("card").classList.add("wide");
+  el("card").innerHTML =
+    '<h1 style="font-size:clamp(24px,5vh,38px)">Wave ' + S.wave + ' cleared</h1>' +
+    '<p class="sub">Choose one</p><div id="draft"></div>';
+  const box = el("draft");
+  picks.forEach(u => {
+    const b = document.createElement("button");
+    b.className = "upg";
+    b.innerHTML = '<span class="ut">' + u.tag + '</span><b>' + u.name + '</b><i>' + u.desc + '</i>';
+    b.onclick = () => { u.take(); taken.push(u.id); SFX.pick(); startNextWave(); };
+    box.appendChild(b);
+  });
+  el("overlay").classList.remove("hide");
+  ["hud","touch","cross"].forEach(i => el(i).classList.add("hide"));
+}
+
+// ─────────────────────────────────────────────────────────── audio
+// Synthesised on the fly. The page must stay a single self-contained file,
+// so there are no sample assets — every sound here is an oscillator or a
+// burst of noise shaped by a gain envelope.
+let AC = null, master = null;
+let noiseBuf = null;
+
+function audioInit() {
+  if (AC) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  AC = new Ctx();
+  master = AC.createGain();
+  master.gain.value = 0.55;
+  master.connect(AC.destination);
+  const n = AC.sampleRate * 0.5;
+  noiseBuf = AC.createBuffer(1, n, AC.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random()*2 - 1;
+}
+
+function tone(freq, dur, type, vol, sweepTo) {
+  if (!AC) return;
+  const o = AC.createOscillator(), gn = AC.createGain();
+  o.type = type || "sine";
+  o.frequency.setValueAtTime(freq, AC.currentTime);
+  if (sweepTo) o.frequency.exponentialRampToValueAtTime(Math.max(20,sweepTo), AC.currentTime+dur);
+  gn.gain.setValueAtTime(0.0001, AC.currentTime);
+  gn.gain.exponentialRampToValueAtTime(vol, AC.currentTime + 0.008);
+  gn.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + dur);
+  o.connect(gn); gn.connect(master);
+  o.start(); o.stop(AC.currentTime + dur + 0.02);
+}
+
+function noise(dur, vol, cut, sweepTo) {
+  if (!AC || !noiseBuf) return;
+  const s = AC.createBufferSource(); s.buffer = noiseBuf;
+  const f = AC.createBiquadFilter(); f.type = "lowpass";
+  f.frequency.setValueAtTime(cut, AC.currentTime);
+  if (sweepTo) f.frequency.exponentialRampToValueAtTime(Math.max(80,sweepTo), AC.currentTime+dur);
+  const gn = AC.createGain();
+  gn.gain.setValueAtTime(vol, AC.currentTime);
+  gn.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + dur);
+  s.connect(f); f.connect(gn); gn.connect(master);
+  s.start(); s.stop(AC.currentTime + dur + 0.02);
+}
+
+const SFX = {
+  gather: () => { tone(180, 0.34, "sine", 0.22, 620); noise(0.22, 0.05, 900, 2600); },
+  throw:  () => { noise(0.16, 0.16, 1800, 300); tone(420, 0.12, "triangle", 0.12, 140); },
+  impact: () => { noise(0.13, 0.30, 1500, 220); tone(90, 0.12, "square", 0.13, 45); },
+  weak:   () => { tone(1150, 0.14, "square", 0.16, 1750); },
+  kill:   () => { noise(0.22, 0.26, 700, 120); tone(70, 0.2, "sine", 0.16, 34); },
+  boom:   () => { noise(0.62, 0.5, 2400, 90); tone(58, 0.5, "sine", 0.3, 24);
+                  tone(140, 0.28, "square", 0.14, 40); },
+  hurt:   () => { tone(230, 0.26, "sawtooth", 0.22, 70); noise(0.16, 0.14, 500, 150); },
+  combo:  (n) => tone(520 + Math.min(n,8)*90, 0.14, "triangle", 0.18, 780 + n*70),
+  pick:   () => tone(760, 0.1, "triangle", 0.16, 1150),
+  wave:   () => { tone(300, 0.5, "sine", 0.2, 620); setTimeout(()=>tone(460,0.45,"sine",0.16,760), 130); },
+};
+
 // ─────────────────────────────────────────────────────────── combat
 // Damage scales with how hard the thing was actually travelling, so a
 // lobbed boulder and a hurled one are not the same hit.
@@ -5155,6 +5314,7 @@ function addCombo(n) {
     const tier = S.combo >= 12 ? "UNSTOPPABLE" : S.combo >= 8 ? "RAMPAGE"
                : S.combo >= 5 ? "SLAUGHTER" : S.combo === 4 ? "QUAD" : "TRIPLE";
     banner(tier + "  x" + S.combo);
+    SFX.combo(S.combo);
   }
   updateHUD();
 }
@@ -5177,9 +5337,54 @@ function killWalker(w) {
   if (w.E.onDeath === "blast") queueBlast(w.pos, { r:6.5, dmg:150 }, null);
   S.kills++;
   S.score += (w.E.score || 100) * Math.max(1, S.combo);
+  if (MOD.voidwell) pullToward(w.pos, 8, 16);
+  if (MOD.lightning && S.kills % MOD.lightning === 0) arcLightning(w.pos);
   S.shake = Math.min(0.9, S.shake + 0.35);
+  SFX.kill();
   addCombo(1);
   updateHUD();
+}
+
+// Shared by Gravity and Void: yank everything within reach toward a point.
+function pullToward(pos, r, force) {
+  for (const w of walkers) {
+    if (w.dead) continue;
+    const dx = pos.x-w.pos.x, dz = pos.z-w.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 0.2 && d < r) {
+      const k = force * (1 - d/r) / d;
+      w.kb.x += dx*k; w.kb.z += dz*k;
+    }
+  }
+}
+
+// Lightning hops to the nearest bodies, drawing a bolt at each hop.
+function arcLightning(from) {
+  let src = from.clone();
+  const hit = [];
+  for (let n = 0; n < 3; n++) {
+    let best = null, bd = 16;
+    for (const w of walkers) {
+      if (w.dead || hit.includes(w)) continue;
+      const d = Math.hypot(w.pos.x-src.x, w.pos.z-src.z);
+      if (d < bd) { bd = d; best = w; }
+    }
+    if (!best) break;
+    hit.push(best);
+    bolt(src, best.pos);
+    damageWalker(best, 95, null, 0);
+    src = best.pos.clone();
+  }
+  if (hit.length) { SFX.weak(); banner("ARC x" + hit.length); }
+}
+
+const bolts = [];
+function bolt(a, b2) {
+  const geo = new T.BufferGeometry().setFromPoints([
+    new T.Vector3(a.x, 1.4, a.z), new T.Vector3(b2.x, 1.4, b2.z)]);
+  const m = new T.Line(geo, new T.LineBasicMaterial({ color:0x9ad8ff, transparent:true }));
+  scene.add(m);
+  bolts.push({ mesh:m, life:0.22 });
 }
 
 function damageWalker(w, amount, dir, knock) {
@@ -5230,9 +5435,11 @@ function queueBlast(pos, ex, src) {
 }
 
 function runBlast(b) {
-  const { pos, ex } = b;
+  const { pos } = b;
+  const ex = { r: b.ex.r * MOD.blastR, dmg: b.ex.dmg };
   shell(pos, ex.r, 0xffa542);
   sparks(pos, 0xff8a3c, 14, 22);
+  SFX.boom();
   S.shake = Math.min(1.2, S.shake + 0.7);
 
   let killed = 0;
@@ -5317,6 +5524,7 @@ function clearAll() {
   puddles.forEach(p => scene.remove(p.mesh)); puddles.length = 0;
   shells.forEach(s => { s.life = 0; s.mesh.visible = false; });
   blastQ.length = 0;
+  bolts.forEach(b2 => scene.remove(b2.mesh)); bolts.length = 0;
   S.held = []; S.lock = null; S.combo = 0; S.comboT = 0;
 }
 
@@ -5365,7 +5573,8 @@ function updateHUD() {
   if (th) th.textContent = Object.keys(kinds).length
     ? Object.entries(kinds).map(([k,v]) => k[0]+v).join(" ") : "";
   let h = "";
-  for (let i = 0; i < CFG.maxHealth; i++) h += `<i class="${i < hero.hp ? "" : "off"}"></i>`;
+  const maxHp = CFG.maxHealth + MOD.hpBonus;
+  for (let i = 0; i < maxHp; i++) h += `<i class="${i < hero.hp ? "" : "off"}"></i>`;
   el("hp").innerHTML = h;
   el("carry").textContent = S.held.length;
   const sc = el("score"); if (sc) sc.textContent = S.score;
@@ -5509,12 +5718,13 @@ function pressForce() {
 function gather() {
   if (S.focus < CFG.gatherFloor) { toast("Not enough focus"); return; }
   const near = rocks
-    .filter(o => !o.held && !o.gone && o.seekT <= 0 && o.pos.distanceTo(hero.pos) < CFG.grabRadius)
+    .filter(o => !o.held && !o.gone && o.seekT <= 0 && o.pos.distanceTo(hero.pos) < CFG.grabRadius + MOD.grabR)
     .sort((a,b) => a.pos.distanceTo(hero.pos) - b.pos.distanceTo(hero.pos))
-    .slice(0, CFG.maxHeld);
+    .slice(0, CFG.maxHeld + MOD.maxHeld);
   if (!near.length) { toast("No stones in reach"); return; }
   near.forEach((o,i) => { o.held = true; o.slot = i; o.mesh.material = heldMat; });
   S.held = near;
+  SFX.gather();
   updateHUD();
   updateForceLabel();
 }
@@ -5529,6 +5739,7 @@ function shootOne() {
   // instead of leaving a growing gap where the fired stones used to sit.
   S.held.forEach((s, i) => { s.slot = i; });
   launchSeeker(o);
+  SFX.throw();
   updateHUD();
   updateForceLabel();
 }
@@ -5551,7 +5762,7 @@ function burstAll() {
 
   S.held.forEach((o,i) => {
     o.held = false;
-    o.mult = CFG.burstMul;
+    o.mult = CFG.burstMul * MOD.burstDmg;
     const mark = marks.length ? marks[i % marks.length] : null;
     if (mark) {
       o.mesh.material = seekMat;
@@ -5569,6 +5780,7 @@ function burstAll() {
   });
   S.held = [];
   S.shake = Math.min(0.6, S.shake + 0.35);
+  SFX.throw();
   updateHUD();
   updateForceLabel();
 }
@@ -5579,7 +5791,7 @@ function launchSeeker(o) {
   o.seek = S.lock && !S.lock.dead ? S.lock : nearestInCone();
   o.seekT = o.seek ? CFG.seekTime : 0;
   aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
-  o.mult = CFG.singleMul;
+  o.mult = CFG.singleMul * MOD.singleDmg;
   o.vel.copy(aimDir).multiplyScalar(CFG.throwSpeed*(o.def.speedMul||1))
     .add(new T.Vector3(0, 1.4, 0));
   S.shake = Math.min(0.4, S.shake + 0.1);
@@ -5604,7 +5816,7 @@ function nearestInCone() {
 function step(dt) {
   S.t += dt;
 
-  S.focus = Math.min(1, S.focus + CFG.focusRegen*dt);
+  S.focus = Math.min(1, S.focus + CFG.focusRegen*MOD.focusRegen*dt);
   el("focusFill").style.width = (S.focus*100) + "%";
   el("focusFill").classList.toggle("spent", S.focus < CFG.gatherFloor);
 
@@ -5845,6 +6057,7 @@ function step(dt) {
     if (dist < CFG.zReach && w.cool <= 0 && hero.pos.y < CFG.dodgeHeight) {
       w.cool = CFG.zCooldown;
       hero.hp--;
+      SFX.hurt();
       S.shake = Math.min(1, S.shake+0.45);
       el("dmg").classList.add("on");
       setTimeout(() => el("dmg").classList.remove("on"), 220);
@@ -5879,10 +6092,13 @@ function step(dt) {
           // genuinely harder to hit than a Tank's.
           const hy = o.pos.y / Math.max(0.4, w.E.scale);
           const weak = hy > 1.52 && hy < 2.25;
-          let dmg = o.def.dmg * scale * (o.mult || 1);
-          if (weak) { dmg *= CFG.weakMul; banner("WEAK POINT"); }
+          let dmg = o.def.dmg * scale * (o.mult || 1) * MOD.allDmg;
+          if (MOD.berserk && hero.hp <= 2) dmg *= 2;
+          if (weak) { dmg *= CFG.weakMul; banner("WEAK POINT"); SFX.weak(); }
+          else SFX.impact();
           tmp.y = 0; tmp.normalize();
           damageWalker(w, dmg, tmp, 4.5*(o.def.knock||1));
+          if (MOD.gravity) pullToward(o.pos, 6.5, 13);
           sparks(tmp.set(o.pos.x, weak ? 1.9 : 1.3, o.pos.z),
                  weak ? 0xffd23c : 0xc9b08a, weak ? 12 : 7, weak ? 18 : 13);
           S.shake = Math.min(0.9, S.shake + 0.12);
@@ -5952,6 +6168,13 @@ function step(dt) {
     if (p.life <= 0) { scene.remove(p.mesh); p.mesh.material.dispose(); puddles.splice(i,1); }
   }
 
+  for (let i = bolts.length-1; i >= 0; i--) {
+    const bl = bolts[i];
+    bl.life -= dt;
+    bl.mesh.material.opacity = Math.max(0, bl.life/0.22);
+    if (bl.life <= 0) { scene.remove(bl.mesh); bl.mesh.geometry.dispose(); bolts.splice(i,1); }
+  }
+
   for (const s of shells) {
     if (s.life <= 0) continue;
     s.life -= dt;
@@ -5995,18 +6218,26 @@ function step(dt) {
 }
 
 function nextWave() {
-  S.wave++;
-  if (S.wave > 5) {
+  if (S.wave >= WAVES.length) {
     S.phase = "done";
-    show(`<h1>Survived</h1><p class="sub">5 waves · ${S.kills} put down</p>
+    show(`<h1>Survived</h1><p class="sub">${WAVES.length} waves · ${S.kills} put down · ${S.score} points</p>
           <p class="rule">Nothing walked away from you.</p><button id="again">Again</button>`);
     el("again").onclick = restart;
     return;
   }
+  offerDraft();
+}
+
+function startNextWave() {
+  el("card").classList.remove("wide");
+  S.wave++;
+  el("overlay").classList.add("hide");
+  ["hud","touch","cross"].forEach(i => el(i).classList.remove("hide"));
   buildWave(S.wave);
-  hero.hp = Math.min(CFG.maxHealth, hero.hp+1);
+  hero.hp = Math.min(CFG.maxHealth + MOD.hpBonus, hero.hp+1);
   updateHUD();
   S.phase = "play";
+  SFX.wave();
   toast("Wave " + S.wave);
 }
 
@@ -6023,7 +6254,14 @@ function show(html) {
   ["hud","touch","cross"].forEach(i => el(i).classList.add("hide"));
 }
 
-function restart() { S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0; start(); }
+function restart() {
+  // A run's build does not carry into the next one.
+  Object.assign(MOD, { singleDmg:1, burstDmg:1, allDmg:1, maxHeld:0, grabR:0,
+    focusRegen:1, hpBonus:0, berserk:false, gravity:false, voidwell:false,
+    lightning:0, blastR:1 });
+  taken.length = 0;
+  S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0; start();
+}
 
 // Adaptive quality. Bloom re-renders the scene several times at reduced
 // resolution, which a desktop GPU shrugs off and a weak phone does not.
@@ -6077,7 +6315,9 @@ function start() {
   toast("Tap FORCE to gather · then SHOOT one at a time", 3400);
 }
 
-el("startBtn").addEventListener("click", start);
+// Browsers only allow audio to start from a gesture, so the first tap of
+// the run is where the context is created.
+el("startBtn").addEventListener("click", () => { audioInit(); start(); });
 resize();
 requestAnimationFrame(frame);
 })();
