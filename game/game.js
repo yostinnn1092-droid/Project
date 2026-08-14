@@ -220,9 +220,31 @@ function addObstacle(x, z, r, h, kind) {
   if (kind === "stone") { mesh.position.y = r*0.75; mesh.rotation.set(rand(0,1), rand(0,6), rand(0,1)); }
   mesh.castShadow = mesh.receiveShadow = true;
   scene.add(mesh);
-  obstacles.push({ pos: new T.Vector3(x, 0, z), r, h, mesh });
+  // Cover is destructible: a boulder is not a permanent feature of the map,
+  // it is a thing you can knock down and then have to live without.
+  obstacles.push({ pos: new T.Vector3(x, 0, z), r, h, mesh, kind,
+                   hp: kind === "stone" ? 420 : 300, maxHp: kind === "stone" ? 420 : 300,
+                   dead:false });
 }
 // Cover has to be hittable without becoming a wall between the player and
+function hurtObstacle(ob, amount) {
+  if (ob.dead) return;
+  ob.hp -= amount;
+  // Lean it further as it takes punishment, so the state is readable before
+  // it goes rather than only after.
+  const wear = 1 - Math.max(0, ob.hp)/ob.maxHp;
+  ob.mesh.rotation.z = wear * 0.5 * (ob.kind === "stone" ? 0.4 : 1);
+  if (ob.hp > 0) { sparks(ob.mesh.position, 0xb9b0a2, 6, 12); return; }
+  ob.dead = true;
+  ob.mesh.visible = false;
+  sparks(ob.mesh.position, ob.kind === "stone" ? 0xb9b0a2 : 0x6b4b34, 22, 24);
+  SFX.boom();
+  S.shake = Math.min(1, S.shake + 0.4);
+  banner(ob.kind === "stone" ? "COVER SHATTERED" : "TIMBER");
+  // Falling cover hurts whatever is standing under it.
+  queueBlast(ob.pos, { r: ob.r + 3.4, dmg: 120 }, null);
+}
+
 // the fight. A first pass put 15 obstacles from 0.3x arena radius outward,
 // including boulders the size of a house directly in the firing line; most
 // throws hit scenery and the kill rate collapsed. Fewer, smaller, and held
@@ -457,20 +479,33 @@ const zJaw   = new T.MeshStandardMaterial({ color:0x8a3b32, roughness:0.9 });
 //   onDeath  "blast" detonates when killed
 //   leap     closes distance in bursts instead of a steady walk
 const ENEMIES = {
-  walker:  { name:"Walker",  hp:100, speed:2.05, scale:1.00, bulk:1.00,
+  walker:  { name:"Walker",  code:"WK", hp:100, speed:2.05, scale:1.00, bulk:1.00,
              skin:0x7d8f66, eye:0xff6a30, score:100 },
-  runner:  { name:"Runner",  hp:55,  speed:4.70, scale:0.94, bulk:0.80,
+  runner:  { name:"Runner",  code:"RN", hp:55,  speed:4.70, scale:0.94, bulk:0.80,
              skin:0x93a86a, eye:0xffd23c, score:130 },
-  crawler: { name:"Crawler", hp:45,  speed:3.10, scale:0.58, bulk:1.10,
+  crawler: { name:"Crawler", code:"CR", hp:45,  speed:3.10, scale:0.58, bulk:1.10,
              skin:0x6b7d55, eye:0xff9a30, score:120 },
-  tank:    { name:"Tank",    hp:430, speed:1.25, scale:1.42, bulk:1.45,
+  tank:    { name:"Tank",    code:"TK", hp:430, speed:1.25, scale:1.42, bulk:1.45,
              skin:0x5f6f4b, eye:0xff3c2a, armor:38, score:400 },
-  armored: { name:"Armored", hp:170, speed:1.85, scale:1.10, bulk:1.20,
+  armored: { name:"Armored", code:"AR", hp:170, speed:1.85, scale:1.10, bulk:1.20,
              skin:0x8d94a0, eye:0xff5a3c, armor:62, score:300 },
-  exploder:{ name:"Exploder",hp:70,  speed:2.55, scale:1.05, bulk:1.25,
+  exploder:{ name:"Exploder",code:"EX", hp:70,  speed:2.55, scale:1.05, bulk:1.25,
              skin:0xb06a3c, eye:0xffc23c, onDeath:"blast", score:180 },
-  leaper:  { name:"Leaper",  hp:85,  speed:2.30, scale:0.98, bulk:0.88,
+  leaper:  { name:"Leaper",  code:"LP", hp:85,  speed:2.30, scale:0.98, bulk:0.88,
              skin:0x6f8f7a, eye:0x6affc0, leap:true, score:200 },
+  // A Shield holds a slab in front of it. Anything arriving from the front
+  // is absorbed by the slab, so the answer is to go around it, blow it over,
+  // or drop something on it from above.
+  shield:  { name:"Shield",  code:"SH", hp:150, speed:1.55, scale:1.14, bulk:1.30,
+             skin:0x6d7a86, eye:0xffb03c, shield:{ arc:0.55, hp:320 }, score:340 },
+  // A Spawner is a timer: leave it alone and the arena fills with crawlers.
+  spawner: { name:"Spawner", code:"SP", hp:230, speed:1.10, scale:1.25, bulk:1.50,
+             skin:0x7a5f8a, eye:0xc06aff, spawns:{ every:5.2, type:"crawler", cap:6 },
+             score:450 },
+  // A Warper does what you do. It picks up loose props and throws them back,
+  // which turns your own ammunition supply into a hazard.
+  warper:  { name:"Warper",  code:"WP", hp:120, speed:1.70, scale:1.06, bulk:0.95,
+             skin:0x8a6a9c, eye:0xe94fbf, psy:{ every:4.4, range:22 }, score:380 },
 };
 
 // Waves introduce a mechanic rather than a bigger number. Anything past the
@@ -480,13 +515,13 @@ const WAVES = [
   { walker:4, runner:3 },
   { walker:4, runner:2, crawler:3 },
   { walker:3, runner:3, exploder:2 },
-  { walker:4, runner:3, armored:2 },
-  { walker:4, leaper:3, exploder:2 },
-  { walker:4, runner:4, armored:2, tank:1 },
-  { walker:5, leaper:3, crawler:4, exploder:3 },
-  { runner:6, armored:3, tank:1, leaper:2 },
-  { walker:6, runner:4, armored:3, exploder:3, tank:2 },
-  { boss:1, walker:4, runner:3 },
+  { walker:4, runner:3, shield:2 },
+  { walker:4, leaper:3, exploder:2, armored:1 },
+  { walker:3, runner:4, shield:2, spawner:1 },
+  { walker:4, leaper:3, crawler:4, exploder:3, warper:1 },
+  { runner:6, armored:3, tank:1, leaper:2, warper:2 },
+  { walker:5, shield:3, spawner:2, exploder:3, tank:2 },
+  { boss:1, walker:4, runner:3, shield:2 },
 ];
 
 // The boss is a telekinesis problem, not a health bar: four plates must be
@@ -620,6 +655,33 @@ function spawnWalker(type, x, z) {
     });
   }
 
+  // Each new archetype needs a silhouette, not just a statline — you have to
+  // be able to tell what is walking at you before it reaches you.
+  let slab = null;
+  if (EE.shield) {
+    slab = new T.Mesh(new T.BoxGeometry(1.5, 1.7, 0.22),
+      new T.MeshStandardMaterial({ color:0x9aa3ad, roughness:0.72, flatShading:true }));
+    slab.position.set(0, 1.15, 0.72);
+    slab.castShadow = true;
+    body.add(slab);
+  }
+  if (EE.spawns) {
+    // A lit spine: the thing on it is what keeps producing crawlers.
+    const spine = new T.Mesh(new T.ConeGeometry(0.34, 1.5, 6),
+      new T.MeshStandardMaterial({ color:0xc06aff, emissive:0xc06aff,
+                                   emissiveIntensity:1.2, flatShading:true }));
+    spine.position.set(0, 2.15, -0.1);
+    body.add(spine);
+  }
+  if (EE.psy) {
+    const halo = new T.Mesh(new T.TorusGeometry(0.62, 0.07, 6, 16),
+      new T.MeshStandardMaterial({ color:0xe94fbf, emissive:0xe94fbf,
+                                   emissiveIntensity:1.4, flatShading:true }));
+    halo.rotation.x = Math.PI/2;
+    halo.position.y = 2.4;
+    body.add(halo);
+  }
+
   g.position.set(x,0,z);
   g.scale.setScalar(EE.scale * rand(0.94, 1.06));
   if (elite) {
@@ -639,6 +701,9 @@ function spawnWalker(type, x, z) {
                  walk:rand(0,6), dead:false, cool:0,
                  hp:EE.hp, maxHp:EE.hp, flash:0, kb:new T.Vector3(),
                  leapT:rand(1,3), vy:0, air:false,
+                 slab, slabHp: EE.shield ? EE.shield.hp : 0,
+                 spawnT: EE.spawns ? rand(2.5, EE.spawns.every) : 0,
+                 psyT: EE.psy ? rand(2, EE.psy.every) : 0, brood:0,
                  thrown:0, tvel:new T.Vector3() });
 }
 
@@ -1207,6 +1272,31 @@ function damageWalker(w, amount, dir, knock, kind) {
     w.flash = 1;
     return;                      // body damage is absorbed entirely
   }
+  // A Shield eats anything arriving through its front arc. Blasts wrap round
+  // it and a body dropped on it from above misses the slab entirely, so the
+  // counters are flanking, explosives, and launching something at it — not
+  // simply more damage.
+  if (w.slab && w.slabHp > 0 && dir && kind !== "blast" && kind !== "chem") {
+    // dir is built at the impact site as (prop - walker) normalised, so it
+    // points from the body back toward where the hit came from. The slab is
+    // on the body's facing side, so a frontal hit is a POSITIVE dot with the
+    // facing vector — an earlier negation here had the slab blocking hits
+    // that arrived from behind and passing everything that hit the front.
+    const facx = Math.sin(w.g.rotation.y), facz = Math.cos(w.g.rotation.y);
+    if (dir.x*facx + dir.z*facz > w.E.shield.arc) {
+      w.slabHp -= amount;
+      w.flash = 1;
+      sparks(tmp3.set(w.pos.x, 1.4, w.pos.z), 0xaab4c4, 6, 12);
+      SFX.impact(2.4, 1.1);
+      if (w.slabHp <= 0) {
+        w.slab.visible = false;
+        banner("SHIELD BROKEN");
+        S.freeze = Math.max(S.freeze, 0.1);
+        sparks(w.pos, 0xaab4c4, 18, 22);
+      }
+      return;                    // the slab took it, the body did not
+    }
+  }
   // IRON TIDE plates everything but hands blasts a way through it, so the
   // wave has an answer rather than just being slower.
   const ar = (WMOD.blastPierce && kind === "blast") ? 0 : (w.E.armor || 0);
@@ -1289,6 +1379,13 @@ function runBlast(b) {
       if (o.def.explode && o !== b.src) detonate(o);
     }
   }
+  // Cover is in the blast radius too. A barrel chain does not just clear
+  // bodies, it rearranges the map you are fighting on.
+  for (const ob of obstacles) {
+    if (ob.dead) continue;
+    const d = Math.hypot(ob.pos.x-pos.x, ob.pos.z-pos.z);
+    if (d < ex.r + ob.r) hurtObstacle(ob, ex.dmg * (1 - d/(ex.r+ob.r)) * 1.4);
+  }
   if (killed >= 2) banner("CHAIN x" + killed);
 }
 
@@ -1354,6 +1451,19 @@ function clearAll() {
   bolts.forEach(b2 => scene.remove(b2.mesh)); bolts.length = 0;
   tethers.forEach(t2 => { t2.visible = false; });
   S.held = []; S.lock = null; S.combo = 0; S.comboT = 0;
+  resetObstacles();
+}
+
+// Cover destroyed during a wave stays destroyed for that wave; a new wave is
+// a new patch of woods. Restoring rather than respawning keeps the instanced
+// meshes and the obstacle list stable across a whole run.
+function resetObstacles() {
+  for (const ob of obstacles) {
+    ob.dead = false;
+    ob.hp = ob.maxHp;
+    ob.mesh.visible = true;
+    ob.mesh.rotation.z = 0;
+  }
 }
 
 function buildWave(n) {
@@ -1407,8 +1517,14 @@ function buildWave(n) {
 function updateHUD() {
   const alive = walkers.filter(w => !w.dead);
   el("left").textContent = alive.length;
+  // Two-letter codes, because first letters collide (Shield/Spawner,
+  // Exploder/Elite) and the roll-call is useless if you cannot read it.
   const kinds = {};
-  alive.forEach(w => { kinds[w.E.name] = (kinds[w.E.name]||0)+1; });
+  alive.forEach(w => {
+    if (w.boss) { kinds["BOSS"] = (kinds["BOSS"]||0)+1; return; }
+    const c = (w.E.code || w.E.name.slice(0,2).toUpperCase()) + (w.elite ? "*" : "");
+    kinds[c] = (kinds[c]||0)+1;
+  });
   const bw = walkers.find(w => w.boss && !w.dead);
   const bb = el("bossBar");
   if (bb) {
@@ -1424,7 +1540,8 @@ function updateHUD() {
   }
   const th = el("threat");
   if (th) th.textContent = Object.keys(kinds).length
-    ? Object.entries(kinds).map(([k,v]) => k[0]+v).join(" ") : "";
+    ? Object.entries(kinds).sort((a,b) => b[1]-a[1]).slice(0, 5)
+        .map(([k,v]) => k+v).join(" ") : "";
   let h = "";
   const maxHp = CFG.maxHealth + MOD.hpBonus;
   for (let i = 0; i < maxHp; i++) h += `<i class="${i < hero.hp ? "" : "off"}"></i>`;
@@ -1957,7 +2074,7 @@ function step(dt) {
     }
     // prop vs solid cover
     for (const ob of obstacles) {
-      if (o.pos.y > ob.h + o.r) continue;
+      if (ob.dead || o.pos.y > ob.h + o.r) continue;
       const dx = o.pos.x-ob.pos.x, dz = o.pos.z-ob.pos.z;
       const dd = Math.hypot(dx, dz), min2 = ob.r + o.r;
       if (dd > 0 && dd < min2) {
@@ -1973,6 +2090,7 @@ function step(dt) {
             if (o.def.puddle)  { spill(o);    break; }
             sparks(o.pos, 0xb9b0a2, 5, 11);
             SFX.impact(o.def.mass, 0.7);
+            hurtObstacle(ob, sp2 * o.def.mass * 1.6);
           }
         }
       }
@@ -2071,6 +2189,48 @@ function step(dt) {
       w.g.rotation.y = Math.atan2(tmp.x, tmp.z);
     }
 
+    // A Spawner is a clock. Ignore it and the arena fills; the cap keeps a
+    // long wave from becoming unwinnable rather than merely urgent.
+    if (w.E.spawns && !w.thrown) {
+      w.spawnT -= dt;
+      if (w.spawnT <= 0) {
+        w.spawnT = w.E.spawns.every;
+        if (w.brood < w.E.spawns.cap) {
+          w.brood++;
+          const a2 = rand(0, Math.PI*2);
+          spawnWalker(w.E.spawns.type, w.pos.x + Math.cos(a2)*2.2,
+                                        w.pos.z + Math.sin(a2)*2.2);
+          sparks(tmp3.set(w.pos.x, 2.1, w.pos.z), 0xc06aff, 10, 14);
+          SFX.gather(0.6);
+          updateHUD();
+        }
+      }
+    }
+
+    // A Warper throws your own ammunition back at you. It reuses the exact
+    // hostile-prop path the boss uses, so a returned rock behaves the same
+    // way and can be shot out of the air or simply dodged.
+    if (w.E.psy && !w.thrown && dist < w.E.psy.range) {
+      w.psyT -= dt;
+      if (w.psyT <= 0) {
+        w.psyT = w.E.psy.every;
+        let pick = null, bd = 13;
+        for (const o of rocks) {
+          if (o.held || o.gone || o.hostile) continue;
+          const d2 = o.pos.distanceTo(w.pos);
+          if (d2 < bd && d2 > 1.2) { bd = d2; pick = o; }
+        }
+        if (pick) {
+          tmp2.set(hero.pos.x-pick.pos.x, 2.0, hero.pos.z-pick.pos.z).normalize();
+          pick.vel.copy(tmp2).multiplyScalar(30);
+          pick.hostile = 1.8;
+          pick.mesh.material = seekMat;
+          sparks(tmp3.set(w.pos.x, 2.3, w.pos.z), 0xe94fbf, 8, 12);
+          SFX.throw(0.8);
+        }
+      }
+    }
+
     if (w.boss) {
       // Core only lights, and only becomes vulnerable, once stripped.
       w.glow.intensity = w.platesLeft ? 0 : 5 + Math.sin(S.t*6)*2.5;
@@ -2118,7 +2278,7 @@ function step(dt) {
         if (sp3 > LAUNCH_MIN) {
           let stop = false;
           for (const ob of obstacles) {
-            if (w.pos.y > ob.h) continue;
+            if (ob.dead || w.pos.y > ob.h) continue;
             const dd = Math.hypot(w.pos.x-ob.pos.x, w.pos.z-ob.pos.z);
             if (dd < ob.r + w.r) {
               w.tvel.multiplyScalar(-0.25);
@@ -2126,6 +2286,7 @@ function step(dt) {
               sparks(w.pos, 0x8a5a4a, 10, 16);
               SFX.impact(2.6, 1.3);
               S.shake = Math.min(1, S.shake + 0.3);
+              hurtObstacle(ob, sp3 * 5);
               banner("SLAMMED");
               stop = true;
               break;
