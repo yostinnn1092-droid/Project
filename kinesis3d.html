@@ -5085,7 +5085,7 @@ function spawnObject(key, x, z) {
     spin: new T.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)),
     m: def.mass * r*r*r * 3.4,
     held:false, slot:0, seek:null, seekT:0, pierced:0, gone:false, restT:0, mult:1,
-    hostile:0,
+    hostile:0, grabT:0, boostT:0, boostTo:0, launchDir:new T.Vector3(0,0,1),
   });
 }
 
@@ -5398,10 +5398,25 @@ function noise(dur, vol, cut, sweepTo) {
   s.start(); s.stop(AC.currentTime + dur + 0.02);
 }
 
+// Pitch scales with 1/sqrt(mass) and duration with mass, which is roughly
+// how real objects behave: a plank ticks, a boulder thuds. Everything that
+// takes a mass argument defaults to 1 so old call sites still work.
 const SFX = {
-  gather: () => { tone(180, 0.34, "sine", 0.22, 620); noise(0.22, 0.05, 900, 2600); },
-  throw:  () => { noise(0.16, 0.16, 1800, 300); tone(420, 0.12, "triangle", 0.12, 140); },
-  impact: () => { noise(0.13, 0.30, 1500, 220); tone(90, 0.12, "square", 0.13, 45); },
+  gather: (m=1) => {
+    const p = 1/Math.sqrt(m);
+    tone(150*p, 0.28+0.12*m, "sine", 0.2, 560*p);
+    noise(0.2, 0.045+0.02*m, 800*p, 2400*p);
+  },
+  throw:  (m=1) => {
+    const p = 1/Math.sqrt(m);
+    noise(0.14+0.06*m, 0.15+0.05*m, 1700*p, 260);
+    tone(380*p, 0.11+0.05*m, "triangle", 0.12, 130*p);
+  },
+  impact: (m=1, hard=1) => {
+    const p = 1/Math.sqrt(m);
+    noise(0.11+0.07*m, Math.min(0.5, 0.26*hard*Math.sqrt(m)), 1400*p, 200);
+    tone(95*p, 0.10+0.07*m, "square", 0.12*Math.sqrt(m), 42*p);
+  },
   weak:   () => { tone(1150, 0.14, "square", 0.16, 1750); },
   kill:   () => { noise(0.22, 0.26, 700, 120); tone(70, 0.2, "sine", 0.16, 34); },
   boom:   () => { noise(0.62, 0.5, 2400, 90); tone(58, 0.5, "sine", 0.3, 24);
@@ -5490,6 +5505,33 @@ function arcLightning(from) {
     src = best.pos.clone();
   }
   if (hit.length) { SFX.weak(); banner("ARC x" + hit.length); }
+}
+
+// Tether pool. One reusable line per carry slot — a link the player can see
+// is the clearest possible "this object is under my control" signal.
+const tethers = [];
+for (let i = 0; i < 12; i++) {
+  const geo = new T.BufferGeometry().setFromPoints([new T.Vector3(), new T.Vector3()]);
+  const m = new T.Line(geo, new T.LineBasicMaterial({
+    color: 0xe94fbf, transparent: true, opacity: 0 }));
+  m.frustumCulled = false;
+  m.visible = false;
+  scene.add(m);
+  tethers.push(m);
+}
+function updateTethers() {
+  const n = S.held.length;
+  for (let i = 0; i < tethers.length; i++) {
+    const t2 = tethers[i], o = S.held[i];
+    if (!o) { t2.visible = false; continue; }
+    const p = t2.geometry.attributes.position;
+    p.setXYZ(0, hero.pos.x, hero.pos.y + 1.85, hero.pos.z);
+    p.setXYZ(1, o.pos.x, o.pos.y, o.pos.z);
+    p.needsUpdate = true;
+    t2.visible = true;
+    // Fresh grabs flare, then settle to a steady thread.
+    t2.material.opacity = 0.2 + 0.5*Math.max(0, o.grabT||0) + 0.06*Math.sin(S.t*9 + i);
+  }
 }
 
 const bolts = [];
@@ -5657,6 +5699,7 @@ function clearAll() {
   shells.forEach(s => { s.life = 0; s.mesh.visible = false; });
   blastQ.length = 0;
   bolts.forEach(b2 => scene.remove(b2.mesh)); bolts.length = 0;
+  tethers.forEach(t2 => { t2.visible = false; });
   S.held = []; S.lock = null; S.combo = 0; S.comboT = 0;
 }
 
@@ -5900,9 +5943,20 @@ function gather() {
     .sort((a,b) => a.pos.distanceTo(hero.pos) - b.pos.distanceTo(hero.pos))
     .slice(0, CFG.maxHeld + MOD.maxHeld);
   if (!near.length) { toast("No stones in reach"); return; }
-  near.forEach((o,i) => { o.held = true; o.slot = i; o.mesh.material = heldMat; });
+  let heaviest = 0;
+  near.forEach((o,i) => {
+    o.held = true; o.slot = i; o.mesh.material = heldMat;
+    // Snap it off the floor so the grab reads as a yank rather than a fade.
+    // Kept small and capped: the carry spring has to stay dominant, and an
+    // earlier value of 7/mass flung light props clean over the treeline.
+    o.vel.y += Math.min(3.2, 2.0 / Math.max(0.7, o.def.mass));
+    o.grabT = 0.5;
+    sparks(tmp.set(o.pos.x, o.pos.y*0.4, o.pos.z), 0xe94fbf, 4, 7);
+    heaviest = Math.max(heaviest, o.def.mass);
+  });
   S.held = near;
-  SFX.gather();
+  SFX.gather(heaviest);
+  S.shake = Math.min(0.4, S.shake + 0.06*heaviest);
   updateHUD();
   updateForceLabel();
 }
@@ -5917,7 +5971,7 @@ function shootOne() {
   // instead of leaving a growing gap where the fired stones used to sit.
   S.held.forEach((s, i) => { s.slot = i; });
   launchSeeker(o);
-  SFX.throw();
+  SFX.throw(o.def.mass);
   updateHUD();
   updateForceLabel();
 }
@@ -5941,6 +5995,7 @@ function burstAll() {
   S.held.forEach((o,i) => {
     o.held = false;
     o.mult = CFG.burstMul * MOD.burstDmg;
+    o.boostT = 0.12; o.boostTo = CFG.throwSpeed*(o.def.speedMul||1);
     const mark = marks.length ? marks[i % marks.length] : null;
     if (mark) {
       o.mesh.material = seekMat;
@@ -5958,7 +6013,7 @@ function burstAll() {
   });
   S.held = [];
   S.shake = Math.min(0.6, S.shake + 0.35);
-  SFX.throw();
+  SFX.throw(S.held.length ? 1.4 : 1);
   updateHUD();
   updateForceLabel();
 }
@@ -5970,8 +6025,14 @@ function launchSeeker(o) {
   o.seekT = o.seek ? CFG.seekTime : 0;
   aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
   o.mult = CFG.singleMul * MOD.singleDmg;
-  o.vel.copy(aimDir).multiplyScalar(CFG.throwSpeed*(o.def.speedMul||1))
-    .add(new T.Vector3(0, 1.4, 0));
+  // Leave the hand under full speed and keep accelerating for a beat. The
+  // object moves on the same frame the button is pressed — no input delay —
+  // but it visibly winds up instead of popping to terminal velocity.
+  const full = CFG.throwSpeed*(o.def.speedMul||1);
+  o.launchDir = aimDir.clone();
+  o.boostT = 0.16;
+  o.boostTo = full;
+  o.vel.copy(aimDir).multiplyScalar(full*0.55).add(new T.Vector3(0, 1.4, 0));
   S.shake = Math.min(0.4, S.shake + 0.1);
 }
 
@@ -6107,7 +6168,13 @@ function step(dt) {
       // snaps to it. The carry itself communicates what you picked up.
       o.vel.addScaledVector(tmp.sub(o.pos), (CFG.liftSpring/Math.max(0.6,o.def.mass))*dt);
       o.vel.multiplyScalar(1 - Math.min(1, CFG.liftDamp*dt));
-      o.spin.set(2.2,3.1,1.4);
+      // Buzz under the field: light things jitter fast, heavy things wallow.
+      // Costs nothing and sells "this is being held by force, not carried".
+      const buzz = 0.9 / Math.max(0.5, o.def.mass);
+      o.vel.x += Math.sin(S.t*23*buzz + o.slot)*buzz*0.9*dt*60*0.016;
+      o.vel.z += Math.cos(S.t*19*buzz + o.slot*2)*buzz*0.9*dt*60*0.016;
+      o.spin.set(2.2*buzz, 3.1*buzz, 1.4*buzz);
+      if (o.grabT > 0) o.grabT -= dt;
     } else if (o.seekT > 0) {
       // Guided flight: bend the velocity toward the mark at a fixed turn
       // rate, keeping speed. Moderate rate, so a late lock can still miss.
@@ -6134,6 +6201,12 @@ function step(dt) {
       if (o.seekT <= 0) o.mesh.material = matFor(o.key, o.def);
     } else {
       o.vel.y += CFG.gravity*dt;
+    }
+    // Launch ramp: push along the original throw direction until up to speed.
+    if (o.boostT > 0) {
+      o.boostT -= dt;
+      const cur = o.vel.length();
+      if (cur < o.boostTo) o.vel.addScaledVector(o.launchDir, (o.boostTo - cur) * 9 * dt);
     }
     o.pos.addScaledVector(o.vel, dt);
 
@@ -6326,14 +6399,18 @@ function step(dt) {
           const weak = hy > 1.52 && hy < 2.25;
           let dmg = o.def.dmg * scale * (o.mult || 1) * MOD.allDmg;
           if (MOD.berserk && hero.hp <= 2) dmg *= 2;
+          const hardness = Math.min(1.8, scale) * Math.sqrt(o.def.mass);
           if (weak) { dmg *= CFG.weakMul; banner("WEAK POINT"); SFX.weak(); }
-          else SFX.impact();
+          else SFX.impact(o.def.mass, Math.min(1.6, scale));
           tmp.y = 0; tmp.normalize();
           damageWalker(w, dmg, tmp, 4.5*(o.def.knock||1));
           if (MOD.gravity) pullToward(o.pos, 6.5, 13);
           sparks(tmp.set(o.pos.x, weak ? 1.9 : 1.3, o.pos.z),
-                 weak ? 0xffd23c : 0xc9b08a, weak ? 12 : 7, weak ? 18 : 13);
-          S.shake = Math.min(0.9, S.shake + 0.12);
+                 weak ? 0xffd23c : 0xc9b08a,
+                 Math.round((weak ? 12 : 7) * Math.min(2, o.def.mass)),
+                 (weak ? 18 : 13) * Math.min(1.6, Math.sqrt(o.def.mass)));
+          // A boulder should punch the camera harder than a plank.
+          S.shake = Math.min(0.9, S.shake + 0.07*hardness);
 
           o.pierced++;
           if (o.pierced > (o.def.pierce || 0)) {
@@ -6420,6 +6497,8 @@ function step(dt) {
     S.comboT -= dt;
     if (S.comboT <= 0 && S.combo) { S.combo = 0; updateHUD(); }
   }
+
+  updateTethers();
 
   motes.rotation.y += dt*0.012;
   motes.position.y = Math.sin(S.t*0.25)*0.4;
