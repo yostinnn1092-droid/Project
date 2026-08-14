@@ -55,6 +55,9 @@
                transition: width .08s linear; }
   #focusFill.spent { background: linear-gradient(90deg, #5A2020, #C4443A); }
 
+  /* compact roll-call of what is still standing: W3 R2 T1 */
+  #threat { display:block; font-family: var(--mono); font-size: 8.5px;
+            letter-spacing: .1em; color: var(--dim); margin-top: 1px; }
   #comboWrap .val { color: var(--dim); transition: color .15s ease; }
   #comboWrap.hot .val { color: var(--blood); text-shadow: 0 0 10px rgba(255,90,60,.7); }
 
@@ -267,7 +270,9 @@
   <div class="chip"><span class="lbl">Carry</span><span class="val" id="carry">0</span></div>
   <div class="chip" id="comboWrap"><span class="lbl">Combo</span><span class="val" id="comboVal">x1</span></div>
   <div class="chip" id="scoreChip"><span class="lbl">Score</span><span class="val" id="score">0</span></div>
-  <div class="chip"><span class="lbl">Walkers</span><span class="val" id="left">0</span></div>
+  <div class="chip"><span class="lbl">Threat</span>
+    <span class="val" id="left">0</span>
+    <span id="threat"></span></div>
 </div>
 
 <div id="cross" class="hide"><i></i><i></i><i></i><i></i><u></u></div>
@@ -307,6 +312,10 @@
        other off, <b>chem</b> leaves a burning pool, <b>boulders</b> hit like a truck but haul slowly,
        <b>planks</b> and <b>girders</b> punch straight through a line of them.</p>
     <p class="rule">Kill fast to build a <em>combo</em>. Chains and multi-kills score hardest.</p>
+    <p class="rule"><b>Single</b> is one heavy guided shot — head hits double it.
+       <b>Burst</b> locks a different target per stone but each lands softer.</p>
+    <p class="rule">Runners are fast and frail. <em>Armored</em> and <em>Tanks</em> shrug off rocks —
+       use boulders, girders or barrels. <em>Exploders</em> detonate when they die.</p>
     <p class="rule" style="margin-top:12px;font-size:11px;opacity:.7">
        Keyboard — WASD move · Space jump · Shift dash · F fire · Q mode</p>
     <button id="startBtn">Begin</button>
@@ -4678,6 +4687,10 @@ const CFG = {
   zCooldown:    1.15,
   maxHealth:    5,
   aimCone:      0.972,
+  singleMul:    1.4,     // precision bonus: one deliberate, heavy shot
+  burstMul:     0.6,     // each burst projectile hits softer, but spreads
+  weakMul:      2.0,     // head hit
+  burstCone:    0.72,    // how wide burst will spread to find separate marks
 };
 
 const el = id => document.getElementById(id);
@@ -5010,7 +5023,7 @@ function spawnObject(key, x, z) {
     pos: new T.Vector3(x, r, z), vel: new T.Vector3(),
     spin: new T.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)),
     m: def.mass * r*r*r * 3.4,
-    held:false, slot:0, seek:null, seekT:0, pierced:0, gone:false, restT:0,
+    held:false, slot:0, seek:null, seekT:0, pierced:0, gone:false, restT:0, mult:1,
   });
 }
 
@@ -5020,9 +5033,49 @@ const zRag   = new T.MeshStandardMaterial({ color:0x3d3a2e, roughness:1.0, flatS
                                             side:T.DoubleSide });
 const zEye   = new T.MeshBasicMaterial({ color:0xff6a30 });
 const zJaw   = new T.MeshStandardMaterial({ color:0x8a3b32, roughness:0.9 });
+// Archetypes are a table for the same reason objects are: a new enemy
+// should be an entry, not a new branch in the AI loop.
+//
+//   armor    flat reduction applied BEFORE hp loss; heavy props punch it,
+//            light ones bounce off — this is what makes prop choice matter
+//   onDeath  "blast" detonates when killed
+//   leap     closes distance in bursts instead of a steady walk
+const ENEMIES = {
+  walker:  { name:"Walker",  hp:100, speed:2.05, scale:1.00, bulk:1.00,
+             skin:0x7d8f66, eye:0xff6a30, score:100 },
+  runner:  { name:"Runner",  hp:55,  speed:4.70, scale:0.94, bulk:0.80,
+             skin:0x93a86a, eye:0xffd23c, score:130 },
+  crawler: { name:"Crawler", hp:45,  speed:3.10, scale:0.58, bulk:1.10,
+             skin:0x6b7d55, eye:0xff9a30, score:120 },
+  tank:    { name:"Tank",    hp:430, speed:1.25, scale:1.42, bulk:1.45,
+             skin:0x5f6f4b, eye:0xff3c2a, armor:38, score:400 },
+  armored: { name:"Armored", hp:170, speed:1.85, scale:1.10, bulk:1.20,
+             skin:0x8d94a0, eye:0xff5a3c, armor:62, score:300 },
+  exploder:{ name:"Exploder",hp:70,  speed:2.55, scale:1.05, bulk:1.25,
+             skin:0xb06a3c, eye:0xffc23c, onDeath:"blast", score:180 },
+  leaper:  { name:"Leaper",  hp:85,  speed:2.30, scale:0.98, bulk:0.88,
+             skin:0x6f8f7a, eye:0x6affc0, leap:true, score:200 },
+};
+
+// Waves introduce a mechanic rather than a bigger number. Anything past the
+// table repeats the last row with a scaling multiplier.
+const WAVES = [
+  { walker:5 },
+  { walker:4, runner:3 },
+  { walker:4, runner:2, crawler:3 },
+  { walker:3, runner:3, exploder:2 },
+  { walker:4, runner:3, armored:2 },
+  { walker:4, leaper:3, exploder:2 },
+  { walker:4, runner:4, armored:2, tank:1 },
+  { walker:5, leaper:3, crawler:4, exploder:3 },
+  { runner:6, armored:3, tank:1, leaper:2 },
+  { walker:6, runner:4, armored:3, exploder:3, tank:2 },
+];
+
 const walkers = [];
 
-function spawnWalker(x, z) {
+function spawnWalker(type, x, z) {
+  const E = ENEMIES[type] || ENEMIES.walker;
   const g = new T.Group(), body = new T.Group();
   g.add(body);
 
@@ -5033,13 +5086,16 @@ function spawnWalker(x, z) {
   torso.rotation.x = 0.34;
   body.add(torso);
 
-  torso.add(part(new T.CylinderGeometry(0.24, 0.33, 0.78, 7), zRot, 0, 0.34, 0));
+  const skinM = new T.MeshStandardMaterial({ color:E.skin, roughness:1, flatShading:true });
+  const eyeM  = new T.MeshBasicMaterial({ color:E.eye });
+  const B = E.bulk;
+  torso.add(part(new T.CylinderGeometry(0.24*B, 0.33*B, 0.78, 7), zRot, 0, 0.34, 0));
   // Ragged shirt hanging off the frame, open at the bottom.
-  const rag = part(new T.CylinderGeometry(0.36, 0.50, 0.72, 7, 1, true), zRag, 0, 0.20, 0);
+  const rag = part(new T.CylinderGeometry(0.36*B, 0.50*B, 0.72, 7, 1, true), zRag, 0, 0.20, 0);
   torso.add(rag);
   // Ribs showing through: two thin bands, cheap but grim.
-  torso.add(part(new T.BoxGeometry(0.40, 0.045, 0.30), zSkin, 0, 0.46, 0.06));
-  torso.add(part(new T.BoxGeometry(0.36, 0.045, 0.28), zSkin, 0, 0.36, 0.07));
+  torso.add(part(new T.BoxGeometry(0.40*B, 0.045, 0.30), skinM, 0, 0.46, 0.06));
+  torso.add(part(new T.BoxGeometry(0.36*B, 0.045, 0.28), skinM, 0, 0.36, 0.07));
 
   // Head lolls to one side.
   const neck = new T.Group();
@@ -5047,19 +5103,19 @@ function spawnWalker(x, z) {
   neck.rotation.z = rand(-0.35, 0.35);
   neck.rotation.x = -0.2;
   torso.add(neck);
-  const skull = part(new T.SphereGeometry(0.225, 12, 9), zSkin, 0, 0.1, 0);
+  const skull = part(new T.SphereGeometry(0.225, 12, 9), skinM, 0, 0.1, 0);
   skull.scale.set(0.92, 1.06, 1.05);
   neck.add(skull);
   neck.add(part(new T.BoxGeometry(0.22, 0.11, 0.13), zJaw, 0, -0.01, 0.17));  // slack jaw
-  neck.add(part(new T.SphereGeometry(0.05, 8, 6), zEye, -0.095, 0.14, 0.19));
-  neck.add(part(new T.SphereGeometry(0.05, 8, 6), zEye,  0.095, 0.14, 0.19));
+  neck.add(part(new T.SphereGeometry(0.05, 8, 6), eyeM, -0.095, 0.14, 0.19));
+  neck.add(part(new T.SphereGeometry(0.05, 8, 6), eyeM,  0.095, 0.14, 0.19));
 
   // Long reaching arms with clawed hands.
   function zLimb(parent, len, px, py, rad) {
     const pv = new T.Group();
     pv.position.set(px, py, 0);
-    pv.add(part(new T.CapsuleGeometry(rad, len, 4, 7), zSkin, 0, -len/2-0.04, 0));
-    const hand = part(new T.ConeGeometry(rad*1.7, rad*3.2, 5), zSkin, 0, -len-0.14, 0);
+    pv.add(part(new T.CapsuleGeometry(rad, len, 4, 7), skinM, 0, -len/2-0.04, 0));
+    const hand = part(new T.ConeGeometry(rad*1.7, rad*3.2, 5), skinM, 0, -len-0.14, 0);
     hand.rotation.x = Math.PI;
     pv.add(hand);
     parent.add(pv);
@@ -5074,11 +5130,13 @@ function spawnWalker(x, z) {
   const lR = zLimb(body, 0.62,  0.15, 1.00, 0.10);
 
   g.position.set(x,0,z);
-  g.scale.setScalar(rand(0.92, 1.12));   // a crowd of identical models reads as clones
+  g.scale.setScalar(E.scale * rand(0.94, 1.06));
   scene.add(g);
-  walkers.push({ g, body, torso, aL, aR, lL, lR, pos:g.position, r:0.75,
+  walkers.push({ g, body, torso, aL, aR, lL, lR, pos:g.position,
+                 type, E, r:0.75*E.scale,
                  walk:rand(0,6), dead:false, cool:0,
-                 hp:100, maxHp:100, flash:0, kb:new T.Vector3() });
+                 hp:E.hp, maxHp:E.hp, flash:0, kb:new T.Vector3(),
+                 leapT:rand(1,3), vy:0, air:false });
 }
 
 // ─────────────────────────────────────────────────────────── combat
@@ -5113,9 +5171,12 @@ function killWalker(w) {
   if (w.dead) return;
   w.dead = true;
   scene.remove(w.g);
-  burst(w.pos, 0x5d7a4a);
+  burst(w.pos, w.E.skin);
+  // An Exploder is a delivery mechanism: killing one near a crowd is the
+  // point, and killing one next to a barrel is better.
+  if (w.E.onDeath === "blast") queueBlast(w.pos, { r:6.5, dmg:150 }, null);
   S.kills++;
-  S.score += 100 * Math.max(1, S.combo);
+  S.score += (w.E.score || 100) * Math.max(1, S.combo);
   S.shake = Math.min(0.9, S.shake + 0.35);
   addCombo(1);
   updateHUD();
@@ -5123,6 +5184,10 @@ function killWalker(w) {
 
 function damageWalker(w, amount, dir, knock) {
   if (w.dead) return;
+  // Armour subtracts flat, with a small floor so nothing is fully immune.
+  // A rock into a Tank is a chip; a boulder or a blast is a real hit.
+  const ar = w.E.armor || 0;
+  if (ar) amount = Math.max(amount * 0.08, amount - ar);
   w.hp -= amount;
   w.flash = 1;
   if (dir && knock) w.kb.addScaledVector(dir, knock);
@@ -5257,7 +5322,7 @@ function clearAll() {
 
 function buildWave(n) {
   clearAll();
-  const count = 3 + n*2;
+
   // Scatter the catalogue rather than a pile of identical rocks, so what is
   // lying near you is itself a tactical fact.
   for (const key in OBJECTS) {
@@ -5271,10 +5336,17 @@ function buildWave(n) {
       spawnObject(key, Math.cos(a)*d, Math.sin(a)*d);
     }
   }
-  for (let i = 0; i < count; i++) {
-    const a = (i/count)*Math.PI*2 + rand(-0.3,0.3), d = CFG.arena - rand(2,8);
-    spawnWalker(Math.cos(a)*d, Math.sin(a)*d);
+  const comp = WAVES[Math.min(n, WAVES.length) - 1];
+  const extra = Math.max(0, n - WAVES.length);        // past the table, scale up
+  const list = [];
+  for (const t in comp) {
+    const c = comp[t] + Math.round(comp[t] * extra * 0.35);
+    for (let i = 0; i < c; i++) list.push(t);
   }
+  list.forEach((t, i) => {
+    const a = (i/list.length)*Math.PI*2 + rand(-0.25,0.25), d = CFG.arena - rand(2,8);
+    spawnWalker(t, Math.cos(a)*d, Math.sin(a)*d);
+  });
   hero.pos.set(0,0,0); hero.yaw = Math.PI;
   hero.vy = 0; hero.grounded = true;
   S.dashT = 0; S.dashCd = 0;
@@ -5285,7 +5357,13 @@ function buildWave(n) {
 }
 
 function updateHUD() {
-  el("left").textContent = walkers.filter(w => !w.dead).length;
+  const alive = walkers.filter(w => !w.dead);
+  el("left").textContent = alive.length;
+  const kinds = {};
+  alive.forEach(w => { kinds[w.E.name] = (kinds[w.E.name]||0)+1; });
+  const th = el("threat");
+  if (th) th.textContent = Object.keys(kinds).length
+    ? Object.entries(kinds).map(([k,v]) => k[0]+v).join(" ") : "";
   let h = "";
   for (let i = 0; i < CFG.maxHealth; i++) h += `<i class="${i < hero.hp ? "" : "off"}"></i>`;
   el("hp").innerHTML = h;
@@ -5460,13 +5538,34 @@ function burstAll() {
   if (!n) return;
   if (S.focus <= 0.02) { toast("No focus left"); return; }
   S.focus = Math.max(0, S.focus - CFG.throwCost * n);
+  aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
+
+  // Burst assigns a DIFFERENT mark per stone across a wide forward arc.
+  // Single concentrates one heavy shot; burst spreads seven light ones over
+  // seven bodies. That is the whole distinction between the modes.
+  const marks = walkers.filter(w => !w.dead).map(w => {
+    tmp.set(w.pos.x-hero.pos.x, 0, w.pos.z-hero.pos.z);
+    const d = tmp.length() || 1;
+    return { w, d, dot: tmp.divideScalar(d).dot(aimDir) };
+  }).filter(m => m.dot > CFG.burstCone).sort((a,b) => a.d - b.d);
+
   S.held.forEach((o,i) => {
     o.held = false;
-    o.mesh.material = matFor(o.key, o.def);
-    const spread = (i - (n-1)/2) * 0.16;
-    o.vel.set(Math.sin(cam.yaw+spread), 0, Math.cos(cam.yaw+spread))
-      .multiplyScalar(CFG.throwSpeed*(o.def.speedMul||1))
-      .add(new T.Vector3(0, rand(1.0,2.6), 0));
+    o.mult = CFG.burstMul;
+    const mark = marks.length ? marks[i % marks.length] : null;
+    if (mark) {
+      o.mesh.material = seekMat;
+      o.seek = mark.w; o.seekT = CFG.seekTime;
+      tmp.set(mark.w.pos.x-hero.pos.x, 0, mark.w.pos.z-hero.pos.z).normalize();
+      o.vel.copy(tmp).multiplyScalar(CFG.throwSpeed*(o.def.speedMul||1))
+        .add(new T.Vector3(0, rand(1.0,2.2), 0));
+    } else {
+      o.mesh.material = matFor(o.key, o.def);
+      const spread = (i - (n-1)/2) * 0.16;
+      o.vel.set(Math.sin(cam.yaw+spread), 0, Math.cos(cam.yaw+spread))
+        .multiplyScalar(CFG.throwSpeed*(o.def.speedMul||1))
+        .add(new T.Vector3(0, rand(1.0,2.6), 0));
+    }
   });
   S.held = [];
   S.shake = Math.min(0.6, S.shake + 0.35);
@@ -5480,6 +5579,7 @@ function launchSeeker(o) {
   o.seek = S.lock && !S.lock.dead ? S.lock : nearestInCone();
   o.seekT = o.seek ? CFG.seekTime : 0;
   aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
+  o.mult = CFG.singleMul;
   o.vel.copy(aimDir).multiplyScalar(CFG.throwSpeed*(o.def.speedMul||1))
     .add(new T.Vector3(0, 1.4, 0));
   S.shake = Math.min(0.4, S.shake + 0.1);
@@ -5707,8 +5807,23 @@ function step(dt) {
     const dist = tmp.length();
     if (dist > 0.01) {
       tmp.divideScalar(dist);
-      w.pos.addScaledVector(tmp, CFG.zSpeed*dt);
+      let spd = w.E.speed;
+      // Leapers hold back, then cover ground in a burst — the threat is the
+      // timing, not the top speed.
+      if (w.E.leap) {
+        w.leapT -= dt;
+        if (w.leapT <= 0 && dist > 4 && dist < 20 && !w.air) {
+          w.air = true; w.vy = 8.5; w.leapT = rand(2.2, 3.8);
+        }
+        if (w.air) spd = w.E.speed * 4.2;
+      }
+      w.pos.addScaledVector(tmp, spd*dt);
       w.g.rotation.y = Math.atan2(tmp.x, tmp.z);
+    }
+    if (w.air) {
+      w.vy += CFG.gravity*dt;
+      w.pos.y += w.vy*dt;
+      if (w.pos.y <= 0) { w.pos.y = 0; w.vy = 0; w.air = false; }
     }
     if (w.kb.lengthSq() > 1e-4) {
       w.pos.addScaledVector(w.kb, dt);
@@ -5760,9 +5875,16 @@ function step(dt) {
           // Damage is proportional to how fast it was really going, capped
           // so a blast-launched prop cannot one-shot everything on the map.
           const scale = Math.min(1.6, sp / CFG.throwSpeed);
+          // Head box scales with the archetype, so a Crawler's weak point is
+          // genuinely harder to hit than a Tank's.
+          const hy = o.pos.y / Math.max(0.4, w.E.scale);
+          const weak = hy > 1.52 && hy < 2.25;
+          let dmg = o.def.dmg * scale * (o.mult || 1);
+          if (weak) { dmg *= CFG.weakMul; banner("WEAK POINT"); }
           tmp.y = 0; tmp.normalize();
-          damageWalker(w, o.def.dmg*scale, tmp, 4.5*(o.def.knock||1));
-          sparks(tmp.set(o.pos.x, 1.3, o.pos.z), 0xc9b08a, 7, 13);
+          damageWalker(w, dmg, tmp, 4.5*(o.def.knock||1));
+          sparks(tmp.set(o.pos.x, weak ? 1.9 : 1.3, o.pos.z),
+                 weak ? 0xffd23c : 0xc9b08a, weak ? 12 : 7, weak ? 18 : 13);
           S.shake = Math.min(0.9, S.shake + 0.12);
 
           o.pierced++;
