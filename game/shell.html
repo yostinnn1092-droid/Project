@@ -1,0 +1,385 @@
+<title>Kinesis</title>
+<style>
+  :root {
+    --void:  #0A0912;
+    --force: #E94FBF;
+    --blood: #FF5A3C;
+    --ink:   #E8E4F0;
+    --dim:   #7E7894;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--void); color: var(--ink); font-family: var(--sans);
+    touch-action: none; -webkit-user-select: none; user-select: none;
+    overscroll-behavior: none;
+  }
+  #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .hide { display: none !important; }
+
+  /* ───── HUD (landscape-first: hugs the top edge, never the middle) ───── */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 5;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 10px; padding: 10px 14px; pointer-events: none;
+  }
+  .chip {
+    background: rgba(10,9,18,.6); border: 1px solid rgba(232,228,240,.13);
+    border-radius: 4px; padding: 5px 9px; backdrop-filter: blur(6px);
+  }
+  .lbl { font-family: var(--mono); font-size: 8px; letter-spacing: .18em;
+         text-transform: uppercase; color: var(--dim); display: block; margin-bottom: 2px; }
+  .val { font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums; }
+
+  #hp { display: flex; gap: 4px; }
+  #hp i {
+    width: 11px; height: 11px; border-radius: 2px;
+    background: var(--blood); box-shadow: 0 0 7px rgba(255,90,60,.6);
+    transform: rotate(45deg);
+  }
+  #hp i.off { background: rgba(232,228,240,.16); box-shadow: none; }
+
+  #focusWrap { min-width: 90px; max-width: 190px; }
+  @media (max-width: 780px) {
+    #hud { gap: 6px; padding: 8px 10px; }
+    .chip { padding: 4px 7px; }
+    .val { font-size: 13px; }
+    #focusWrap { min-width: 64px; }
+  }
+  @media (max-width: 620px) { #scoreChip { display: none; } }
+  #focusBar { height: 5px; border-radius: 3px; background: rgba(232,228,240,.13); overflow: hidden; }
+  #focusFill { height: 100%; width: 100%;
+               background: linear-gradient(90deg, #7A2A66, var(--force));
+               transition: width .08s linear; }
+  #focusFill.spent { background: linear-gradient(90deg, #5A2020, #C4443A); }
+
+  /* compact roll-call of what is still standing: W3 R2 T1 */
+  #threat { display:block; font-family: var(--mono); font-size: 8.5px;
+            letter-spacing: .1em; color: var(--dim); margin-top: 1px; }
+  #comboWrap .val { color: var(--dim); transition: color .15s ease; }
+  #comboWrap.hot .val { color: var(--blood); text-shadow: 0 0 10px rgba(255,90,60,.7); }
+
+  /* multi-kill shout, centre-top so it never covers the fight */
+  #combo {
+    position: fixed; left: 50%; top: 21%; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 22px; font-weight: 700;
+    letter-spacing: .14em; text-transform: uppercase; z-index: 8;
+    color: var(--blood); text-shadow: 0 0 22px rgba(255,90,60,.85);
+    pointer-events: none; opacity: 0; white-space: nowrap;
+  }
+  #combo.pop { animation: shout .95s ease-out forwards; }
+  @keyframes shout {
+    0%   { opacity: 0; transform: translateX(-50%) scale(.7); }
+    18%  { opacity: 1; transform: translateX(-50%) scale(1.12); }
+    35%  { transform: translateX(-50%) scale(1); }
+    100% { opacity: 0; transform: translateX(-50%) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) { #combo.pop { animation-duration: .5s; } }
+
+  /* ───── upgrade draft ───── */
+  /* The menu card is 430px wide, which forces three upgrades to wrap 2+1.
+     The draft needs its own width. */
+  #card.wide { max-width: 780px; }
+  #draft { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap;
+           justify-content: center; }
+  .upg {
+    flex: 1 1 190px; max-width: 240px; min-height: 132px;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+    padding: 13px 14px; margin: 0; text-align: left;
+    background: rgba(20,17,30,.9); color: var(--ink);
+    border: 1.5px solid rgba(232,228,240,.2); border-radius: 7px;
+    box-shadow: none; cursor: pointer; letter-spacing: 0; text-transform: none;
+    font-family: var(--sans); transition: border-color .14s ease, transform .14s ease;
+  }
+  .upg:hover, .upg:focus-visible {
+    border-color: var(--force); transform: translateY(-3px);
+    box-shadow: 0 0 22px rgba(233,79,191,.3);
+  }
+  .upg .ut { font-family: var(--mono); font-size: 8px; letter-spacing: .2em;
+             text-transform: uppercase; color: var(--force); }
+  .upg b { font-size: 16px; font-weight: 650; }
+  .upg i { font-style: normal; font-size: 12.5px; line-height: 1.5; color: var(--dim); }
+  @media (max-height: 430px) { .upg { min-height: 108px; padding: 10px 11px; } }
+
+  /* ───── boss bar ───── */
+  #bossBar {
+    position: fixed; left: 50%; top: 62px; transform: translateX(-50%);
+    width: min(520px, 76vw); z-index: 6; pointer-events: none;
+    opacity: 0; transition: opacity .3s ease;
+  }
+  #bossBar.show { opacity: 1; }
+  #bossName {
+    font-family: var(--mono); font-size: 9px; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--dim); text-align: center;
+    margin-bottom: 4px;
+  }
+  #bossBar.open #bossName { color: var(--blood); }
+  .bb { height: 7px; border-radius: 3px; background: rgba(232,228,240,.12);
+        overflow: hidden; margin-bottom: 3px; }
+  /* Two bars, stacked: armour on top, core underneath. The player can see
+     the fight has two phases before anyone explains it. */
+  #bossPlate { height: 100%; background: linear-gradient(90deg,#5c6675,#aab4c4);
+               transition: width .16s linear; }
+  #bossCore  { height: 100%; background: linear-gradient(90deg,#7a1f14,var(--blood));
+               transition: width .16s linear; }
+
+  /* ───── crosshair ───── */
+  #cross {
+    position: fixed; left: 50%; top: 50%; width: 46px; height: 46px;
+    margin: -23px 0 0 -23px; z-index: 6; pointer-events: none;
+  }
+  #cross i {
+    position: absolute; background: rgba(232,228,240,.55);
+    transition: background .1s ease, transform .12s ease;
+  }
+  /* four ticks around a gap — an open centre keeps the target visible */
+  #cross i:nth-child(1) { left: 50%; top: 0;   width: 1.5px; height: 13px; margin-left: -.75px; }
+  #cross i:nth-child(2) { left: 50%; bottom: 0;width: 1.5px; height: 13px; margin-left: -.75px; }
+  #cross i:nth-child(3) { top: 50%; left: 0;   height: 1.5px; width: 13px; margin-top: -.75px; }
+  #cross i:nth-child(4) { top: 50%; right: 0;  height: 1.5px; width: 13px; margin-top: -.75px; }
+  #cross u {
+    position: absolute; left: 50%; top: 50%; width: 3px; height: 3px;
+    margin: -1.5px 0 0 -1.5px; border-radius: 50%;
+    background: rgba(232,228,240,.7);
+  }
+  #cross.armed i { background: var(--force); }
+  #cross.armed u { background: var(--force); }
+  /* burst mode reads wider, so the reticle spreads to match */
+  #cross.aoe i:nth-child(1), #cross.aoe i:nth-child(2) { height: 9px; }
+  #cross.aoe i:nth-child(3), #cross.aoe i:nth-child(4) { width: 9px; }
+  #cross.lock i { background: var(--blood); transform: scale(1.25); }
+  #cross.lock u { background: var(--blood); }
+
+  /* damage flash */
+  #dmg {
+    position: fixed; inset: 0; z-index: 7; pointer-events: none; opacity: 0;
+    transition: opacity .18s ease;
+    background: radial-gradient(ellipse at center, transparent 45%, rgba(255,60,40,.55));
+  }
+  #dmg.on { opacity: 1; }
+
+  /* ───── touch controls ───── */
+  #touch { position: fixed; inset: 0; z-index: 4; pointer-events: none; }
+  #stick {
+    position: absolute; left: 20px; bottom: 18px;
+    width: 112px; height: 112px; border-radius: 50%;
+    border: 1.5px solid rgba(232,228,240,.18);
+    background: radial-gradient(circle, rgba(232,228,240,.07), rgba(232,228,240,.02));
+    pointer-events: auto; touch-action: none;
+  }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 48px; height: 48px;
+    margin: -24px 0 0 -24px; border-radius: 50%;
+    background: rgba(232,228,240,.24); border: 1.5px solid rgba(232,228,240,.4);
+  }
+  #force {
+    position: absolute; right: 22px; bottom: 22px;
+    width: 96px; height: 96px; border-radius: 50%;
+    border: 2px solid var(--force);
+    background: radial-gradient(circle, rgba(233,79,191,.24), rgba(233,79,191,.06));
+    color: var(--ink); font-family: var(--mono); font-size: 10.5px;
+    letter-spacing: .16em; text-transform: uppercase;
+    pointer-events: auto; touch-action: none; cursor: pointer;
+    box-shadow: 0 0 22px rgba(233,79,191,.3);
+    transition: transform .1s ease, box-shadow .1s ease;
+  }
+  #force.on {
+    transform: scale(.94);
+    background: radial-gradient(circle, rgba(233,79,191,.5), rgba(233,79,191,.2));
+    box-shadow: 0 0 40px rgba(233,79,191,.7);
+  }
+  /* Loaded: the same button is now the trigger. Colour shifts to the
+     target red so it never reads as "gather" while stones are up. */
+  #force.loaded {
+    border-color: var(--blood);
+    background: radial-gradient(circle, rgba(255,90,60,.3), rgba(255,90,60,.08));
+    box-shadow: 0 0 26px rgba(255,90,60,.42);
+    line-height: 1.15;
+  }
+  #force .cnt {
+    display: block; font-size: 19px; font-style: normal; font-weight: 600;
+    letter-spacing: 0; margin-top: 3px; color: var(--blood);
+    font-variant-numeric: tabular-nums;
+  }
+  /* movement abilities: a column left of FORCE, inside thumb reach */
+  .ab {
+    position: absolute; width: 70px; height: 70px; border-radius: 50%;
+    border: 1.5px solid rgba(232,228,240,.35);
+    background: rgba(10,9,18,.62); color: var(--ink);
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em;
+    text-transform: uppercase; pointer-events: auto; touch-action: none;
+    cursor: pointer; overflow: hidden;
+    transition: transform .1s ease, opacity .15s ease;
+  }
+  .ab:active { transform: scale(.93); }
+  .ab.cool { opacity: .42; }
+  #jump { right: 128px; bottom: 22px; }
+  #rep  { right: 206px; bottom: 61px; border-color: rgba(233,79,191,.7); }
+  #repCd {
+    position: absolute; inset: 0; background: rgba(233,79,191,.24);
+    transform-origin: top center; transform: scaleY(0); pointer-events: none;
+  }
+  @media (max-width: 700px) { #rep { right: 200px; bottom: 58px; width: 62px; height: 62px; } }
+  #dash { right: 128px; bottom: 100px; border-color: rgba(111,155,255,.65); }
+  /* cooldown drains downward behind the label */
+  #dashCd {
+    position: absolute; inset: 0; background: rgba(111,155,255,.22);
+    transform-origin: top center; transform: scaleY(0); pointer-events: none;
+  }
+  .ab span { position: relative; z-index: 1; }
+
+  /* mode toggle sits above FORCE, thumb-reachable */
+  #modeBtn {
+    position: absolute; right: 22px; bottom: 128px;
+    min-width: 96px; padding: 8px 10px 10px;
+    border-radius: 6px; border: 1.5px solid rgba(232,228,240,.28);
+    background: rgba(10,9,18,.7); color: var(--ink);
+    font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
+    text-transform: uppercase; text-align: center;
+    pointer-events: auto; touch-action: none; cursor: pointer;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  #modeBtn .mt { display:block; font-size:7.5px; color:var(--dim); margin-bottom:3px; }
+  #modeBtn #modeName { font-size: 12px; letter-spacing: .12em; }
+  #modeBtn.aoe { border-color: var(--force); box-shadow: 0 0 16px rgba(233,79,191,.35); }
+  #modeBtn.cool { opacity: .55; }
+  #modeCdWrap {
+    height: 3px; margin-top: 6px; border-radius: 2px;
+    background: rgba(232,228,240,.14); overflow: hidden;
+  }
+  #modeCd {
+    height: 100%; background: var(--force);
+    transform-origin: left center; transform: scaleX(0);
+  }
+  @media (pointer: fine) { #stick, #force { opacity: .3; } }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 12%; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--ink); z-index: 8;
+    background: rgba(10,9,18,.75); padding: 7px 14px; border-radius: 4px;
+    border: 1px solid rgba(232,228,240,.12);
+    opacity: 0; transition: opacity .3s ease; pointer-events: none;
+    text-align: center; max-width: 80vw;
+  }
+  #toast.show { opacity: 1; }
+
+  /* ───── rotate nag ───── */
+  #rotate {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    place-items: center; text-align: center; padding: 30px;
+    background: rgba(6,5,13,.95);
+  }
+  #rotate.show { display: grid; }
+  #rotate .ph {
+    width: 54px; height: 92px; border: 2.5px solid var(--force);
+    border-radius: 8px; margin: 0 auto 22px;
+    animation: turn 2.2s ease-in-out infinite;
+  }
+  @keyframes turn {
+    0%,35% { transform: rotate(0deg); }
+    65%,100% { transform: rotate(-90deg); }
+  }
+  @media (prefers-reduced-motion: reduce) { #rotate .ph { animation: none; transform: rotate(-90deg); } }
+
+  /* ───── menu ───── */
+  #overlay {
+    position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+    background: radial-gradient(ellipse at center, rgba(10,9,18,.88), rgba(6,5,13,.98));
+    padding: 20px; text-align: center; overflow-y: auto;
+  }
+  #card { max-width: 430px; }
+  h1 {
+    font-size: clamp(32px, 8vh, 58px); font-weight: 300;
+    letter-spacing: .24em; text-transform: uppercase; margin-bottom: 5px;
+    text-shadow: 0 0 30px rgba(233,79,191,.6);
+  }
+  .sub { font-family: var(--mono); font-size: 9.5px; letter-spacing: .28em;
+         text-transform: uppercase; color: var(--force); margin-bottom: 18px; }
+  .rule { font-size: 13.5px; line-height: 1.6; color: var(--dim); margin-bottom: 7px; }
+  .rule b { color: var(--ink); font-weight: 600; }
+  .rule em { color: var(--blood); font-style: normal; }
+  button {
+    margin-top: 16px; font-family: var(--mono); font-size: 11.5px;
+    letter-spacing: .2em; text-transform: uppercase;
+    color: var(--void); background: var(--force); border: 0; border-radius: 4px;
+    padding: 13px 30px; cursor: pointer;
+    box-shadow: 0 0 24px rgba(233,79,191,.45);
+    transition: transform .12s ease;
+  }
+  button:active { transform: translateY(1px); }
+  :focus-visible { outline: 2px solid var(--blood); outline-offset: 3px; }
+</style>
+
+<canvas id="gl"></canvas>
+
+<div id="hud" class="hide">
+  <div class="chip"><span class="lbl">Wave</span><span class="val" id="wave">1</span></div>
+  <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
+  <div class="chip" id="focusWrap"><span class="lbl">Focus</span>
+    <div id="focusBar"><div id="focusFill"></div></div></div>
+  <div class="chip"><span class="lbl">Carry</span><span class="val" id="carry">0</span></div>
+  <div class="chip" id="comboWrap"><span class="lbl">Combo</span><span class="val" id="comboVal">x1</span></div>
+  <div class="chip" id="scoreChip"><span class="lbl">Score</span><span class="val" id="score">0</span></div>
+  <div class="chip"><span class="lbl">Threat</span>
+    <span class="val" id="left">0</span>
+    <span id="threat"></span></div>
+</div>
+
+<div id="cross" class="hide"><i></i><i></i><i></i><i></i><u></u></div>
+<div id="dmg"></div>
+
+<div id="touch" class="hide">
+  <div id="stick"><div id="knob"></div></div>
+  <button id="jump" class="ab"><span>Jump</span></button>
+  <button id="dash" class="ab"><div id="dashCd"></div><span>Dash</span></button>
+  <button id="rep" class="ab"><div id="repCd"></div><span>Push</span></button>
+  <button id="modeBtn"><span class="mt">Mode</span><span id="modeName">Single</span>
+    <div id="modeCdWrap"><div id="modeCd"></div></div></button>
+  <button id="force">Force</button>
+</div>
+
+<div id="bossBar">
+  <div id="bossName">Warden</div>
+  <div class="bb"><div id="bossPlate"></div></div>
+  <div class="bb"><div id="bossCore"></div></div>
+</div>
+<div id="combo"></div>
+<div id="toast"></div>
+
+<div id="rotate">
+  <div>
+    <div class="ph"></div>
+    <p class="sub" style="margin:0">Rotate to landscape</p>
+  </div>
+</div>
+
+<div id="overlay">
+  <div id="card">
+    <h1>Kinesis</h1>
+    <p class="sub">Best played in landscape</p>
+    <p class="rule"><b>Move</b> with the left stick (or WASD). <b>Drag</b> anywhere to aim.</p>
+    <p class="rule"><b>Tap FORCE</b> to gather stones — they ride a wheel behind you. Holding them is free.</p>
+    <p class="rule">The button then becomes <b>SHOOT</b> and stays there until the wheel is empty.</p>
+    <p class="rule"><b>Single</b> fires one stone per press, each bending into the crosshair.
+       <b>Burst</b> throws the lot at once, unguided. <b>MODE</b> swaps them — 10s cooldown.</p>
+    <p class="rule"><b>JUMP</b> clears a swipe — walkers cannot reach you at the top of one.
+       <b>DASH</b> blinks you out of a closing circle, 1.3s cooldown.</p>
+    <p class="rule">Not everything on the ground is a rock. <b>Barrels</b> detonate and set each
+       other off, <b>chem</b> leaves a burning pool, <b>boulders</b> hit like a truck but haul slowly,
+       <b>planks</b> and <b>girders</b> punch straight through a line of them.</p>
+    <p class="rule">Kill fast to build a <em>combo</em>. Chains and multi-kills score hardest.</p>
+    <p class="rule"><b>Single</b> is one heavy guided shot — head hits double it.
+       <b>Burst</b> locks a different target per stone but each lands softer.</p>
+    <p class="rule">Runners are fast and frail. <em>Armored</em> and <em>Tanks</em> shrug off rocks —
+       use boulders, girders or barrels. <em>Exploders</em> detonate when they die.</p>
+    <p class="rule" style="margin-top:12px;font-size:11px;opacity:.7">
+       Keyboard — WASD move · Space jump · Shift dash · R push · F fire · Q mode</p>
+    <button id="startBtn">Begin</button>
+  </div>
+</div>
+
+<script>/*__THREE__*/</script>
+<script>/*__GAME__*/</script>
