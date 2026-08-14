@@ -41,12 +41,39 @@
   }
   #hp i.off { background: rgba(232,228,240,.16); box-shadow: none; }
 
-  #focusWrap { min-width: 120px; max-width: 190px; }
+  #focusWrap { min-width: 90px; max-width: 190px; }
+  @media (max-width: 780px) {
+    #hud { gap: 6px; padding: 8px 10px; }
+    .chip { padding: 4px 7px; }
+    .val { font-size: 13px; }
+    #focusWrap { min-width: 64px; }
+  }
+  @media (max-width: 620px) { #scoreChip { display: none; } }
   #focusBar { height: 5px; border-radius: 3px; background: rgba(232,228,240,.13); overflow: hidden; }
   #focusFill { height: 100%; width: 100%;
                background: linear-gradient(90deg, #7A2A66, var(--force));
                transition: width .08s linear; }
   #focusFill.spent { background: linear-gradient(90deg, #5A2020, #C4443A); }
+
+  #comboWrap .val { color: var(--dim); transition: color .15s ease; }
+  #comboWrap.hot .val { color: var(--blood); text-shadow: 0 0 10px rgba(255,90,60,.7); }
+
+  /* multi-kill shout, centre-top so it never covers the fight */
+  #combo {
+    position: fixed; left: 50%; top: 21%; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 22px; font-weight: 700;
+    letter-spacing: .14em; text-transform: uppercase; z-index: 8;
+    color: var(--blood); text-shadow: 0 0 22px rgba(255,90,60,.85);
+    pointer-events: none; opacity: 0; white-space: nowrap;
+  }
+  #combo.pop { animation: shout .95s ease-out forwards; }
+  @keyframes shout {
+    0%   { opacity: 0; transform: translateX(-50%) scale(.7); }
+    18%  { opacity: 1; transform: translateX(-50%) scale(1.12); }
+    35%  { transform: translateX(-50%) scale(1); }
+    100% { opacity: 0; transform: translateX(-50%) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) { #combo.pop { animation-duration: .5s; } }
 
   /* ───── crosshair ───── */
   #cross {
@@ -238,6 +265,8 @@
   <div class="chip" id="focusWrap"><span class="lbl">Focus</span>
     <div id="focusBar"><div id="focusFill"></div></div></div>
   <div class="chip"><span class="lbl">Carry</span><span class="val" id="carry">0</span></div>
+  <div class="chip" id="comboWrap"><span class="lbl">Combo</span><span class="val" id="comboVal">x1</span></div>
+  <div class="chip" id="scoreChip"><span class="lbl">Score</span><span class="val" id="score">0</span></div>
   <div class="chip"><span class="lbl">Walkers</span><span class="val" id="left">0</span></div>
 </div>
 
@@ -253,6 +282,7 @@
   <button id="force">Force</button>
 </div>
 
+<div id="combo"></div>
 <div id="toast"></div>
 
 <div id="rotate">
@@ -273,7 +303,10 @@
        <b>Burst</b> throws the lot at once, unguided. <b>MODE</b> swaps them — 10s cooldown.</p>
     <p class="rule"><b>JUMP</b> clears a swipe — walkers cannot reach you at the top of one.
        <b>DASH</b> blinks you out of a closing circle, 1.3s cooldown.</p>
-    <p class="rule">Survive 5 waves. A slow stone only shoves a <em>walker</em> back.</p>
+    <p class="rule">Not everything on the ground is a rock. <b>Barrels</b> detonate and set each
+       other off, <b>chem</b> leaves a burning pool, <b>boulders</b> hit like a truck but haul slowly,
+       <b>planks</b> and <b>girders</b> punch straight through a line of them.</p>
+    <p class="rule">Kill fast to build a <em>combo</em>. Chains and multi-kills score hardest.</p>
     <p class="rule" style="margin-top:12px;font-size:11px;opacity:.7">
        Keyboard — WASD move · Space jump · Shift dash · F fire · Q mode</p>
     <button id="startBtn">Begin</button>
@@ -4894,31 +4927,93 @@ function pushGhost() {
   gh.life = 0.34;
 }
 
-// ─────────────────────────────────────────────────────────── rocks
-const rockMat = new T.MeshStandardMaterial({ color:0xc9c2b4, roughness:0.85, flatShading:true });
-const rockHot = new T.MeshStandardMaterial({ color:0xc98fb8, roughness:0.6, flatShading:true,
-                                             emissive:0xe94fbf, emissiveIntensity:0.5 });
-const rockSeek = new T.MeshStandardMaterial({ color:0xffb0a0, roughness:0.5, flatShading:true,
-                                              emissive:0xff5a3c, emissiveIntensity:0.75 });
-const rocks = [];
+// ─────────────────────────────────────────────────────────── objects
+// Everything throwable is described here rather than in code, so a new
+// prop is a table entry and not a new branch in the physics loop.
+//
+//   dmg      damage at full throw speed; scales with actual impact speed
+//   mass     heavier is slower to haul and harder to fling
+//   pierce   how many bodies it passes through before stopping
+//   knock    knockback multiplier applied on hit
+//   explode  detonates on impact: {r, dmg}
+//   puddle   leaves a damaging area: {r, dps, life}
+//   speedMul multiplier on launch speed
+const OBJECTS = {
+  rock:   { name:"Rock",    dmg:100, mass:1.0, knock:1.0, count:10,
+            size:[0.42,0.72], color:0xc9c2b4 },
+  heavy:  { name:"Boulder", dmg:265, mass:3.4, knock:2.6, count:2,
+            size:[1.00,1.30], color:0x8d8880 },
+  plank:  { name:"Plank",   dmg:62,  mass:0.55, knock:2.0, pierce:3, count:3,
+            size:[0.55,0.75], color:0x7a5330, shape:"plank", speedMul:1.15 },
+  barrel: { name:"Barrel",  dmg:30,  mass:1.2, knock:1.0, count:4,
+            size:[0.62,0.62], color:0xc4562e, shape:"barrel",
+            explode:{ r:7.5, dmg:190 }, emissive:0x5a1a08 },
+  chem:   { name:"Chem",    dmg:24,  mass:1.2, knock:0.8, count:2,
+            size:[0.62,0.62], color:0x8ada4e, shape:"barrel",
+            puddle:{ r:5.0, dps:70, life:7 }, emissive:0x2f6b18 },
+  metal:  { name:"Girder",  dmg:150, mass:1.7, knock:1.6, pierce:2, count:3,
+            size:[0.5,0.7], color:0xa9b6c6, shape:"plank", speedMul:1.4 },
+};
 
-function spawnRock(x, z, r) {
-  const geo = new T.IcosahedronGeometry(r,1);
-  const p = geo.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const s = rand(0.82,1.2);
-    p.setXYZ(i, p.getX(i)*s, p.getY(i)*s, p.getZ(i)*s);
-  }
-  geo.computeVertexNormals();
-  const mesh = new T.Mesh(geo, rockMat);
-  mesh.castShadow = mesh.receiveShadow = true;
-  scene.add(mesh);
-  rocks.push({ mesh, r, pos:new T.Vector3(x,r,z), vel:new T.Vector3(),
-    spin:new T.Vector3(rand(-1,1),rand(-1,1),rand(-1,1)),
-    m:r*r*r*3.4, held:false, slot:0, seek:null, seekT:0 });
+const rockMat = new T.MeshStandardMaterial({ color:0xc9c2b4, roughness:0.85, flatShading:true });
+const heldMat = new T.MeshStandardMaterial({ color:0xc98fb8, roughness:0.6, flatShading:true,
+                                             emissive:0xe94fbf, emissiveIntensity:0.55 });
+const seekMat = new T.MeshStandardMaterial({ color:0xffb0a0, roughness:0.5, flatShading:true,
+                                             emissive:0xff5a3c, emissiveIntensity:0.85 });
+const matCache = {};
+function matFor(key, def) {
+  if (!matCache[key]) matCache[key] = new T.MeshStandardMaterial({
+    color: def.color, roughness: 0.85, flatShading: true,
+    emissive: def.emissive || 0x000000, emissiveIntensity: def.emissive ? 0.7 : 0 });
+  return matCache[key];
 }
 
-// ─────────────────────────────────────────────────────────── walkers
+const rocks = [];
+
+function geomFor(def, r) {
+  if (def.shape === "plank")  return new T.BoxGeometry(r*0.45, r*0.42, r*3.4);
+  if (def.shape === "barrel") return new T.CylinderGeometry(r, r, r*2.3, 9);
+  const geo = new T.IcosahedronGeometry(r, 1);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const s2 = rand(0.82,1.2);
+    p.setXYZ(i, p.getX(i)*s2, p.getY(i)*s2, p.getZ(i)*s2);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// Move a spent or stranded prop back into play near the player. Keeps the
+// object count bounded (good for the physics loop) while guaranteeing there
+// is always something to pick up.
+function recycleObject(o) {
+  const a = rand(0, Math.PI*2), d = rand(7, CFG.grabRadius - 1.5);
+  o.pos.set(hero.pos.x + Math.cos(a)*d, o.r + 6, hero.pos.z + Math.sin(a)*d);
+  const lim = CFG.arena - 3;
+  const hd = Math.hypot(o.pos.x, o.pos.z);
+  if (hd > lim) { o.pos.x *= lim/hd; o.pos.z *= lim/hd; }
+  o.vel.set(0, 0, 0);
+  o.gone = false; o.held = false; o.pierced = 0; o.seekT = 0; o.seek = null;
+  o.mesh.visible = true;
+  o.mesh.material = matFor(o.key, o.def);
+  o.restT = 0;
+}
+
+function spawnObject(key, x, z) {
+  const def = OBJECTS[key];
+  const r = rand(def.size[0], def.size[1]);
+  const mesh = new T.Mesh(geomFor(def, r), matFor(key, def));
+  mesh.castShadow = mesh.receiveShadow = true;
+  scene.add(mesh);
+  rocks.push({
+    mesh, r, key, def,
+    pos: new T.Vector3(x, r, z), vel: new T.Vector3(),
+    spin: new T.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)),
+    m: def.mass * r*r*r * 3.4,
+    held:false, slot:0, seek:null, seekT:0, pierced:0, gone:false, restT:0,
+  });
+}
+
 const zSkin  = new T.MeshStandardMaterial({ color:0x7d8f66, roughness:1.0, flatShading:true });
 const zRot   = new T.MeshStandardMaterial({ color:0x5a6b4a, roughness:1.0, flatShading:true });
 const zRag   = new T.MeshStandardMaterial({ color:0x3d3a2e, roughness:1.0, flatShading:true,
@@ -4982,7 +5077,144 @@ function spawnWalker(x, z) {
   g.scale.setScalar(rand(0.92, 1.12));   // a crowd of identical models reads as clones
   scene.add(g);
   walkers.push({ g, body, torso, aL, aR, lL, lR, pos:g.position, r:0.75,
-                 walk:rand(0,6), dead:false, cool:0 });
+                 walk:rand(0,6), dead:false, cool:0,
+                 hp:100, maxHp:100, flash:0, kb:new T.Vector3() });
+}
+
+// ─────────────────────────────────────────────────────────── combat
+// Damage scales with how hard the thing was actually travelling, so a
+// lobbed boulder and a hurled one are not the same hit.
+const MIN_HIT_SPEED = 9;
+
+const puddles = [];
+const blastQ  = [];            // explosions wait here; see MAX_BLASTS
+const MAX_BLASTS = 5;          // per frame, so a barrel farm cannot stall a phone
+
+function addCombo(n) {
+  S.combo += n;
+  S.comboT = 2.6;
+  if (S.combo >= 3) {
+    const tier = S.combo >= 12 ? "UNSTOPPABLE" : S.combo >= 8 ? "RAMPAGE"
+               : S.combo >= 5 ? "SLAUGHTER" : S.combo === 4 ? "QUAD" : "TRIPLE";
+    banner(tier + "  x" + S.combo);
+  }
+  updateHUD();
+}
+
+function banner(txt) {
+  const b = el("combo");
+  b.textContent = txt;
+  b.classList.remove("pop");
+  void b.offsetWidth;          // restart the animation
+  b.classList.add("pop");
+}
+
+function killWalker(w) {
+  if (w.dead) return;
+  w.dead = true;
+  scene.remove(w.g);
+  burst(w.pos, 0x5d7a4a);
+  S.kills++;
+  S.score += 100 * Math.max(1, S.combo);
+  S.shake = Math.min(0.9, S.shake + 0.35);
+  addCombo(1);
+  updateHUD();
+}
+
+function damageWalker(w, amount, dir, knock) {
+  if (w.dead) return;
+  w.hp -= amount;
+  w.flash = 1;
+  if (dir && knock) w.kb.addScaledVector(dir, knock);
+  if (w.hp <= 0) killWalker(w);
+}
+
+function sparks(pos, color, n, spread) {
+  for (let i = 0; i < n; i++) {
+    const m = new T.Mesh(gibGeo, new T.MeshStandardMaterial({
+      color, emissive: color, emissiveIntensity: 0.8, transparent: true }));
+    m.position.copy(pos);
+    m.scale.setScalar(rand(0.3, 0.8));
+    scene.add(m);
+    gibs.push({ mesh:m,
+      vel:new T.Vector3(rand(-1,1),rand(0.2,1.2),rand(-1,1)).normalize().multiplyScalar(rand(4,spread)),
+      spin:new T.Vector3(rand(-9,9),rand(-9,9),rand(-9,9)),
+      life:rand(0.3,0.8), max:0.8 });
+  }
+}
+
+// Expanding shells, pooled — an explosion allocating meshes mid-chain is
+// exactly how a chain reaction turns into a frame spike.
+const shells = [];
+for (let i = 0; i < 8; i++) {
+  const m = new T.Mesh(new T.SphereGeometry(1, 14, 10),
+    new T.MeshBasicMaterial({ color:0xffa542, transparent:true, opacity:0, depthWrite:false }));
+  m.visible = false; scene.add(m);
+  shells.push({ mesh:m, life:0, r:1 });
+}
+function shell(pos, r, color) {
+  const s = shells.find(x => x.life <= 0) || shells[0];
+  s.mesh.position.copy(pos);
+  s.mesh.material.color.setHex(color);
+  s.mesh.visible = true;
+  s.life = 0.42; s.r = r;
+}
+
+function queueBlast(pos, ex, src) {
+  blastQ.push({ pos: pos.clone(), ex, src });
+}
+
+function runBlast(b) {
+  const { pos, ex } = b;
+  shell(pos, ex.r, 0xffa542);
+  sparks(pos, 0xff8a3c, 14, 22);
+  S.shake = Math.min(1.2, S.shake + 0.7);
+
+  let killed = 0;
+  for (const w of walkers) {
+    if (w.dead) continue;
+    const d = Math.hypot(w.pos.x-pos.x, w.pos.z-pos.z);
+    if (d < ex.r) {
+      const fall = 1 - d/ex.r;                       // linear falloff
+      tmp.set(w.pos.x-pos.x, 0, w.pos.z-pos.z).normalize();
+      const before = w.dead;
+      damageWalker(w, ex.dmg*fall, tmp, 9*fall);
+      if (!before && w.dead) killed++;
+    }
+  }
+  // Shove loose props, and detonate any barrel caught in the blast — this
+  // one line is the whole chain-reaction mechanic.
+  for (const o of rocks) {
+    if (o.held || o.gone) continue;
+    const d = Math.hypot(o.pos.x-pos.x, o.pos.z-pos.z);
+    if (d < ex.r) {
+      tmp.set(o.pos.x-pos.x, 0.5, o.pos.z-pos.z).normalize();
+      o.vel.addScaledVector(tmp, 26*(1-d/ex.r)/Math.max(0.5,o.def.mass));
+      if (o.def.explode && o !== b.src) detonate(o);
+    }
+  }
+  if (killed >= 2) banner("CHAIN x" + killed);
+}
+
+function detonate(o) {
+  if (o.gone) return;
+  o.gone = true;                      // consumed; also stops re-entry
+  o.mesh.visible = false;
+  queueBlast(o.pos, o.def.explode, o);
+}
+
+function spill(o) {
+  if (o.gone) return;
+  o.gone = true;
+  o.mesh.visible = false;
+  const p = o.def.puddle;
+  const m = new T.Mesh(new T.CircleGeometry(p.r, 24),
+    new T.MeshBasicMaterial({ color:0x8ada4e, transparent:true, opacity:0.34, depthWrite:false }));
+  m.rotation.x = -Math.PI/2;
+  m.position.set(o.pos.x, 0.05, o.pos.z);
+  scene.add(m);
+  puddles.push({ mesh:m, pos:m.position.clone(), r:p.r, dps:p.dps, life:p.life, max:p.life });
+  sparks(o.pos, 0x8ada4e, 10, 12);
 }
 
 // ─────────────────────────────────────────────────────────── gibs
@@ -5003,6 +5235,7 @@ function burst(pos, color) {
 // ─────────────────────────────────────────────────────────── state
 const S = {
   phase:"menu", wave:1, kills:0, focus:1, shake:0, t:0,
+  combo:0, comboT:0, score:0, recycleT:0,
   held: [],
   mode: "single",          // "single" | "aoe"
   modeCd: 0,               // seconds left on the switch cooldown
@@ -5016,15 +5249,27 @@ function clearAll() {
   rocks.length = 0;
   walkers.forEach(w => scene.remove(w.g)); walkers.length = 0;
   gibs.forEach(x => scene.remove(x.mesh)); gibs.length = 0;
-  S.held = []; S.lock = null;
+  puddles.forEach(p => scene.remove(p.mesh)); puddles.length = 0;
+  shells.forEach(s => { s.life = 0; s.mesh.visible = false; });
+  blastQ.length = 0;
+  S.held = []; S.lock = null; S.combo = 0; S.comboT = 0;
 }
 
 function buildWave(n) {
   clearAll();
   const count = 3 + n*2;
-  for (let i = 0; i < 11 + n; i++) {
-    const a = rand(0,Math.PI*2), d = rand(3,15);
-    spawnRock(Math.cos(a)*d, Math.sin(a)*d + 3, rand(0.42,0.72));
+  // Scatter the catalogue rather than a pile of identical rocks, so what is
+  // lying near you is itself a tactical fact.
+  for (const key in OBJECTS) {
+    const def = OBJECTS[key];
+    const n2 = Math.max(1, Math.round(def.count * (1.4 + n*0.15)));
+    for (let i = 0; i < n2; i++) {
+      const a = rand(0,Math.PI*2);
+      // Uniform over a disc is sqrt-distributed, which piles everything at
+      // the rim. Bias inward instead so there is always something underfoot.
+      const d = Math.pow(Math.random(), 0.8) * (CFG.arena*0.62);
+      spawnObject(key, Math.cos(a)*d, Math.sin(a)*d);
+    }
   }
   for (let i = 0; i < count; i++) {
     const a = (i/count)*Math.PI*2 + rand(-0.3,0.3), d = CFG.arena - rand(2,8);
@@ -5045,6 +5290,9 @@ function updateHUD() {
   for (let i = 0; i < CFG.maxHealth; i++) h += `<i class="${i < hero.hp ? "" : "off"}"></i>`;
   el("hp").innerHTML = h;
   el("carry").textContent = S.held.length;
+  const sc = el("score"); if (sc) sc.textContent = S.score;
+  const cv = el("comboVal"); if (cv) cv.textContent = "x" + Math.max(1, S.combo);
+  const cw = el("comboWrap"); if (cw) cw.classList.toggle("hot", S.combo > 1);
 }
 
 let toastT = 0;
@@ -5183,11 +5431,11 @@ function pressForce() {
 function gather() {
   if (S.focus < CFG.gatherFloor) { toast("Not enough focus"); return; }
   const near = rocks
-    .filter(o => !o.held && o.seekT <= 0 && o.pos.distanceTo(hero.pos) < CFG.grabRadius)
+    .filter(o => !o.held && !o.gone && o.seekT <= 0 && o.pos.distanceTo(hero.pos) < CFG.grabRadius)
     .sort((a,b) => a.pos.distanceTo(hero.pos) - b.pos.distanceTo(hero.pos))
     .slice(0, CFG.maxHeld);
   if (!near.length) { toast("No stones in reach"); return; }
-  near.forEach((o,i) => { o.held = true; o.slot = i; o.mesh.material = rockHot; });
+  near.forEach((o,i) => { o.held = true; o.slot = i; o.mesh.material = heldMat; });
   S.held = near;
   updateHUD();
   updateForceLabel();
@@ -5214,10 +5462,10 @@ function burstAll() {
   S.focus = Math.max(0, S.focus - CFG.throwCost * n);
   S.held.forEach((o,i) => {
     o.held = false;
-    o.mesh.material = rockMat;
+    o.mesh.material = matFor(o.key, o.def);
     const spread = (i - (n-1)/2) * 0.16;
     o.vel.set(Math.sin(cam.yaw+spread), 0, Math.cos(cam.yaw+spread))
-      .multiplyScalar(CFG.throwSpeed)
+      .multiplyScalar(CFG.throwSpeed*(o.def.speedMul||1))
       .add(new T.Vector3(0, rand(1.0,2.6), 0));
   });
   S.held = [];
@@ -5228,11 +5476,12 @@ function burstAll() {
 
 function launchSeeker(o) {
   o.held = false;
-  o.mesh.material = rockSeek;
+  o.mesh.material = seekMat;
   o.seek = S.lock && !S.lock.dead ? S.lock : nearestInCone();
   o.seekT = o.seek ? CFG.seekTime : 0;
   aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
-  o.vel.copy(aimDir).multiplyScalar(CFG.throwSpeed).add(new T.Vector3(0, 1.4, 0));
+  o.vel.copy(aimDir).multiplyScalar(CFG.throwSpeed*(o.def.speedMul||1))
+    .add(new T.Vector3(0, 1.4, 0));
   S.shake = Math.min(0.4, S.shake + 0.1);
 }
 
@@ -5350,6 +5599,7 @@ function step(dt) {
 
   // ---- rocks
   for (const o of rocks) {
+    if (o.gone) continue;
     if (o.held) {
       const n = Math.max(1, S.held.length);
       const a = S.t*CFG.wheelSpin + (o.slot/n)*Math.PI*2;
@@ -5358,7 +5608,9 @@ function step(dt) {
       tmp.set(cx0 + rightV.x*Math.cos(a)*wr,
               CFG.wheelHeight + Math.sin(a)*wr,
               cz0 + rightV.z*Math.cos(a)*wr);
-      o.vel.addScaledVector(tmp.sub(o.pos), CFG.liftSpring*dt);
+      // Divided by mass: a boulder swings wide and lags the wheel, a plank
+      // snaps to it. The carry itself communicates what you picked up.
+      o.vel.addScaledVector(tmp.sub(o.pos), (CFG.liftSpring/Math.max(0.6,o.def.mass))*dt);
       o.vel.multiplyScalar(1 - Math.min(1, CFG.liftDamp*dt));
       o.spin.set(2.2,3.1,1.4);
     } else if (o.seekT > 0) {
@@ -5382,9 +5634,9 @@ function step(dt) {
         o.vel.y += CFG.gravity*CFG.seekGrav*dt;
       } else {
         o.seekT = 0;
-        o.mesh.material = rockMat;
+        o.mesh.material = matFor(o.key, o.def);
       }
-      if (o.seekT <= 0) o.mesh.material = rockMat;
+      if (o.seekT <= 0) o.mesh.material = matFor(o.key, o.def);
     } else {
       o.vel.y += CFG.gravity*dt;
     }
@@ -5395,7 +5647,7 @@ function step(dt) {
       if (o.vel.y < 0) o.vel.y = -o.vel.y*CFG.restitution;
       o.vel.x *= 0.9; o.vel.z *= 0.9; o.spin.multiplyScalar(0.93);
       if (Math.abs(o.vel.y) < 0.7) o.vel.y = 0;
-      if (o.seekT > 0) { o.seekT = 0; o.mesh.material = rockMat; }
+      if (o.seekT > 0) { o.seekT = 0; o.mesh.material = matFor(o.key, o.def); }
     }
     const d = Math.hypot(o.pos.x, o.pos.z);
     if (d > CFG.arena-o.r) {
@@ -5404,6 +5656,8 @@ function step(dt) {
       const dot = o.vel.x*nx + o.vel.z*nz;
       o.vel.x -= 2*dot*nx*CFG.restitution; o.vel.z -= 2*dot*nz*CFG.restitution;
     }
+    o.restT = o.vel.lengthSq() < 0.6 ? o.restT + dt : 0;
+
     o.mesh.position.copy(o.pos);
     o.mesh.rotation.x += o.spin.x*dt;
     o.mesh.rotation.y += o.spin.y*dt;
@@ -5413,6 +5667,7 @@ function step(dt) {
   for (let i = 0; i < rocks.length; i++) {
     for (let j = i+1; j < rocks.length; j++) {
       const a = rocks[i], b = rocks[j];
+      if (a.gone || b.gone) continue;
       if (a.seekT > 0 || b.seekT > 0) continue;   // guided stones pass through
       tmp.subVectors(b.pos, a.pos);
       const dd = tmp.length(), min = a.r+b.r;
@@ -5422,6 +5677,16 @@ function step(dt) {
         a.pos.addScaledVector(tmp,-push); b.pos.addScaledVector(tmp,push);
         tmp2.subVectors(b.vel,a.vel);
         const sep = tmp2.dot(tmp);
+
+        // A hard knock sets off a volatile prop, whoever is carrying the
+        // momentum. This is what lets a thrown rock pop a barrel across
+        // the clearing rather than only barrels the player threw himself.
+        const impact = Math.abs(sep);
+        if (impact > MIN_HIT_SPEED) {
+          if (a.def.explode) detonate(a); else if (a.def.puddle) spill(a);
+          if (b.def.explode) detonate(b); else if (b.def.puddle) spill(b);
+          if (a.gone || b.gone) continue;
+        }
         if (sep < 0) {
           const imp = -(1+CFG.restitution)*sep/(1/a.m + 1/b.m);
           a.vel.addScaledVector(tmp,-imp/a.m);
@@ -5444,6 +5709,14 @@ function step(dt) {
       tmp.divideScalar(dist);
       w.pos.addScaledVector(tmp, CFG.zSpeed*dt);
       w.g.rotation.y = Math.atan2(tmp.x, tmp.z);
+    }
+    if (w.kb.lengthSq() > 1e-4) {
+      w.pos.addScaledVector(w.kb, dt);
+      w.kb.multiplyScalar(Math.max(0, 1 - 7*dt));
+    }
+    if (w.flash > 0) {
+      w.flash = Math.max(0, w.flash - dt*4);
+      w.body.scale.setScalar(1 + w.flash*0.14);
     }
     w.walk += dt*5.5;
     w.body.rotation.z = Math.sin(w.walk)*0.11;
@@ -5475,19 +5748,30 @@ function step(dt) {
     }
 
     for (const o of rocks) {
-      if (o.held) continue;
+      if (o.held || o.gone) continue;
       tmp.set(o.pos.x-w.pos.x, o.pos.y-1.2, o.pos.z-w.pos.z);
       if (tmp.length() < o.r + w.r) {
         const sp = o.vel.length();
-        if (sp > CFG.killSpeed) {
-          w.dead = true;
-          scene.remove(w.g);
-          burst(w.pos, 0x5d7a4a);
-          S.kills++;
-          S.shake = Math.min(0.9, S.shake+0.4);
-          o.vel.multiplyScalar(0.5);
-          o.seekT = 0; o.mesh.material = rockMat;
-          updateHUD();
+
+        if (o.def.explode) { detonate(o); break; }
+        if (o.def.puddle)  { spill(o);    break; }
+
+        if (sp > MIN_HIT_SPEED) {
+          // Damage is proportional to how fast it was really going, capped
+          // so a blast-launched prop cannot one-shot everything on the map.
+          const scale = Math.min(1.6, sp / CFG.throwSpeed);
+          tmp.y = 0; tmp.normalize();
+          damageWalker(w, o.def.dmg*scale, tmp, 4.5*(o.def.knock||1));
+          sparks(tmp.set(o.pos.x, 1.3, o.pos.z), 0xc9b08a, 7, 13);
+          S.shake = Math.min(0.9, S.shake + 0.12);
+
+          o.pierced++;
+          if (o.pierced > (o.def.pierce || 0)) {
+            o.vel.multiplyScalar(0.32);          // spent
+            o.seekT = 0; o.mesh.material = matFor(o.key, o.def);
+          } else {
+            o.vel.multiplyScalar(0.86);          // punches through
+          }
           break;
         } else {
           tmp.y = 0; tmp.normalize();
@@ -5507,6 +5791,57 @@ function step(dt) {
     g.life -= dt;
     g.mesh.material.opacity = clamp(g.life/g.max,0,1);
     if (g.life <= 0) { scene.remove(g.mesh); g.mesh.material.dispose(); gibs.splice(i,1); }
+  }
+
+  // Resupply pass. A prop is a candidate once it has been consumed, or has
+  // sat still well outside reach for a while — recycling the strays rather
+  // than spawning more keeps the simulation size flat.
+  S.recycleT -= dt;
+  if (S.recycleT <= 0) {
+    S.recycleT = 1.4;
+    let inReach = 0;
+    for (const o of rocks)
+      if (!o.gone && !o.held && o.pos.distanceTo(hero.pos) < CFG.grabRadius) inReach++;
+    if (inReach < 6) {
+      let moved = 0;
+      for (const o of rocks) {
+        if (moved >= 3) break;
+        if (o.held) continue;
+        const far = o.pos.distanceTo(hero.pos) > CFG.grabRadius + 6;
+        if (o.gone || (far && o.restT > 2)) { recycleObject(o); moved++; }
+      }
+    }
+  }
+
+  // Explosions are drained a few per frame. A dense barrel chain would
+  // otherwise resolve entirely inside one tick and drop a frame.
+  let budget = MAX_BLASTS;
+  while (blastQ.length && budget-- > 0) runBlast(blastQ.shift());
+
+  for (let i = puddles.length-1; i >= 0; i--) {
+    const p = puddles[i];
+    p.life -= dt;
+    p.mesh.material.opacity = 0.34 * Math.max(0, p.life/p.max);
+    p.mesh.scale.setScalar(0.6 + 0.4*Math.min(1, (p.max-p.life)*3));
+    for (const w of walkers) {
+      if (w.dead) continue;
+      if (Math.hypot(w.pos.x-p.pos.x, w.pos.z-p.pos.z) < p.r) damageWalker(w, p.dps*dt, null, 0);
+    }
+    if (p.life <= 0) { scene.remove(p.mesh); p.mesh.material.dispose(); puddles.splice(i,1); }
+  }
+
+  for (const s of shells) {
+    if (s.life <= 0) continue;
+    s.life -= dt;
+    const k2 = 1 - s.life/0.42;
+    s.mesh.scale.setScalar(s.r * (0.25 + k2*0.95));
+    s.mesh.material.opacity = 0.55 * (1-k2);
+    if (s.life <= 0) s.mesh.visible = false;
+  }
+
+  if (S.comboT > 0) {
+    S.comboT -= dt;
+    if (S.comboT <= 0 && S.combo) { S.combo = 0; updateHUD(); }
   }
 
   motes.rotation.y += dt*0.012;
@@ -5566,7 +5901,7 @@ function show(html) {
   ["hud","touch","cross"].forEach(i => el(i).classList.add("hide"));
 }
 
-function restart() { S.wave = 1; S.kills = 0; hero.hp = CFG.maxHealth; S.modeCd = 0; start(); }
+function restart() { S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0; start(); }
 
 // Adaptive quality. Bloom re-renders the scene several times at reduced
 // resolution, which a desktop GPU shrugs off and a weak phone does not.
