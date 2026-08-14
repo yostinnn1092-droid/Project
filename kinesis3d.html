@@ -113,6 +113,19 @@
     background: radial-gradient(circle, rgba(233,79,191,.5), rgba(233,79,191,.2));
     box-shadow: 0 0 40px rgba(233,79,191,.7);
   }
+  /* Loaded: the same button is now the trigger. Colour shifts to the
+     target red so it never reads as "gather" while stones are up. */
+  #force.loaded {
+    border-color: var(--blood);
+    background: radial-gradient(circle, rgba(255,90,60,.3), rgba(255,90,60,.08));
+    box-shadow: 0 0 26px rgba(255,90,60,.42);
+    line-height: 1.15;
+  }
+  #force .cnt {
+    display: block; font-size: 19px; font-style: normal; font-weight: 600;
+    letter-spacing: 0; margin-top: 3px; color: var(--blood);
+    font-variant-numeric: tabular-nums;
+  }
   /* mode toggle sits above FORCE, thumb-reachable */
   #modeBtn {
     position: absolute; right: 22px; bottom: 128px;
@@ -232,9 +245,9 @@
     <p class="sub">Best played in landscape</p>
     <p class="rule"><b>Move</b> with the left stick (or WASD). <b>Drag</b> anywhere to aim.</p>
     <p class="rule"><b>Tap FORCE</b> to gather stones — they ride a wheel behind you. Holding them is free.</p>
-    <p class="rule"><b>Tap again</b> to throw. Only the throw spends focus.</p>
-    <p class="rule"><b>Single</b> fires one at a time, each stone bending into the crosshair.
-       <b>Burst</b> throws everything at once, unguided. <b>MODE</b> swaps them — 10s cooldown.</p>
+    <p class="rule">The button then becomes <b>SHOOT</b> and stays there until the wheel is empty.</p>
+    <p class="rule"><b>Single</b> fires one stone per press, each bending into the crosshair.
+       <b>Burst</b> throws the lot at once, unguided. <b>MODE</b> swaps them — 10s cooldown.</p>
     <p class="rule">Survive 5 waves. A slow stone only shoves a <em>walker</em> back.</p>
     <button id="startBtn">Begin</button>
   </div>
@@ -4373,7 +4386,6 @@ const CFG = {
 
   throwSpeed:   40,
   killSpeed:    13,
-  fireDelay:    0.16,    // seconds between shots in single-target mode
   seekTurn:     3.0,     // rad/s the stone can bend toward its mark
   seekTime:     1.5,     // how long guidance lasts
   seekGrav:     0.25,    // gravity multiplier while guided
@@ -4561,7 +4573,6 @@ const S = {
   held: [],
   mode: "single",          // "single" | "aoe"
   modeCd: 0,               // seconds left on the switch cooldown
-  queue: [], queueT: 0,    // sequential fire queue (single-target mode)
   lock: null,              // walker currently under the crosshair
 };
 const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2 };
@@ -4571,7 +4582,7 @@ function clearAll() {
   rocks.length = 0;
   walkers.forEach(w => scene.remove(w.g)); walkers.length = 0;
   gibs.forEach(x => scene.remove(x.mesh)); gibs.length = 0;
-  S.held = []; S.queue = []; S.lock = null;
+  S.held = []; S.lock = null;
 }
 
 function buildWave(n) {
@@ -4597,7 +4608,7 @@ function updateHUD() {
   let h = "";
   for (let i = 0; i < CFG.maxHealth; i++) h += `<i class="${i < hero.hp ? "" : "off"}"></i>`;
   el("hp").innerHTML = h;
-  el("carry").textContent = S.held.length + S.queue.length;
+  el("carry").textContent = S.held.length;
 }
 
 let toastT = 0;
@@ -4609,12 +4620,27 @@ function toast(msg, ms = 1900) {
 }
 
 // ─────────────────────────────────────────────────────────── modes
+function updateForceLabel() {
+  // The button IS the state readout: FORCE while empty, SHOOT/THROW while
+  // loaded, with the remaining count on it. Reverts on its own at zero.
+  const n = S.held.length, btn = el("force");
+  if (!n) {
+    btn.innerHTML = "Force";
+    btn.classList.remove("loaded");
+  } else {
+    btn.innerHTML = (S.mode === "single" ? "Shoot" : "Throw") +
+                    '<b class="cnt">' + n + '</b>';
+    btn.classList.add("loaded");
+  }
+}
+
 function setMode(m, silent) {
   S.mode = m;
   el("modeName").textContent = m === "single" ? "Single" : "Burst";
   el("modeBtn").classList.toggle("aoe", m === "aoe");
   el("cross").classList.toggle("aoe", m === "aoe");
-  if (!silent) toast(m === "single" ? "Single target — guided, one by one"
+  updateForceLabel();
+  if (!silent) toast(m === "single" ? "Single — one press, one guided shot"
                                     : "Burst — everything at once");
 }
 
@@ -4682,7 +4708,11 @@ addEventListener("pointercancel", lookEnd);
 // ─────────────────────────────────────────────────────────── power
 function pressForce() {
   if (S.phase !== "play") return;
-  if (S.held.length) { throwStones(); return; }
+  if (S.held.length) {
+    if (S.mode === "single") shootOne();
+    else burstAll();
+    return;
+  }
   gather();
 }
 
@@ -4696,40 +4726,40 @@ function gather() {
   near.forEach((o,i) => { o.held = true; o.slot = i; o.mesh.material = rockHot; });
   S.held = near;
   updateHUD();
+  updateForceLabel();
 }
 
 const aimDir = new T.Vector3();
 
-function throwStones() {
+function shootOne() {
+  if (S.focus < CFG.throwCost) { toast("No focus"); return; }
+  S.focus = Math.max(0, S.focus - CFG.throwCost);
+  const o = S.held.shift();
+  // Re-index the survivors so the wheel stays evenly spaced as it empties,
+  // instead of leaving a growing gap where the fired stones used to sit.
+  S.held.forEach((s, i) => { s.slot = i; });
+  launchSeeker(o);
+  updateHUD();
+  updateForceLabel();
+}
+
+function burstAll() {
   const n = S.held.length;
   if (!n) return;
-  const cost = CFG.throwCost * n;
   if (S.focus <= 0.02) { toast("No focus left"); return; }
-  S.focus = Math.max(0, S.focus - cost);
-  aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
-
-  if (S.mode === "aoe") {
-    // Burst: everything leaves at once, fanned out. No guidance — this is
-    // the mode you use when you are surrounded and precision is hopeless.
-    S.held.forEach((o,i) => {
-      o.held = false;
-      o.mesh.material = rockMat;
-      const spread = (i - (n-1)/2) * 0.16;
-      o.vel.set(Math.sin(cam.yaw+spread), 0, Math.cos(cam.yaw+spread))
-        .multiplyScalar(CFG.throwSpeed)
-        .add(new T.Vector3(0, rand(1.0,2.6), 0));
-    });
-    S.held = [];
-    S.shake = Math.min(0.6, S.shake + 0.35);
-  } else {
-    // Single target: queue them and fire one at a time. Each stone picks its
-    // mark at launch, so if the first shot kills the walker the rest retarget
-    // instead of chasing a corpse.
-    S.queue = S.held.slice();
-    S.held = [];
-    S.queueT = 0;
-  }
+  S.focus = Math.max(0, S.focus - CFG.throwCost * n);
+  S.held.forEach((o,i) => {
+    o.held = false;
+    o.mesh.material = rockMat;
+    const spread = (i - (n-1)/2) * 0.16;
+    o.vel.set(Math.sin(cam.yaw+spread), 0, Math.cos(cam.yaw+spread))
+      .multiplyScalar(CFG.throwSpeed)
+      .add(new T.Vector3(0, rand(1.0,2.6), 0));
+  });
+  S.held = [];
+  S.shake = Math.min(0.6, S.shake + 0.35);
   updateHUD();
+  updateForceLabel();
 }
 
 function launchSeeker(o) {
@@ -4772,16 +4802,6 @@ function step(dt) {
     if (S.modeCd === 0) el("modeBtn").classList.remove("cool");
   }
 
-  // sequential fire
-  if (S.queue.length) {
-    S.queueT -= dt;
-    if (S.queueT <= 0) {
-      launchSeeker(S.queue.shift());
-      S.queueT = CFG.fireDelay;
-      updateHUD();
-    }
-  }
-
   // ---- movement
   let ix = input.mx, iz = input.mz;
   if (keys.has("KeyW") || keys.has("ArrowUp"))    iz -= 1;
@@ -4812,7 +4832,7 @@ function step(dt) {
 
   const sw = Math.sin(hero.walk) * (mag > 1e-3 ? 0.7 : 0);
   legL.rotation.x = sw; legR.rotation.x = -sw;
-  const channel = S.held.length > 0 || S.queue.length > 0;
+  const channel = S.held.length > 0;
   const at = channel ? -2.25 : 0, k = Math.min(1, 9*dt);
   armL.rotation.x += (at-armL.rotation.x)*k;
   armR.rotation.x += (at-armR.rotation.x)*k;
@@ -5059,13 +5079,14 @@ function start() {
   el("overlay").classList.add("hide");
   ["hud","touch","cross"].forEach(i => el(i).classList.remove("hide"));
   setMode("single", true);
+  updateForceLabel();
   S.modeCd = 0;
   el("modeBtn").classList.remove("cool");
   buildWave(S.wave);
   S.phase = "play";
   last = performance.now();
   resize();
-  toast("Tap FORCE to gather · tap again to throw", 3200);
+  toast("Tap FORCE to gather · then SHOOT one at a time", 3400);
 }
 
 el("startBtn").addEventListener("click", start);
