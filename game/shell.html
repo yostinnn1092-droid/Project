@@ -129,7 +129,11 @@
     text-shadow: 0 0 10px rgba(233,79,191,.6); white-space: nowrap;
   }
   #modName2.show { display: block; }
-  #waveChip { min-width: 54px; }
+  /* Where you are, under the wave number, in the HUD's quietest voice. */
+  #arena { display: block; font-family: var(--mono); font-size: 8px;
+           letter-spacing: .16em; color: var(--dim); margin-top: 2px;
+           white-space: nowrap; }
+  #waveChip { min-width: 70px; }
 
   /* end-of-run scoreboard */
   .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px;
@@ -393,6 +397,7 @@
 
 <div id="hud" class="hide">
   <div class="chip" id="waveChip"><span class="lbl">Wave</span><span class="val" id="wave">1</span>
+    <span id="arena"></span>
     <span id="modName2"></span></div>
   <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
   <div class="chip" id="focusWrap"><span class="lbl">Focus</span>

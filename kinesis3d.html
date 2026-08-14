@@ -129,7 +129,11 @@
     text-shadow: 0 0 10px rgba(233,79,191,.6); white-space: nowrap;
   }
   #modName2.show { display: block; }
-  #waveChip { min-width: 54px; }
+  /* Where you are, under the wave number, in the HUD's quietest voice. */
+  #arena { display: block; font-family: var(--mono); font-size: 8px;
+           letter-spacing: .16em; color: var(--dim); margin-top: 2px;
+           white-space: nowrap; }
+  #waveChip { min-width: 70px; }
 
   /* end-of-run scoreboard */
   .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px;
@@ -393,6 +397,7 @@
 
 <div id="hud" class="hide">
   <div class="chip" id="waveChip"><span class="lbl">Wave</span><span class="val" id="wave">1</span>
+    <span id="arena"></span>
     <span id="modName2"></span></div>
   <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
   <div class="chip" id="focusWrap"><span class="lbl">Focus</span>
@@ -4902,7 +4907,8 @@ addEventListener("resize", resize);
 addEventListener("orientationchange", () => setTimeout(resize, 250));
 
 // ─────────────────────────────────────────────────────────── lighting
-scene.add(new T.HemisphereLight(0x53709a, 0x27301c, 1.25));
+const hemi = new T.HemisphereLight(0x53709a, 0x27301c, 1.25);
+scene.add(hemi);
 const sun = new T.DirectionalLight(0xc3d8f5, 2.1);   // moonlight through the canopy
 sun.position.set(14, 22, 10);
 sun.castShadow = true;
@@ -4922,22 +4928,81 @@ scene.add(rim);
 const psi = new T.PointLight(0xe94fbf, 0, 24, 2);
 scene.add(psi);
 
-// ─────────────────────────────────────────────────────────── woods
+// ─────────────────────────────────────────────────────────── arenas
+// Four places to fight, cycling every three waves. They are not reskins:
+// each one changes how much cover you get, how far you can see, and how
+// legible a body is against the ground — which is the whole read of a fight
+// at range. Everything below is built ONCE and then re-coloured and
+// re-placed per arena, because disposing and rebuilding two hundred
+// instanced trees mid-run is a stutter the player would feel.
+const ARENAS = [
+  { id:"woods", name:"BLACKWOOD", sub:"Night forest. Close horizon, heavy cover.",
+    bg:0x0b1310, fogNear:26, fogFar:72,
+    ground:0x33402a, clearing:0x46512f,
+    hemiSky:0x53709a, hemiGround:0x27301c, hemiI:1.25,
+    sun:0xc3d8f5, sunI:2.1, rim:0x7fd0a0, rimI:1.0,
+    trunk:0x3b2f26, foliaA:0x24401f, foliaB:0x2f5228,
+    treeH:[7,15], trunkW:1.0, canopyScale:1.0, treeRing:23,
+    scrub:0x1d3018, scrubN:64,
+    bole:0x4a3b2c, stone:0x8d9199, log:0x342a22,
+    mote:0xd8e878, moteSize:0.13, moteHi:6,
+    coverTrees:6, coverStones:4, logs:7 },
+
+  { id:"quarry", name:"THE QUARRY", sub:"Open stone. Long sightlines, little to hide behind.",
+    bg:0x161311, fogNear:40, fogFar:112,
+    ground:0x4a4238, clearing:0x5d5346,
+    hemiSky:0x9a8a70, hemiGround:0x342c24, hemiI:1.5,
+    sun:0xffd9a8, sunI:2.4, rim:0xc98f5a, rimI:0.8,
+    trunk:0x6e6355, foliaA:0x7d7263, foliaB:0x5f564a,
+    treeH:[3.5,7.5], trunkW:2.7, canopyScale:0.5, treeRing:30,
+    scrub:0x554b3e, scrubN:40,
+    bole:0x6e6355, stone:0x9a9188, log:0x554b3e,
+    mote:0xe8d9a8, moteSize:0.10, moteHi:9,
+    coverTrees:3, coverStones:8, logs:4 },
+
+  { id:"ash", name:"ASHFALL", sub:"Burnt ground. Embers falling, almost no cover left.",
+    bg:0x150a08, fogNear:20, fogFar:64,
+    ground:0x35211a, clearing:0x4a2e23,
+    hemiSky:0x9a4a30, hemiGround:0x1c100c, hemiI:1.15,
+    sun:0xffb079, sunI:2.15, rim:0xff4a2a, rimI:0.9,
+    trunk:0x241a16, foliaA:0x2e201a, foliaB:0x1c1310,
+    treeH:[6,13], trunkW:0.72, canopyScale:0.22, treeRing:26,
+    scrub:0x2a1a14, scrubN:30,
+    bole:0x2b1f19, stone:0x6b5a52, log:0x1f1512,
+    mote:0xff7a3c, moteSize:0.16, moteHi:11,
+    coverTrees:4, coverStones:3, logs:9 },
+
+  { id:"ruin", name:"SUNKEN RUIN", sub:"Flooded stonework. Cold light, broken pillars.",
+    bg:0x08131a, fogNear:22, fogFar:80,
+    ground:0x1e3038, clearing:0x2a4149,
+    hemiSky:0x4a8fa8, hemiGround:0x16242a, hemiI:1.35,
+    sun:0xa8d8f0, sunI:1.9, rim:0x4fd6e9, rimI:1.2,
+    trunk:0x6d7a80, foliaA:0x2c4a44, foliaB:0x223a38,
+    treeH:[5,12], trunkW:1.7, canopyScale:0.55, treeRing:25,
+    scrub:0x1a2e2a, scrubN:52,
+    bole:0x7a838a, stone:0x8fa0a8, log:0x3a4a50,
+    mote:0x9fe8ff, moteSize:0.12, moteHi:8,
+    coverTrees:5, coverStones:6, logs:5 },
+];
+
+// ─────────────────────────────────────────────────────────── world
 const groundMat = new T.MeshStandardMaterial({ color: 0x33402a, roughness: 1.0 });
 const ground = new T.Mesh(new T.CircleGeometry(CFG.arena + 26, 96), groundMat);
 ground.rotation.x = -Math.PI/2; ground.receiveShadow = true;
 scene.add(ground);
 
-// A worn clearing floor, slightly lighter than the forest bed, so the
+// A worn clearing floor, slightly lighter than the ground beyond it, so the
 // playable circle reads as a place rather than an invisible rule.
-const clearing = new T.Mesh(new T.CircleGeometry(CFG.arena, 72),
-  new T.MeshStandardMaterial({ color: 0x46512f, roughness: 1.0 }));
+const clearMat = new T.MeshStandardMaterial({ color: 0x46512f, roughness: 1.0 });
+const clearing = new T.Mesh(new T.CircleGeometry(CFG.arena, 72), clearMat);
 clearing.rotation.x = -Math.PI/2; clearing.position.y = 0.015;
 clearing.receiveShadow = true;
 scene.add(clearing);
 
-// Trees are instanced: ~200 trunks and 400 foliage blobs would be 600 draw
-// calls as separate meshes, and 3 as instances.
+// Treeline is instanced: ~200 trunks and 400 crowns would be 600 draw calls
+// as separate meshes, and 3 as instances. The same three meshes serve every
+// arena — a quarry is the same instances with rock colours, a squat profile
+// and the crowns scaled down to rubble.
 const TREES = 210;
 const trunkMat = new T.MeshStandardMaterial({ color: 0x3b2f26, roughness: 0.95 });
 const foliaA   = new T.MeshStandardMaterial({ color: 0x24401f, roughness: 0.95, flatShading: true });
@@ -4948,51 +5013,65 @@ const canopy1 = new T.InstancedMesh(new T.IcosahedronGeometry(1, 0), foliaA, TRE
 const canopy2 = new T.InstancedMesh(new T.IcosahedronGeometry(1, 0), foliaB, TREES);
 trunks.castShadow = canopy1.castShadow = canopy2.castShadow = true;
 trunks.receiveShadow = canopy1.receiveShadow = canopy2.receiveShadow = true;
-
-const M = new T.Matrix4(), Q = new T.Quaternion(), Vp = new T.Vector3(), Vs = new T.Vector3();
-for (let i = 0; i < TREES; i++) {
-  // Ring the clearing, thickening outward, so the player is walled in by
-  // woods without a single tree standing inside the fight.
-  const a = rand(0, Math.PI*2);
-  const d = CFG.arena + 2.5 + Math.pow(Math.random(), 0.65) * 23;
-  const x = Math.cos(a)*d, z = Math.sin(a)*d;
-  const h = rand(7, 15), lean = rand(-0.06, 0.06);
-
-  Q.setFromEuler(new T.Euler(lean, rand(0, 6.28), lean));
-  M.compose(Vp.set(x, h/2, z), Q, Vs.set(rand(0.8,1.3), h, rand(0.8,1.3)));
-  trunks.setMatrixAt(i, M);
-
-  const r1 = rand(1.9, 3.2);
-  Q.setFromEuler(new T.Euler(rand(0,1), rand(0,6.28), rand(0,1)));
-  M.compose(Vp.set(x, h*0.82, z), Q, Vs.set(r1, r1*rand(0.7,1.0), r1));
-  canopy1.setMatrixAt(i, M);
-
-  const r2 = r1 * rand(0.6, 0.85);
-  Q.setFromEuler(new T.Euler(rand(0,1), rand(0,6.28), rand(0,1)));
-  M.compose(Vp.set(x + rand(-1,1), h*0.62, z + rand(-1,1)), Q, Vs.set(r2, r2*0.8, r2));
-  canopy2.setMatrixAt(i, M);
-}
 scene.add(trunks, canopy1, canopy2);
 
-// Undergrowth inside the clearing: purely decorative and kept low, so it
-// dresses the floor without ever blocking a stone or a walker.
+const M = new T.Matrix4(), Q = new T.Quaternion(), Vp = new T.Vector3(), Vs = new T.Vector3();
+
+function layTreeline(A) {
+  for (let i = 0; i < TREES; i++) {
+    // Ring the clearing, thickening outward, so the player is walled in
+    // without a single trunk standing inside the fight.
+    const a = rand(0, Math.PI*2);
+    const d = CFG.arena + 2.5 + Math.pow(Math.random(), 0.65) * A.treeRing;
+    const x = Math.cos(a)*d, z = Math.sin(a)*d;
+    const h = rand(A.treeH[0], A.treeH[1]), lean = rand(-0.06, 0.06);
+
+    Q.setFromEuler(new T.Euler(lean, rand(0, 6.28), lean));
+    const tw = A.trunkW;
+    M.compose(Vp.set(x, h/2, z), Q, Vs.set(rand(0.8,1.3)*tw, h, rand(0.8,1.3)*tw));
+    trunks.setMatrixAt(i, M);
+
+    const cs = A.canopyScale;
+    const r1 = rand(1.9, 3.2) * cs;
+    Q.setFromEuler(new T.Euler(rand(0,1), rand(0,6.28), rand(0,1)));
+    M.compose(Vp.set(x, h*0.82, z), Q, Vs.set(r1, r1*rand(0.7,1.0), r1));
+    canopy1.setMatrixAt(i, M);
+
+    const r2 = r1 * rand(0.6, 0.85);
+    Q.setFromEuler(new T.Euler(rand(0,1), rand(0,6.28), rand(0,1)));
+    M.compose(Vp.set(x + rand(-1,1), h*0.62, z + rand(-1,1)), Q, Vs.set(r2, r2*0.8, r2));
+    canopy2.setMatrixAt(i, M);
+  }
+  trunks.instanceMatrix.needsUpdate = true;
+  canopy1.instanceMatrix.needsUpdate = true;
+  canopy2.instanceMatrix.needsUpdate = true;
+}
+
+// Ground cover inside the clearing: purely decorative and kept low, so it
+// dresses the floor without ever blocking a stone or a walker. Unused
+// instances are parked at zero scale rather than removed.
 const SCRUB = 64;
 const scrubMat = new T.MeshStandardMaterial({ color: 0x1d3018, roughness: 1, flatShading: true });
 const scrub = new T.InstancedMesh(new T.IcosahedronGeometry(1, 0), scrubMat, SCRUB);
 scrub.receiveShadow = true;
-for (let i = 0; i < SCRUB; i++) {
-  const a = rand(0, Math.PI*2), d = Math.sqrt(Math.random()) * (CFG.arena - 2);
-  const s = rand(0.5, 1.25);
-  Q.setFromEuler(new T.Euler(0, rand(0,6.28), 0));
-  // Wide and very flat: a tuft, not a boulder.
-  M.compose(Vp.set(Math.cos(a)*d, 0.06, Math.sin(a)*d), Q, Vs.set(s*1.9, s*0.22, s*1.9));
-  scrub.setMatrixAt(i, M);
-}
 scene.add(scrub);
 
-// Solid cover inside the clearing. Until now the arena floor was empty and
-// the treeline purely decorative, so there was nothing to slam anything
-// INTO — which is half of what environmental combat means.
+function layScrub(A) {
+  for (let i = 0; i < SCRUB; i++) {
+    if (i >= A.scrubN) { M.makeScale(0,0,0); scrub.setMatrixAt(i, M); continue; }
+    const a = rand(0, Math.PI*2), d = Math.sqrt(Math.random()) * (CFG.arena - 2);
+    const s = rand(0.5, 1.25);
+    Q.setFromEuler(new T.Euler(0, rand(0,6.28), 0));
+    // Wide and very flat: a tuft, not a boulder.
+    M.compose(Vp.set(Math.cos(a)*d, 0.06, Math.sin(a)*d), Q, Vs.set(s*1.9, s*0.22, s*1.9));
+    scrub.setMatrixAt(i, M);
+  }
+  scrub.instanceMatrix.needsUpdate = true;
+}
+
+// Solid cover inside the clearing. Until this existed the arena floor was
+// empty and the treeline purely decorative, so there was nothing to slam
+// anything INTO — which is half of what environmental combat means.
 const obstacles = [];
 const boleMat  = new T.MeshStandardMaterial({ color: 0x4a3b2c, roughness: 0.95 });
 const stoneMat = new T.MeshStandardMaterial({ color: 0x8d9199, roughness: 0.9, flatShading: true });
@@ -5011,7 +5090,7 @@ function addObstacle(x, z, r, h, kind) {
                    hp: kind === "stone" ? 420 : 300, maxHp: kind === "stone" ? 420 : 300,
                    dead:false });
 }
-// Cover has to be hittable without becoming a wall between the player and
+
 function hurtObstacle(ob, amount) {
   if (ob.dead) return;
   ob.hp -= amount;
@@ -5030,46 +5109,106 @@ function hurtObstacle(ob, amount) {
   queueBlast(ob.pos, { r: ob.r + 3.4, dmg: 120 }, null);
 }
 
+// Cover has to be hittable without becoming a wall between the player and
 // the fight. A first pass put 15 obstacles from 0.3x arena radius outward,
 // including boulders the size of a house directly in the firing line; most
 // throws hit scenery and the kill rate collapsed. Fewer, smaller, and held
 // out past the middle where the player actually stands.
-for (let i = 0; i < 6; i++) {
-  const a = (i/6)*Math.PI*2 + rand(-0.35,0.35), d = rand(CFG.arena*0.58, CFG.arena*0.9);
-  addObstacle(Math.cos(a)*d, Math.sin(a)*d, rand(0.6,0.85), rand(5,8), "tree");
-}
-for (let i = 0; i < 4; i++) {
-  const a = (i/4)*Math.PI*2 + rand(-0.6,0.6), d = rand(CFG.arena*0.55, CFG.arena*0.85);
-  addObstacle(Math.cos(a)*d, Math.sin(a)*d, rand(0.7,1.0), 1.9, "stone");
+function layCover(A) {
+  // A dozen meshes is cheap to rebuild; the instanced treeline is not, which
+  // is why only this part is torn down between arenas.
+  obstacles.forEach(ob => { scene.remove(ob.mesh); ob.mesh.geometry.dispose(); });
+  obstacles.length = 0;
+  for (let i = 0; i < A.coverTrees; i++) {
+    const a = (i/A.coverTrees)*Math.PI*2 + rand(-0.35,0.35);
+    const d = rand(CFG.arena*0.58, CFG.arena*0.9);
+    addObstacle(Math.cos(a)*d, Math.sin(a)*d, rand(0.6,0.85), rand(5,8), "tree");
+  }
+  for (let i = 0; i < A.coverStones; i++) {
+    const a = (i/A.coverStones)*Math.PI*2 + rand(-0.6,0.6);
+    const d = rand(CFG.arena*0.55, CFG.arena*0.85);
+    addObstacle(Math.cos(a)*d, Math.sin(a)*d, rand(0.7,1.0), 1.9, "stone");
+  }
 }
 
-// Fallen logs, a few, for silhouette interest at ground level.
+// Fallen logs and rubble, for silhouette interest at ground level.
 const logMat = new T.MeshStandardMaterial({ color: 0x342a22, roughness: 1 });
-for (let i = 0; i < 7; i++) {
-  const a = rand(0, Math.PI*2), d = rand(CFG.arena*0.45, CFG.arena-3);
-  const L = new T.Mesh(new T.CylinderGeometry(0.34, 0.42, rand(3,6), 6), logMat);
-  L.position.set(Math.cos(a)*d, 0.36, Math.sin(a)*d);
-  L.rotation.set(Math.PI/2, 0, rand(0, 6.28));
-  L.rotation.z = rand(0, 6.28);
-  L.castShadow = L.receiveShadow = true;
-  scene.add(L);
+const logs = [];
+
+function layLogs(A) {
+  logs.forEach(L => { scene.remove(L); L.geometry.dispose(); });
+  logs.length = 0;
+  for (let i = 0; i < A.logs; i++) {
+    const a = rand(0, Math.PI*2), d = rand(CFG.arena*0.45, CFG.arena-3);
+    const L = new T.Mesh(new T.CylinderGeometry(0.34, 0.42, rand(3,6), 6), logMat);
+    L.position.set(Math.cos(a)*d, 0.36, Math.sin(a)*d);
+    L.rotation.set(Math.PI/2, 0, rand(0, 6.28));
+    L.rotation.z = rand(0, 6.28);
+    L.castShadow = L.receiveShadow = true;
+    scene.add(L);
+    logs.push(L);
+  }
 }
 
-// Fireflies. Same trick as the old dust, but warm and drifting low, which
-// is what sells "woods at night" more than any amount of tree geometry.
+// Drifting motes. Fireflies in the woods, dust in the quarry, embers in the
+// ash — same points, different colour, size and ceiling.
 const moteN = 260, motePos = new Float32Array(moteN*3);
-for (let i = 0; i < moteN; i++) {
-  const a = rand(0, Math.PI*2), d = Math.sqrt(Math.random()) * (CFG.arena + 12);
-  motePos[i*3]   = Math.cos(a)*d;
-  motePos[i*3+1] = rand(0.5, 6);
-  motePos[i*3+2] = Math.sin(a)*d;
-}
 const moteGeo = new T.BufferGeometry();
 moteGeo.setAttribute("position", new T.BufferAttribute(motePos, 3));
-const motes = new T.Points(moteGeo, new T.PointsMaterial({
+const moteMat = new T.PointsMaterial({
   color: 0xd8e878, size: 0.13, transparent: true, opacity: 0.85,
-  depthWrite: false, sizeAttenuation: true }));
+  depthWrite: false, sizeAttenuation: true });
+const motes = new T.Points(moteGeo, moteMat);
 scene.add(motes);
+
+function layMotes(A) {
+  for (let i = 0; i < moteN; i++) {
+    const a = rand(0, Math.PI*2), d = Math.sqrt(Math.random()) * (CFG.arena + 12);
+    motePos[i*3]   = Math.cos(a)*d;
+    motePos[i*3+1] = rand(0.5, A.moteHi);
+    motePos[i*3+2] = Math.sin(a)*d;
+  }
+  moteGeo.attributes.position.needsUpdate = true;
+  moteMat.color.setHex(A.mote);
+  moteMat.size = A.moteSize;
+}
+
+// The one entry point: swap every palette and re-lay everything that varies.
+let arena = ARENAS[0];
+
+function buildArena(A) {
+  arena = A;
+  scene.background.setHex(A.bg);
+  scene.fog.color.setHex(A.bg);
+  scene.fog.near = A.fogNear; scene.fog.far = A.fogFar;
+
+  hemi.color.setHex(A.hemiSky); hemi.groundColor.setHex(A.hemiGround);
+  hemi.intensity = A.hemiI;
+  sun.color.setHex(A.sun); sun.intensity = A.sunI;
+  rim.color.setHex(A.rim);  rim.intensity = A.rimI;
+
+  groundMat.color.setHex(A.ground);
+  clearMat.color.setHex(A.clearing);
+  trunkMat.color.setHex(A.trunk);
+  foliaA.color.setHex(A.foliaA);
+  foliaB.color.setHex(A.foliaB);
+  scrubMat.color.setHex(A.scrub);
+  boleMat.color.setHex(A.bole);
+  stoneMat.color.setHex(A.stone);
+  logMat.color.setHex(A.log);
+
+  layTreeline(A);
+  layScrub(A);
+  layCover(A);
+  layLogs(A);
+  layMotes(A);
+}
+
+// Three waves each, then cycle, so a long run keeps moving instead of
+// running out of places at wave 12.
+function arenaFor(n) {
+  return ARENAS[Math.floor((n-1)/3) % ARENAS.length];
+}
 
 // ─────────────────────────────────────────────────────────── hero
 const HERO = new T.Group();
@@ -5773,6 +5912,10 @@ const SFX = {
   combo:  (n) => tone(520 + Math.min(n,8)*90, 0.14, "triangle", 0.18, 780 + n*70),
   pick:   () => tone(760, 0.1, "triangle", 0.16, 1150),
   wave:   () => { tone(300, 0.5, "sine", 0.2, 620); setTimeout(()=>tone(460,0.45,"sine",0.16,760), 130); },
+  // Arrival: a low swell, deliberately unlike the wave chime.
+  arena:  () => { tone(90, 1.5, "sine", 0.28, 210);
+                  tone(135, 1.3, "triangle", 0.14, 320);
+                  noise(1.1, 0.16, 900, 2600); },
   // Rank-up climbs with the rank so S reads as bigger news than C.
   rankUp: (i) => { const f = 440 * Math.pow(1.16, i);
                    tone(f, 0.16, "triangle", 0.2, f*1.5);
@@ -6254,6 +6397,11 @@ function resetObstacles() {
 function buildWave(n) {
   clearAll();
   rollModifier(n);
+  // Only re-lay the world when the place actually changes; re-laying 210
+  // instanced trees every single wave is work nobody asked for.
+  const A = arenaFor(n);
+  const moved = A !== arena;
+  if (moved) buildArena(A);
 
   // Scatter the catalogue rather than a pile of identical rocks, so what is
   // lying near you is itself a tactical fact.
@@ -6295,7 +6443,16 @@ function buildWave(n) {
     mn.textContent = WMOD.name || "";
     mn.classList.toggle("show", !!WMOD.name);
   }
-  if (WMOD.name) setTimeout(() => { banner(WMOD.name); toast(WMOD.desc, 3200); }, 420);
+  // Arriving somewhere new is the louder event, so it gets the banner and
+  // the condition follows it rather than fighting it for the same slot.
+  if (moved) {
+    banner(A.name);
+    toast(A.name + " — " + A.sub, 3000);
+    el("arena").textContent = A.name;
+    SFX.arena();
+  }
+  if (WMOD.name) setTimeout(() => { banner(WMOD.name); toast(WMOD.desc, 3200); },
+                            moved ? 3200 : 420);
   updateHUD();
 }
 
@@ -7409,6 +7566,8 @@ function restart() {
   taken.length = 0;
   S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0;
   S.style = 0; S.styleT = 0; S.rank = "D"; S.recent.length = 0;
+  buildArena(ARENAS[0]);
+  el("arena").textContent = ARENAS[0].name;
   S.kinetic = 0; endOverdrive();
   start();
 }
@@ -7473,6 +7632,12 @@ function start() {
 // Browsers only allow audio to start from a gesture, so the first tap of
 // the run is where the context is created.
 el("startBtn").addEventListener("click", () => { audioInit(); start(); });
+
+// The module-level declarations create the meshes; nothing is placed until
+// here, so the opening arena goes through exactly the same path as every
+// later one rather than being a special case built inline.
+buildArena(ARENAS[0]);
+el("arena").textContent = ARENAS[0].name;
 
 loadProfile();
 if (PROFILE.runs > 0) {
