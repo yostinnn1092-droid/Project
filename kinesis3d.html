@@ -103,6 +103,28 @@
   .upg i { font-style: normal; font-size: 12.5px; line-height: 1.5; color: var(--dim); }
   @media (max-height: 430px) { .upg { min-height: 108px; padding: 10px 11px; } }
 
+  /* ───── boss bar ───── */
+  #bossBar {
+    position: fixed; left: 50%; top: 62px; transform: translateX(-50%);
+    width: min(520px, 76vw); z-index: 6; pointer-events: none;
+    opacity: 0; transition: opacity .3s ease;
+  }
+  #bossBar.show { opacity: 1; }
+  #bossName {
+    font-family: var(--mono); font-size: 9px; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--dim); text-align: center;
+    margin-bottom: 4px;
+  }
+  #bossBar.open #bossName { color: var(--blood); }
+  .bb { height: 7px; border-radius: 3px; background: rgba(232,228,240,.12);
+        overflow: hidden; margin-bottom: 3px; }
+  /* Two bars, stacked: armour on top, core underneath. The player can see
+     the fight has two phases before anyone explains it. */
+  #bossPlate { height: 100%; background: linear-gradient(90deg,#5c6675,#aab4c4);
+               transition: width .16s linear; }
+  #bossCore  { height: 100%; background: linear-gradient(90deg,#7a1f14,var(--blood));
+               transition: width .16s linear; }
+
   /* ───── crosshair ───── */
   #cross {
     position: fixed; left: 50%; top: 50%; width: 46px; height: 46px;
@@ -194,6 +216,12 @@
   .ab:active { transform: scale(.93); }
   .ab.cool { opacity: .42; }
   #jump { right: 128px; bottom: 22px; }
+  #rep  { right: 206px; bottom: 61px; border-color: rgba(233,79,191,.7); }
+  #repCd {
+    position: absolute; inset: 0; background: rgba(233,79,191,.24);
+    transform-origin: top center; transform: scaleY(0); pointer-events: none;
+  }
+  @media (max-width: 700px) { #rep { right: 200px; bottom: 58px; width: 62px; height: 62px; } }
   #dash { right: 128px; bottom: 100px; border-color: rgba(111,155,255,.65); }
   /* cooldown drains downward behind the label */
   #dashCd {
@@ -307,11 +335,17 @@
   <div id="stick"><div id="knob"></div></div>
   <button id="jump" class="ab"><span>Jump</span></button>
   <button id="dash" class="ab"><div id="dashCd"></div><span>Dash</span></button>
+  <button id="rep" class="ab"><div id="repCd"></div><span>Push</span></button>
   <button id="modeBtn"><span class="mt">Mode</span><span id="modeName">Single</span>
     <div id="modeCdWrap"><div id="modeCd"></div></div></button>
   <button id="force">Force</button>
 </div>
 
+<div id="bossBar">
+  <div id="bossName">Warden</div>
+  <div class="bb"><div id="bossPlate"></div></div>
+  <div class="bb"><div id="bossCore"></div></div>
+</div>
 <div id="combo"></div>
 <div id="toast"></div>
 
@@ -342,7 +376,7 @@
     <p class="rule">Runners are fast and frail. <em>Armored</em> and <em>Tanks</em> shrug off rocks —
        use boulders, girders or barrels. <em>Exploders</em> detonate when they die.</p>
     <p class="rule" style="margin-top:12px;font-size:11px;opacity:.7">
-       Keyboard — WASD move · Space jump · Shift dash · F fire · Q mode</p>
+       Keyboard — WASD move · Space jump · Shift dash · R push · F fire · Q mode</p>
     <button id="startBtn">Begin</button>
   </div>
 </div>
@@ -4715,7 +4749,9 @@ const CFG = {
   singleMul:    1.4,     // precision bonus: one deliberate, heavy shot
   burstMul:     0.6,     // each burst projectile hits softer, but spreads
   weakMul:      2.0,     // head hit
-  burstCone:    0.72,    // how wide burst will spread to find separate marks
+  burstCone:    0.72,
+  repulseR:     13,
+  repulseCd:    8,    // how wide burst will spread to find separate marks
 };
 
 const el = id => document.getElementById(id);
@@ -5049,6 +5085,7 @@ function spawnObject(key, x, z) {
     spin: new T.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)),
     m: def.mass * r*r*r * 3.4,
     held:false, slot:0, seek:null, seekT:0, pierced:0, gone:false, restT:0, mult:1,
+    hostile:0,
   });
 }
 
@@ -5095,11 +5132,68 @@ const WAVES = [
   { walker:5, leaper:3, crawler:4, exploder:3 },
   { runner:6, armored:3, tank:1, leaper:2 },
   { walker:6, runner:4, armored:3, exploder:3, tank:2 },
+  { boss:1, walker:4, runner:3 },
 ];
+
+// The boss is a telekinesis problem, not a health bar: four plates must be
+// stripped before the core can be touched, and it fights by throwing the
+// same debris the player is using.
+const BOSS = {
+  name:"Warden", plateHp:230, plates:4, coreHp:1300,
+  speed:1.05, reach:3.2, atkEvery:3.6, score:5000,
+};
 
 const walkers = [];
 
+function spawnBoss(x, z) {
+  const g = new T.Group();
+  const skinM = new T.MeshStandardMaterial({ color:0x4d5a44, roughness:1, flatShading:true });
+  const plateM= new T.MeshStandardMaterial({ color:0x6d7686, roughness:0.55, metalness:0.5,
+                                             flatShading:true });
+  const coreM = new T.MeshStandardMaterial({ color:0xff3c2a, emissive:0xff3c2a,
+                                             emissiveIntensity:1.4, roughness:0.3 });
+  g.add(part(new T.CylinderGeometry(1.15, 1.55, 3.1, 9), skinM, 0, 2.0, 0));
+  g.add(part(new T.SphereGeometry(0.72, 14, 10), skinM, 0, 4.0, 0.1));
+  g.add(part(new T.SphereGeometry(0.16, 8, 6),
+        new T.MeshBasicMaterial({ color:0xff6a30 }), -0.3, 4.1, 0.62));
+  g.add(part(new T.SphereGeometry(0.16, 8, 6),
+        new T.MeshBasicMaterial({ color:0xff6a30 }),  0.3, 4.1, 0.62));
+  const core = part(new T.OctahedronGeometry(0.62, 0), coreM, 0, 2.5, 0.95);
+  g.add(core);
+  const glow = new T.PointLight(0xff3c2a, 0, 14, 2);
+  glow.position.set(0, 2.5, 1.0);
+  g.add(glow);
+
+  // Plates ring the core. Each is a separate body with its own health.
+  const plates = [];
+  for (let i = 0; i < BOSS.plates; i++) {
+    const a = (i/BOSS.plates)*Math.PI*2;
+    const pl = part(new T.BoxGeometry(1.15, 1.15, 0.34), plateM,
+                    Math.cos(a)*1.15, 2.5 + Math.sin(a)*0.95, 0.92);
+    pl.rotation.z = a;
+    g.add(pl);
+    plates.push({ mesh: pl, hp: BOSS.plateHp });
+  }
+  // Arms, long and heavy.
+  const aL = limb(g, 1.5, skinM, -1.5, 3.3, 0, 0.3);
+  const aR = limb(g, 1.5, skinM,  1.5, 3.3, 0, 0.3);
+  aL.rotation.x = -0.4; aR.rotation.x = -0.4;
+  const lL = limb(g, 1.5, skinM, -0.6, 1.0, 0, 0.34);
+  const lR = limb(g, 1.5, skinM,  0.6, 1.0, 0, 0.34);
+
+  g.position.set(x, 0, z);
+  scene.add(g);
+  walkers.push({ g, body:g, torso:g, aL, aR, lL, lR, pos:g.position,
+    type:"boss", boss:true, core, glow, plates, platesLeft:BOSS.plates,
+    E:{ name:"WARDEN", hp:BOSS.coreHp, speed:BOSS.speed, scale:2.1, skin:0x4d5a44,
+        score:BOSS.score },
+    r:2.0, walk:0, dead:false, cool:0, atkT:BOSS.atkEvery,
+    hp:BOSS.coreHp, maxHp:BOSS.coreHp, flash:0, kb:new T.Vector3(),
+    leapT:99, vy:0, air:false });
+}
+
 function spawnWalker(type, x, z) {
+  if (type === "boss") return spawnBoss(x, z);
   const E = ENEMIES[type] || ENEMIES.walker;
   const g = new T.Group(), body = new T.Group();
   g.add(body);
@@ -5154,13 +5248,28 @@ function spawnWalker(type, x, z) {
   const lL = zLimb(body, 0.62, -0.15, 1.00, 0.10);
   const lR = zLimb(body, 0.62,  0.15, 1.00, 0.10);
 
+  // Elites appear once the waves get serious: same archetype, harder, worth
+  // more — a reason to change target priority rather than a new model.
+  const elite = S.wave >= 5 && Math.random() < 0.18;
+  const EE = elite
+    ? Object.assign({}, E, { hp:Math.round(E.hp*2.1), scale:E.scale*1.28,
+                             armor:(E.armor||0)+18, score:E.score*3,
+                             name:"Elite "+E.name })
+    : E;
+
   g.position.set(x,0,z);
-  g.scale.setScalar(E.scale * rand(0.94, 1.06));
-  scene.add(g);
-  walkers.push({ g, body, torso, aL, aR, lL, lR, pos:g.position,
-                 type, E, r:0.75*E.scale,
+  g.scale.setScalar(EE.scale * rand(0.94, 1.06));
+  if (elite) {
+    const ring2 = new T.Mesh(new T.RingGeometry(0.9, 1.12, 20),
+      new T.MeshBasicMaterial({ color:0xffd23c, transparent:true, opacity:0.55,
+                                side:T.DoubleSide, depthWrite:false }));
+    ring2.rotation.x = -Math.PI/2; ring2.position.y = 0.06;
+    g.add(ring2);
+  }
+  walkers.push({ g, body, torso, aL, aR, lL, lR, pos:g.position, elite,
+                 type, E:EE, r:0.75*EE.scale,
                  walk:rand(0,6), dead:false, cool:0,
-                 hp:E.hp, maxHp:E.hp, flash:0, kb:new T.Vector3(),
+                 hp:EE.hp, maxHp:EE.hp, flash:0, kb:new T.Vector3(),
                  leapT:rand(1,3), vy:0, air:false });
 }
 
@@ -5391,6 +5500,24 @@ function damageWalker(w, amount, dir, knock) {
   if (w.dead) return;
   // Armour subtracts flat, with a small floor so nothing is fully immune.
   // A rock into a Tank is a chip; a boulder or a blast is a real hit.
+  // A plated boss takes almost nothing on the body. The plates ARE the
+  // fight; the core only opens once they are gone.
+  if (w.boss && w.platesLeft > 0) {
+    const pl = w.plates.find(p => p.hp > 0);
+    if (pl) {
+      pl.hp -= amount;
+      if (pl.hp <= 0) {
+        pl.mesh.visible = false;
+        w.platesLeft--;
+        sparks(w.pos, 0xaab4c4, 16, 20);
+        SFX.boom();
+        S.shake = Math.min(1, S.shake + 0.5);
+        banner(w.platesLeft ? "PLATE DOWN · " + w.platesLeft + " LEFT" : "CORE EXPOSED");
+      }
+    }
+    w.flash = 1;
+    return;                      // body damage is absorbed entirely
+  }
   const ar = w.E.armor || 0;
   if (ar) amount = Math.max(amount * 0.08, amount - ar);
   w.hp -= amount;
@@ -5511,7 +5638,7 @@ const S = {
   held: [],
   mode: "single",          // "single" | "aoe"
   modeCd: 0,               // seconds left on the switch cooldown
-  dashT: 0, dashCd: 0, dashDir: new T.Vector3(),
+  dashT: 0, dashCd: 0, dashDir: new T.Vector3(), repCd: 0,
   lock: null,              // walker currently under the crosshair
 };
 const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2 };
@@ -5569,6 +5696,19 @@ function updateHUD() {
   el("left").textContent = alive.length;
   const kinds = {};
   alive.forEach(w => { kinds[w.E.name] = (kinds[w.E.name]||0)+1; });
+  const bw = walkers.find(w => w.boss && !w.dead);
+  const bb = el("bossBar");
+  if (bb) {
+    bb.classList.toggle("show", !!bw);
+    if (bw) {
+      const plates = bw.plates.reduce((s,p) => s + Math.max(0,p.hp), 0);
+      const pMax = BOSS.plates * BOSS.plateHp;
+      el("bossPlate").style.width = (plates/pMax*100) + "%";
+      el("bossCore").style.width  = (Math.max(0,bw.hp)/bw.maxHp*100) + "%";
+      el("bossName").textContent = bw.platesLeft ? "WARDEN · ARMOURED" : "WARDEN · CORE EXPOSED";
+      el("bossBar").classList.toggle("open", !bw.platesLeft);
+    }
+  }
   const th = el("threat");
   if (th) th.textContent = Object.keys(kinds).length
     ? Object.entries(kinds).map(([k,v]) => k[0]+v).join(" ") : "";
@@ -5628,6 +5768,37 @@ function doJump() {
   hero.grounded = false;
 }
 
+function doRepulse() {
+  if (S.phase !== "play" || S.repCd > 0) return;
+  S.repCd = CFG.repulseCd;
+  let n = 0;
+  for (const w of walkers) {
+    if (w.dead) continue;
+    const dx = w.pos.x-hero.pos.x, dz = w.pos.z-hero.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < CFG.repulseR && d > 0.1) {
+      const k = 26 * (1 - d/CFG.repulseR) / d;
+      w.kb.x += dx*k; w.kb.z += dz*k;
+      damageWalker(w, 45, null, 0);
+      n++;
+    }
+  }
+  // Loose props are shoved too, which doubles as a way to clear your own feet.
+  for (const o of rocks) {
+    if (o.held || o.gone) continue;
+    const dx = o.pos.x-hero.pos.x, dz = o.pos.z-hero.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < CFG.repulseR && d > 0.1) {
+      const k = 17 * (1 - d/CFG.repulseR) / d;
+      o.vel.x += dx*k; o.vel.z += dz*k; o.vel.y += 5;
+    }
+  }
+  shell(new T.Vector3(hero.pos.x, 1.2, hero.pos.z), CFG.repulseR*0.8, 0xe94fbf);
+  SFX.boom();
+  S.shake = Math.min(0.8, S.shake + 0.4);
+  if (n) banner("REPULSE x" + n);
+}
+
 function doDash() {
   if (S.phase !== "play" || S.dashCd > 0) return;
   // Dash along the stick if it is pushed, otherwise straight down the
@@ -5654,6 +5825,7 @@ addEventListener("keydown", e => {
   if (e.code === "Space") { e.preventDefault(); doJump(); }
   if (e.code === "KeyF" || e.code === "KeyE") { e.preventDefault(); pressForce(); }
   if (e.code === "ShiftLeft" || e.code === "ShiftRight") { e.preventDefault(); doDash(); }
+  if (e.code === "KeyR") { e.preventDefault(); doRepulse(); }
   if (e.code === "KeyQ" || e.code === "Tab") { e.preventDefault(); switchMode(); }
 });
 addEventListener("keyup", e => keys.delete(e.code));
@@ -5688,6 +5860,7 @@ el("force").addEventListener("pointerdown", e => { e.preventDefault(); pressForc
 el("modeBtn").addEventListener("pointerdown", e => { e.preventDefault(); switchMode(); });
 el("jump").addEventListener("pointerdown", e => { e.preventDefault(); doJump(); });
 el("dash").addEventListener("pointerdown", e => { e.preventDefault(); doDash(); });
+el("rep").addEventListener("pointerdown", e => { e.preventDefault(); doRepulse(); });
 
 let lookId = null, lp = {x:0,y:0};
 canvas.addEventListener("pointerdown", e => {
@@ -5859,6 +6032,11 @@ function step(dt) {
     hero.pos.addScaledVector(S.dashDir, CFG.dashSpeed*dt);
     if (Math.random() < 0.5) pushGhost();
   }
+  if (S.repCd > 0) {
+    S.repCd = Math.max(0, S.repCd - dt);
+    el("rep").classList.toggle("cool", S.repCd > 0);
+    el("repCd").style.transform = `scaleY(${S.repCd / CFG.repulseCd})`;
+  }
   if (S.dashCd > 0) {
     S.dashCd = Math.max(0, S.dashCd - dt);
     el("dash").classList.toggle("cool", S.dashCd > 0);
@@ -5968,6 +6146,25 @@ function step(dt) {
       const dot = o.vel.x*nx + o.vel.z*nz;
       o.vel.x -= 2*dot*nx*CFG.restitution; o.vel.z -= 2*dot*nz*CFG.restitution;
     }
+    // Debris the boss threw can hurt you until it slows down.
+    if (o.hostile > 0) {
+      o.hostile -= dt;
+      const dh = Math.hypot(o.pos.x-hero.pos.x, o.pos.z-hero.pos.z);
+      if (dh < 1.5 && Math.abs(o.pos.y - (hero.pos.y+1.2)) < 1.6 && o.vel.length() > 12) {
+        o.hostile = 0;
+        o.mesh.material = matFor(o.key, o.def);
+        o.vel.multiplyScalar(0.2);
+        hero.hp--;
+        SFX.hurt();
+        S.shake = Math.min(1, S.shake+0.5);
+        el("dmg").classList.add("on");
+        setTimeout(() => el("dmg").classList.remove("on"), 220);
+        updateHUD();
+        if (hero.hp <= 0) { gameOver(); return; }
+      }
+      if (o.hostile <= 0) o.mesh.material = matFor(o.key, o.def);
+    }
+
     o.restT = o.vel.lengthSq() < 0.6 ? o.restT + dt : 0;
 
     o.mesh.position.copy(o.pos);
@@ -6032,6 +6229,35 @@ function step(dt) {
       w.pos.addScaledVector(tmp, spd*dt);
       w.g.rotation.y = Math.atan2(tmp.x, tmp.z);
     }
+
+    if (w.boss) {
+      // Core only lights, and only becomes vulnerable, once stripped.
+      w.glow.intensity = w.platesLeft ? 0 : 5 + Math.sin(S.t*6)*2.5;
+      w.core.material.emissiveIntensity = w.platesLeft ? 0.15 : 1.8;
+      w.atkT -= dt;
+      if (w.atkT <= 0 && dist < 30) {
+        w.atkT = BOSS.atkEvery;
+        // Pick up whatever is lying near it and throw that at the player.
+        let pick = null, bd = 15;
+        for (const o of rocks) {
+          if (o.held || o.gone) continue;
+          const d2 = o.pos.distanceTo(w.pos);
+          if (d2 < bd && d2 > 1.5) { bd = d2; pick = o; }
+        }
+        if (pick) {
+          tmp2.set(hero.pos.x-pick.pos.x, 2.2, hero.pos.z-pick.pos.z).normalize();
+          pick.vel.copy(tmp2).multiplyScalar(34);
+          pick.hostile = 1.8;
+          pick.mesh.material = seekMat;
+          SFX.throw();
+          banner("INCOMING");
+        } else {
+          // Nothing to hand: slam instead.
+          queueBlast(w.pos, { r:8, dmg:0 }, null);
+          S.shake = Math.min(1, S.shake+0.6);
+        }
+      }
+    }
     if (w.air) {
       w.vy += CFG.gravity*dt;
       w.pos.y += w.vy*dt;
@@ -6054,7 +6280,8 @@ function step(dt) {
     w.lL.rotation.x =  Math.sin(w.walk)*0.6;
     w.lR.rotation.x = -Math.sin(w.walk)*0.6;
 
-    if (dist < CFG.zReach && w.cool <= 0 && hero.pos.y < CFG.dodgeHeight) {
+    const reach = w.boss ? BOSS.reach : CFG.zReach * (w.E.scale || 1);
+    if (dist < reach && w.cool <= 0 && hero.pos.y < CFG.dodgeHeight) {
       w.cool = CFG.zCooldown;
       hero.hp--;
       SFX.hurt();
