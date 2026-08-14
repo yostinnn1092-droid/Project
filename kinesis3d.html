@@ -5090,8 +5090,8 @@ function spawnObject(key, x, z) {
 }
 
 const zSkin  = new T.MeshStandardMaterial({ color:0x7d8f66, roughness:1.0, flatShading:true });
-const zRot   = new T.MeshStandardMaterial({ color:0x5a6b4a, roughness:1.0, flatShading:true });
-const zRag   = new T.MeshStandardMaterial({ color:0x3d3a2e, roughness:1.0, flatShading:true,
+const zRot   = new T.MeshStandardMaterial({ color:0x76866a, roughness:1.0, flatShading:true });
+const zRag   = new T.MeshStandardMaterial({ color:0x55503f, roughness:1.0, flatShading:true,
                                             side:T.DoubleSide });
 const zEye   = new T.MeshBasicMaterial({ color:0xff6a30 });
 const zJaw   = new T.MeshStandardMaterial({ color:0x8a3b32, roughness:0.9 });
@@ -5226,8 +5226,8 @@ function spawnWalker(type, x, z) {
   skull.scale.set(0.92, 1.06, 1.05);
   neck.add(skull);
   neck.add(part(new T.BoxGeometry(0.22, 0.11, 0.13), zJaw, 0, -0.01, 0.17));  // slack jaw
-  neck.add(part(new T.SphereGeometry(0.05, 8, 6), eyeM, -0.095, 0.14, 0.19));
-  neck.add(part(new T.SphereGeometry(0.05, 8, 6), eyeM,  0.095, 0.14, 0.19));
+  neck.add(part(new T.SphereGeometry(0.075, 8, 6), eyeM, -0.095, 0.14, 0.2));
+  neck.add(part(new T.SphereGeometry(0.075, 8, 6), eyeM,  0.095, 0.14, 0.2));
 
   // Long reaching arms with clawed hands.
   function zLimb(parent, len, px, py, rad) {
@@ -5266,6 +5266,11 @@ function spawnWalker(type, x, z) {
     ring2.rotation.x = -Math.PI/2; ring2.position.y = 0.06;
     g.add(ring2);
   }
+  // Without this the enemy exists, walks, damages and dies — entirely
+  // invisibly. Dropped when the elite block was inserted; every test since
+  // asserted on counts rather than on anything being on screen, so all of
+  // them passed against a game with no visible enemies.
+  scene.add(g);
   walkers.push({ g, body, torso, aL, aR, lL, lR, pos:g.position, elite,
                  type, E:EE, r:0.75*EE.scale,
                  walk:rand(0,6), dead:false, cool:0,
