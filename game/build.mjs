@@ -4,7 +4,7 @@ const three = fs.readFileSync('vendor/three-bundle.js','utf8');
 let game = fs.readFileSync('game.js','utf8');
 const out = process.argv[2] || 'out.html';
 if (process.argv[3] === 'probe') {
-  const probe = fs.readFileSync('probe.js','utf8');
+  const probe = fs.readFileSync(process.env.PROBE || 'probe.js','utf8');
   const tail = '})();';
   const i = game.lastIndexOf(tail);
   if (i < 0) throw new Error('IIFE tail not found');

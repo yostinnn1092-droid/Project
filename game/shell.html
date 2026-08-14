@@ -55,6 +55,48 @@
                transition: width .08s linear; }
   #focusFill.spent { background: linear-gradient(90deg, #5A2020, #C4443A); }
 
+  /* Style rank + the bar showing how far into the rank you are. The rank
+     letter is the readout; the bar is the "don't stop" pressure. */
+  #styleWrap { min-width: 62px; }
+  #rankVal { font-size: 17px; font-weight: 700; letter-spacing: .06em;
+             color: var(--dim); transition: color .2s ease, text-shadow .2s ease; }
+  #styleBar { height: 3px; margin-top: 3px; border-radius: 2px;
+              background: rgba(232,228,240,.13); overflow: hidden; }
+  #styleFill { height: 100%; width: 0%; background: currentColor;
+               transition: width .12s linear; }
+  #styleWrap.fade #rankVal { opacity: .55; }
+
+  #kinWrap { min-width: 74px; }
+  #kinBar { height: 6px; margin-top: 3px; border-radius: 3px;
+            background: rgba(232,228,240,.13); overflow: hidden; }
+  #kinFill { height: 100%; width: 0%;
+             background: linear-gradient(90deg, #2A6E8F, #4FD6E9);
+             transition: width .1s linear; }
+  #kinWrap.full #kinFill { background: linear-gradient(90deg, #E8C24F, #FF5A3C); }
+  #kinWrap.full { animation: kinpulse 1s ease-in-out infinite; }
+  @keyframes kinpulse { 50% { box-shadow: 0 0 14px rgba(255,90,60,.55); } }
+  @media (max-width: 700px) { #kinWrap { min-width: 52px; } #styleWrap { min-width: 46px; } }
+
+  /* Overdrive repaints the frame rather than the world: a vignette the
+     renderer does not have to pay for. */
+  body.od #od { opacity: 1; }
+  #od {
+    position: fixed; inset: 0; z-index: 4; pointer-events: none; opacity: 0;
+    transition: opacity .35s ease;
+    box-shadow: inset 0 0 150px rgba(255,90,60,.75),
+                inset 0 0 44px rgba(233,79,191,.5);
+    background: radial-gradient(ellipse at center,
+                rgba(255,120,60,0) 42%, rgba(255,90,60,.14) 100%);
+  }
+  body.od #od { animation: odpulse 1.6s ease-in-out infinite; }
+  @keyframes odpulse { 50% { box-shadow: inset 0 0 210px rgba(255,90,60,.9),
+                                         inset 0 0 60px rgba(233,79,191,.6); } }
+  @media (prefers-reduced-motion: reduce) { body.od #od { animation: none; } }
+  body.od #cross { filter: drop-shadow(0 0 7px rgba(255,140,60,.9)); }
+  @media (prefers-reduced-motion: reduce) {
+    #kinWrap.full { animation: none; }
+  }
+
   /* compact roll-call of what is still standing: W3 R2 T1 */
   #threat { display:block; font-family: var(--mono); font-size: 8.5px;
             letter-spacing: .1em; color: var(--dim); margin-top: 1px; }
@@ -77,6 +119,40 @@
     100% { opacity: 0; transform: translateX(-50%) scale(1); }
   }
   @media (prefers-reduced-motion: reduce) { #combo.pop { animation-duration: .5s; } }
+
+  /* Standing readout of the wave condition, riding under the wave number so
+     it stays legible after the announcement banner fades and never lands on
+     top of the combo chip or the boss bar. */
+  #modName2 {
+    display: none; font-family: var(--mono); font-size: 8px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--force); margin-top: 2px;
+    text-shadow: 0 0 10px rgba(233,79,191,.6); white-space: nowrap;
+  }
+  #modName2.show { display: block; }
+  #waveChip { min-width: 54px; }
+
+  /* end-of-run scoreboard */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px;
+           margin: 14px 0 4px; text-align: left; }
+  .stat { display: flex; justify-content: space-between; align-items: baseline;
+          gap: 10px; border-bottom: 1px solid rgba(232,228,240,.1); padding-bottom: 5px; }
+  .stat span { font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
+               text-transform: uppercase; color: var(--dim); }
+  .stat b { font-family: var(--mono); font-size: 17px; font-variant-numeric: tabular-nums; }
+  .stat b.best { color: var(--force); text-shadow: 0 0 12px rgba(233,79,191,.6); }
+  .pb { font-style: normal; font-size: 8px; letter-spacing: .16em;
+        text-transform: uppercase; color: var(--force); vertical-align: middle; }
+  .career { margin-top: 10px; font-size: 10.5px; opacity: .7; line-height: 1.6; }
+  #menuBest { display: none; margin-top: 10px; font-size: 11px; color: var(--force); opacity: .85; }
+  #menuBest.show { display: block; }
+  /* the line on a draft card that says what this pick would complete */
+  .upg .syn, .syn {
+    display: block; margin-top: 7px; font-family: var(--mono); font-size: 8.5px;
+    letter-spacing: .16em; text-transform: uppercase; font-style: normal;
+    text-decoration: none; color: #E8C24F;
+    text-shadow: 0 0 10px rgba(232,194,79,.5);
+  }
+  @media (max-width: 520px) { .stats { grid-template-columns: 1fr; } }
 
   /* ───── upgrade draft ───── */
   /* The menu card is 430px wide, which forces three upgrades to wrap 2+1.
@@ -316,12 +392,18 @@
 <canvas id="gl"></canvas>
 
 <div id="hud" class="hide">
-  <div class="chip"><span class="lbl">Wave</span><span class="val" id="wave">1</span></div>
+  <div class="chip" id="waveChip"><span class="lbl">Wave</span><span class="val" id="wave">1</span>
+    <span id="modName2"></span></div>
   <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
   <div class="chip" id="focusWrap"><span class="lbl">Focus</span>
     <div id="focusBar"><div id="focusFill"></div></div></div>
   <div class="chip"><span class="lbl">Carry</span><span class="val" id="carry">0</span></div>
   <div class="chip" id="comboWrap"><span class="lbl">Combo</span><span class="val" id="comboVal">x1</span></div>
+  <div class="chip" id="styleWrap"><span class="lbl">Style</span>
+    <span class="val" id="rankVal">D</span>
+    <div id="styleBar"><div id="styleFill"></div></div></div>
+  <div class="chip" id="kinWrap"><span class="lbl">Kinetic</span>
+    <div id="kinBar"><div id="kinFill"></div></div></div>
   <div class="chip" id="scoreChip"><span class="lbl">Score</span><span class="val" id="score">0</span></div>
   <div class="chip"><span class="lbl">Threat</span>
     <span class="val" id="left">0</span>
@@ -330,6 +412,7 @@
 
 <div id="cross" class="hide"><i></i><i></i><i></i><i></i><u></u></div>
 <div id="dmg"></div>
+<div id="od"></div>
 
 <div id="touch" class="hide">
   <div id="stick"><div id="knob"></div></div>
@@ -347,6 +430,7 @@
   <div class="bb"><div id="bossCore"></div></div>
 </div>
 <div id="combo"></div>
+<div id="modName2"></div>
 <div id="toast"></div>
 
 <div id="rotate">
@@ -377,6 +461,7 @@
        use boulders, girders or barrels. <em>Exploders</em> detonate when they die.</p>
     <p class="rule" style="margin-top:12px;font-size:11px;opacity:.7">
        Keyboard — WASD move · Space jump · Shift dash · R push · F fire · Q mode</p>
+    <p class="rule" id="menuBest"></p>
     <button id="startBtn">Begin</button>
   </div>
 </div>

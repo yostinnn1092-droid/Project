@@ -55,6 +55,48 @@
                transition: width .08s linear; }
   #focusFill.spent { background: linear-gradient(90deg, #5A2020, #C4443A); }
 
+  /* Style rank + the bar showing how far into the rank you are. The rank
+     letter is the readout; the bar is the "don't stop" pressure. */
+  #styleWrap { min-width: 62px; }
+  #rankVal { font-size: 17px; font-weight: 700; letter-spacing: .06em;
+             color: var(--dim); transition: color .2s ease, text-shadow .2s ease; }
+  #styleBar { height: 3px; margin-top: 3px; border-radius: 2px;
+              background: rgba(232,228,240,.13); overflow: hidden; }
+  #styleFill { height: 100%; width: 0%; background: currentColor;
+               transition: width .12s linear; }
+  #styleWrap.fade #rankVal { opacity: .55; }
+
+  #kinWrap { min-width: 74px; }
+  #kinBar { height: 6px; margin-top: 3px; border-radius: 3px;
+            background: rgba(232,228,240,.13); overflow: hidden; }
+  #kinFill { height: 100%; width: 0%;
+             background: linear-gradient(90deg, #2A6E8F, #4FD6E9);
+             transition: width .1s linear; }
+  #kinWrap.full #kinFill { background: linear-gradient(90deg, #E8C24F, #FF5A3C); }
+  #kinWrap.full { animation: kinpulse 1s ease-in-out infinite; }
+  @keyframes kinpulse { 50% { box-shadow: 0 0 14px rgba(255,90,60,.55); } }
+  @media (max-width: 700px) { #kinWrap { min-width: 52px; } #styleWrap { min-width: 46px; } }
+
+  /* Overdrive repaints the frame rather than the world: a vignette the
+     renderer does not have to pay for. */
+  body.od #od { opacity: 1; }
+  #od {
+    position: fixed; inset: 0; z-index: 4; pointer-events: none; opacity: 0;
+    transition: opacity .35s ease;
+    box-shadow: inset 0 0 150px rgba(255,90,60,.75),
+                inset 0 0 44px rgba(233,79,191,.5);
+    background: radial-gradient(ellipse at center,
+                rgba(255,120,60,0) 42%, rgba(255,90,60,.14) 100%);
+  }
+  body.od #od { animation: odpulse 1.6s ease-in-out infinite; }
+  @keyframes odpulse { 50% { box-shadow: inset 0 0 210px rgba(255,90,60,.9),
+                                         inset 0 0 60px rgba(233,79,191,.6); } }
+  @media (prefers-reduced-motion: reduce) { body.od #od { animation: none; } }
+  body.od #cross { filter: drop-shadow(0 0 7px rgba(255,140,60,.9)); }
+  @media (prefers-reduced-motion: reduce) {
+    #kinWrap.full { animation: none; }
+  }
+
   /* compact roll-call of what is still standing: W3 R2 T1 */
   #threat { display:block; font-family: var(--mono); font-size: 8.5px;
             letter-spacing: .1em; color: var(--dim); margin-top: 1px; }
@@ -77,6 +119,40 @@
     100% { opacity: 0; transform: translateX(-50%) scale(1); }
   }
   @media (prefers-reduced-motion: reduce) { #combo.pop { animation-duration: .5s; } }
+
+  /* Standing readout of the wave condition, riding under the wave number so
+     it stays legible after the announcement banner fades and never lands on
+     top of the combo chip or the boss bar. */
+  #modName2 {
+    display: none; font-family: var(--mono); font-size: 8px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--force); margin-top: 2px;
+    text-shadow: 0 0 10px rgba(233,79,191,.6); white-space: nowrap;
+  }
+  #modName2.show { display: block; }
+  #waveChip { min-width: 54px; }
+
+  /* end-of-run scoreboard */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px;
+           margin: 14px 0 4px; text-align: left; }
+  .stat { display: flex; justify-content: space-between; align-items: baseline;
+          gap: 10px; border-bottom: 1px solid rgba(232,228,240,.1); padding-bottom: 5px; }
+  .stat span { font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
+               text-transform: uppercase; color: var(--dim); }
+  .stat b { font-family: var(--mono); font-size: 17px; font-variant-numeric: tabular-nums; }
+  .stat b.best { color: var(--force); text-shadow: 0 0 12px rgba(233,79,191,.6); }
+  .pb { font-style: normal; font-size: 8px; letter-spacing: .16em;
+        text-transform: uppercase; color: var(--force); vertical-align: middle; }
+  .career { margin-top: 10px; font-size: 10.5px; opacity: .7; line-height: 1.6; }
+  #menuBest { display: none; margin-top: 10px; font-size: 11px; color: var(--force); opacity: .85; }
+  #menuBest.show { display: block; }
+  /* the line on a draft card that says what this pick would complete */
+  .upg .syn, .syn {
+    display: block; margin-top: 7px; font-family: var(--mono); font-size: 8.5px;
+    letter-spacing: .16em; text-transform: uppercase; font-style: normal;
+    text-decoration: none; color: #E8C24F;
+    text-shadow: 0 0 10px rgba(232,194,79,.5);
+  }
+  @media (max-width: 520px) { .stats { grid-template-columns: 1fr; } }
 
   /* ───── upgrade draft ───── */
   /* The menu card is 430px wide, which forces three upgrades to wrap 2+1.
@@ -316,12 +392,18 @@
 <canvas id="gl"></canvas>
 
 <div id="hud" class="hide">
-  <div class="chip"><span class="lbl">Wave</span><span class="val" id="wave">1</span></div>
+  <div class="chip" id="waveChip"><span class="lbl">Wave</span><span class="val" id="wave">1</span>
+    <span id="modName2"></span></div>
   <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
   <div class="chip" id="focusWrap"><span class="lbl">Focus</span>
     <div id="focusBar"><div id="focusFill"></div></div></div>
   <div class="chip"><span class="lbl">Carry</span><span class="val" id="carry">0</span></div>
   <div class="chip" id="comboWrap"><span class="lbl">Combo</span><span class="val" id="comboVal">x1</span></div>
+  <div class="chip" id="styleWrap"><span class="lbl">Style</span>
+    <span class="val" id="rankVal">D</span>
+    <div id="styleBar"><div id="styleFill"></div></div></div>
+  <div class="chip" id="kinWrap"><span class="lbl">Kinetic</span>
+    <div id="kinBar"><div id="kinFill"></div></div></div>
   <div class="chip" id="scoreChip"><span class="lbl">Score</span><span class="val" id="score">0</span></div>
   <div class="chip"><span class="lbl">Threat</span>
     <span class="val" id="left">0</span>
@@ -330,6 +412,7 @@
 
 <div id="cross" class="hide"><i></i><i></i><i></i><i></i><u></u></div>
 <div id="dmg"></div>
+<div id="od"></div>
 
 <div id="touch" class="hide">
   <div id="stick"><div id="knob"></div></div>
@@ -347,6 +430,7 @@
   <div class="bb"><div id="bossCore"></div></div>
 </div>
 <div id="combo"></div>
+<div id="modName2"></div>
 <div id="toast"></div>
 
 <div id="rotate">
@@ -377,6 +461,7 @@
        use boulders, girders or barrels. <em>Exploders</em> detonate when they die.</p>
     <p class="rule" style="margin-top:12px;font-size:11px;opacity:.7">
        Keyboard — WASD move · Space jump · Shift dash · R push · F fire · Q mode</p>
+    <p class="rule" id="menuBest"></p>
     <button id="startBtn">Begin</button>
   </div>
 </div>
@@ -4723,6 +4808,24 @@ const CFG = {
   liftSpring:   16,
   liftDamp:     7,
 
+  // Style, kinetic meter and Overdrive.
+  styleGrace:   3.4,     // seconds of no kills before style starts bleeding
+  styleDecay:   34,      // style points per second once it does
+  kinPerDamage: 0.00085, // meter per point of damage dealt
+  odTime:       9,       // Overdrive duration
+  odDamage:     1.55,
+  odGrabR:      7,
+  odSpeed:      1.18,
+
+  // Mode identity. Single is the finisher: it aims high and executes the
+  // wounded. Burst is crowd control: individually weak, but three landing
+  // together collapse into a shockwave.
+  execAt:       0.28,    // fraction of max HP at or below which Single executes
+  burstWaveMin: 3,       // stones from one burst that must land
+  burstWaveWin: 1.3,     // within this many seconds
+  burstWaveR:   9,
+  burstWaveDmg: 120,
+
   throwSpeed:   40,
   killSpeed:    13,
   seekTurn:     3.0,     // rad/s the stone can bend toward its mark
@@ -5102,6 +5205,7 @@ function recycleObject(o) {
   if (hd > lim) { o.pos.x *= lim/hd; o.pos.z *= lim/hd; }
   o.vel.set(0, 0, 0);
   o.gone = false; o.held = false; o.pierced = 0; o.seekT = 0; o.seek = null;
+  o.fireMode = null; o.volleyId = -1;
   o.mesh.visible = true;
   o.mesh.material = matFor(o.key, o.def);
   o.restT = 0;
@@ -5119,6 +5223,7 @@ function spawnObject(key, x, z) {
     spin: new T.Vector3(rand(-1,1), rand(-1,1), rand(-1,1)),
     m: def.mass * r*r*r * 3.4,
     held:false, slot:0, seek:null, seekT:0, pierced:0, gone:false, restT:0, mult:1,
+    fireMode:null, volleyId:-1,
     hostile:0, grabT:0, boostT:0, boostTo:0, launchDir:new T.Vector3(0,0,1),
   });
 }
@@ -5285,11 +5390,20 @@ function spawnWalker(type, x, z) {
   // Elites appear once the waves get serious: same archetype, harder, worth
   // more — a reason to change target priority rather than a new model.
   const elite = S.wave >= 5 && Math.random() < 0.18;
-  const EE = elite
+  let EE = elite
     ? Object.assign({}, E, { hp:Math.round(E.hp*2.1), scale:E.scale*1.28,
                              armor:(E.armor||0)+18, score:E.score*3,
                              name:"Elite "+E.name })
     : E;
+  // The wave modifier is the last word on the statline, applied on top of the
+  // archetype and any elite promotion.
+  if (WMOD.hp !== 1 || WMOD.speed !== 1 || WMOD.armor) {
+    EE = Object.assign({}, EE, {
+      hp: Math.max(1, Math.round(EE.hp * WMOD.hp)),
+      speed: EE.speed * WMOD.speed,
+      armor: (EE.armor||0) + WMOD.armor,
+    });
+  }
 
   g.position.set(x,0,z);
   g.scale.setScalar(EE.scale * rand(0.94, 1.06));
@@ -5320,6 +5434,8 @@ const MOD = {
   singleDmg: 1, burstDmg: 1, allDmg: 1,
   maxHeld: 0, grabR: 0, focusRegen: 1, hpBonus: 0,
   berserk: false, gravity: false, voidwell: false,
+  blastDmg: 1, arcHops: 3,
+  singularity: false, marksman: false, secondWind: false, avalanche: false,
   lightning: 0,          // kills between arcs; 0 = off
   blastR: 1,
 };
@@ -5362,10 +5478,58 @@ const UPGRADES = [
 
 const taken = [];
 
+// ── synergies
+// Upgrades are additive on their own. Pairs of them are not: taking the
+// second half of a pair unlocks a named effect neither one grants alone.
+// This is what turns a draft into a build — the third pick starts being
+// chosen for what it completes rather than for what it does.
+const SYNERGIES = [
+  { id:"singularity", name:"Singularity", need:["gravity","voidwell"],
+    desc:"Kills collapse into a well that pulls hard and tears.",
+    take(){ MOD.singularity = true; } },
+  { id:"chainstorm",  name:"Chain Storm",  need:["storm","swarm"],
+    desc:"Lightning arcs every other kill, and reaches five bodies.",
+    take(){ MOD.lightning = 2; MOD.arcHops = 5; } },
+  { id:"demolition",  name:"Demolition",   need:["ordnance","berserk"],
+    desc:"Every explosion hits 60% harder.",
+    take(){ MOD.blastDmg *= 1.6; } },
+  { id:"marksman",    name:"Marksman",     need:["kinetic","reach"],
+    desc:"The weak point is twice the size on an aimed shot.",
+    take(){ MOD.marksman = true; } },
+  { id:"secondwind",  name:"Second Wind",  need:["flow","hardened"],
+    desc:"Dropping to your last two hearts refills focus. Once per wave.",
+    take(){ MOD.secondWind = true; } },
+  { id:"avalanche",   name:"Avalanche",    need:["heft","swarm"],
+    desc:"Two stones landing together are enough for a kinetic wave, and it is wider.",
+    take(){ MOD.avalanche = true; } },
+];
+
+function synergyGained(u) {
+  // Which synergy, if any, this pick just completed.
+  return SYNERGIES.find(sy => !sy.got && sy.need.includes(u.id) &&
+                              sy.need.every(n => n === u.id || taken.includes(n)));
+}
+
+// Named on the card before you commit: a pick that completes something says so.
+function synergyHint(u) {
+  const sy = synergyGained(u);
+  return sy ? '<u class="syn">completes ' + sy.name + '</u>' : '';
+}
+
+function applySynergies(u) {
+  const sy = synergyGained(u);
+  if (!sy) return;
+  sy.got = true;
+  sy.take();
+  setTimeout(() => { banner(sy.name.toUpperCase()); toast(sy.name + " — " + sy.desc, 3000);
+                     SFX.rankUp(4); }, 260);
+}
+
 function offerDraft() {
   S.phase = "draft";
   // Three distinct picks, drawn without replacement.
-  const pool = UPGRADES.slice();
+  const pool = UPGRADES.filter(u => !taken.includes(u.id));
+  if (pool.length < 3) pool.push(...UPGRADES.filter(u => taken.includes(u.id)));
   const picks = [];
   while (picks.length < 3 && pool.length) {
     picks.push(pool.splice(Math.floor(Math.random()*pool.length), 1)[0]);
@@ -5378,12 +5542,96 @@ function offerDraft() {
   picks.forEach(u => {
     const b = document.createElement("button");
     b.className = "upg";
-    b.innerHTML = '<span class="ut">' + u.tag + '</span><b>' + u.name + '</b><i>' + u.desc + '</i>';
-    b.onclick = () => { u.take(); taken.push(u.id); SFX.pick(); startNextWave(); };
+    b.innerHTML = '<span class="ut">' + u.tag + '</span><b>' + u.name + '</b><i>' + u.desc + '</i>'
+                + synergyHint(u);
+    b.onclick = () => { u.take(); applySynergies(u); taken.push(u.id);
+                        SFX.pick(); startNextWave(); };
     box.appendChild(b);
   });
+  el("modName2").classList.remove("show");
+  el("bossBar").classList.remove("show");
   el("overlay").classList.remove("hide");
   ["hud","touch","cross"].forEach(i => el(i).classList.add("hide"));
+}
+
+// ─────────────────────────────────────────────────────────── persistence
+// A run is disposable; the record of it is not. Everything here is
+// best-effort: private-mode browsers and file:// origins can both refuse
+// localStorage outright, and the game has to keep working when they do.
+const SAVE_KEY = "kinesis.v1";
+const PROFILE = {
+  best: 0, bestWave: 1, runs: 0, kills: 0,
+  bestRank: "D", seen: {},        // modifier ids the player has met
+};
+
+function loadProfile() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    if (p && typeof p === "object") {
+      for (const k in PROFILE) if (k in p) PROFILE[k] = p[k];
+    }
+  } catch (e) { /* storage unavailable or corrupt — start clean */ }
+}
+
+function saveProfile() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(PROFILE)); }
+  catch (e) { /* nothing to do; the run still counts in this session */ }
+}
+
+// Returns what actually improved, so the end screen can call it out.
+function recordRun() {
+  const beat = { score:false, wave:false, rank:false };
+  PROFILE.runs++;
+  PROFILE.kills += S.kills;
+  if (S.score > PROFILE.best)      { PROFILE.best = S.score; beat.score = true; }
+  if (S.wave  > PROFILE.bestWave)  { PROFILE.bestWave = S.wave; beat.wave = true; }
+  const ri = RANKS.findIndex(r => r.name === S.rank);
+  const bi = RANKS.findIndex(r => r.name === PROFILE.bestRank);
+  if (ri > bi) { PROFILE.bestRank = S.rank; beat.rank = true; }
+  saveProfile();
+  return beat;
+}
+
+// ─────────────────────────────────────────────────────────── wave modifiers
+// From wave 3 on, each wave draws a condition. They are deliberately
+// double-edged: every one of them makes the wave harder in one direction and
+// hands you something back in another, so the right play changes wave to
+// wave rather than the difficulty just ratcheting.
+const MODIFIERS = [
+  { id:"frenzy",   name:"FRENZY",      desc:"They are faster. They are also brittle.",
+    apply(){ WMOD.speed = 1.4; WMOD.hp = 0.75; } },
+  { id:"armored",  name:"IRON TIDE",   desc:"Everything is plated. Blasts ignore plate.",
+    apply(){ WMOD.armor = 26; WMOD.blastPierce = true; } },
+  { id:"horde",    name:"HORDE",       desc:"Half again as many, at three-quarter health.",
+    apply(){ WMOD.count = 1.5; WMOD.hp = 0.75; } },
+  { id:"volatile", name:"VOLATILE",    desc:"Twice the barrels. Everything explodes bigger.",
+    apply(){ WMOD.props = { barrel:2.5, chem:2 }; WMOD.blastR = 1.35; } },
+  { id:"scarcity", name:"SCARCITY",    desc:"Little to throw. Focus returns twice as fast.",
+    apply(){ WMOD.propsAll = 0.5; WMOD.focus = 2; } },
+  { id:"heavy",    name:"DEAD WEIGHT", desc:"Only the heavy props spawned. They hit harder.",
+    apply(){ WMOD.props = { rock:0.35, plank:0.3, heavy:2.4, metal:2.2 }; WMOD.dmg = 1.25; } },
+  { id:"glass",    name:"GLASS",       desc:"One hit kills you. Style builds twice as fast.",
+    apply(){ WMOD.oneHp = true; WMOD.style = 2; } },
+];
+
+// Reset to the identity every wave; a modifier is a diff on top of this.
+const WMOD_BASE = { speed:1, hp:1, armor:0, count:1, props:null, propsAll:1,
+                    focus:1, dmg:1, blastR:1, blastPierce:false, oneHp:false,
+                    style:1, name:null, desc:null };
+const WMOD = Object.assign({}, WMOD_BASE);
+
+function rollModifier(n) {
+  Object.assign(WMOD, WMOD_BASE);
+  WMOD.props = null;
+  if (n < 3) return;                       // the first two waves teach, plainly
+  // Glass is a run-ender if it lands while you are already on one heart.
+  const pool = MODIFIERS.filter(m => !(m.id === "glass" && hero.hp <= 2));
+  const m = pool[Math.floor(Math.random()*pool.length)];
+  WMOD.name = m.name; WMOD.desc = m.desc;
+  PROFILE.seen[m.id] = true; saveProfile();
+  m.apply();
 }
 
 // ─────────────────────────────────────────────────────────── audio
@@ -5460,6 +5708,15 @@ const SFX = {
   combo:  (n) => tone(520 + Math.min(n,8)*90, 0.14, "triangle", 0.18, 780 + n*70),
   pick:   () => tone(760, 0.1, "triangle", 0.16, 1150),
   wave:   () => { tone(300, 0.5, "sine", 0.2, 620); setTimeout(()=>tone(460,0.45,"sine",0.16,760), 130); },
+  // Rank-up climbs with the rank so S reads as bigger news than C.
+  rankUp: (i) => { const f = 440 * Math.pow(1.16, i);
+                   tone(f, 0.16, "triangle", 0.2, f*1.5);
+                   setTimeout(()=>tone(f*1.5, 0.24, "triangle", 0.16, f*2), 90); },
+  rankDown: () => { tone(300, 0.3, "sawtooth", 0.12, 150); },
+  overdrive: () => { tone(120, 0.75, "sawtooth", 0.26, 460);
+                     tone(240, 0.7, "square", 0.14, 700);
+                     noise(0.5, 0.3, 3000, 300); },
+  odEnd:  () => { tone(420, 0.4, "sine", 0.16, 130); },
 };
 
 // ─────────────────────────────────────────────────────────── combat
@@ -5470,6 +5727,84 @@ const MIN_HIT_SPEED = 9;
 const puddles = [];
 const blastQ  = [];            // explosions wait here; see MAX_BLASTS
 const MAX_BLASTS = 5;          // per frame, so a barrel farm cannot stall a phone
+
+// ── style
+// The combo counts kills. Style rates HOW you killed: repeating one trick
+// pays less each time, and switching tricks pays a bonus. That is the whole
+// pressure — the scoring system asks you to use the toolkit, not the best
+// tool. Score multiplier comes off the rank, so style is not cosmetic.
+const KILL_KINDS = {
+  impact:  { label:"IMPACT",      style:10 },
+  blast:   { label:"DETONATION",  style:16 },
+  pierce:  { label:"SKEWERED",    style:18 },
+  env:     { label:"ENVIRONMENTAL", style:24 },
+  crush:   { label:"CRUSHED",     style:20 },
+  chem:    { label:"DISSOLVED",   style:14 },
+  repulse: { label:"SHOCKWAVE",   style:14 },
+  arc:     { label:"ARC",         style:16 },
+};
+const RANKS = [
+  { at:0,   name:"D",  mult:1.0,  color:"#7E7894" },
+  { at:60,  name:"C",  mult:1.25, color:"#8FA8C4" },
+  { at:140, name:"B",  mult:1.5,  color:"#69D0B4" },
+  { at:240, name:"A",  mult:2.0,  color:"#E8C24F" },
+  { at:370, name:"S",  mult:2.6,  color:"#E94FBF" },
+  { at:520, name:"SS", mult:3.4,  color:"#FF5A3C" },
+];
+const STYLE_MAX = RANKS[RANKS.length-1].at + 160;
+
+function rankFor(style) {
+  let r = RANKS[0];
+  for (const c of RANKS) if (style >= c.at) r = c;
+  return r;
+}
+
+function addStyle(kind) {
+  const k = KILL_KINDS[kind] || KILL_KINDS.impact;
+  // Repeats decay geometrically and recover over time, so a player who only
+  // ever throws rocks settles at a low ceiling rather than being locked out.
+  const reps = S.recent.filter(x => x === kind).length;
+  const fresh = reps === 0;
+  const gain = k.style * Math.pow(0.62, reps) * (fresh ? 1.5 : 1);
+  S.style = Math.min(STYLE_MAX, S.style + gain * WMOD.style);
+  S.styleT = CFG.styleGrace;
+  S.recent.unshift(kind);
+  if (S.recent.length > 5) S.recent.pop();
+
+  const r = rankFor(S.style);
+  if (r.name !== S.rank) {
+    const up = RANKS.indexOf(r) > RANKS.findIndex(x => x.name === S.rank);
+    S.rank = r.name;
+    if (up) { banner("RANK " + r.name); SFX.rankUp(RANKS.indexOf(r)); }
+  }
+  return { label: k.label, fresh };
+}
+
+// ── kinetic meter / Overdrive
+const OD = { on:false, t:0 };
+
+function addKinetic(v) {
+  if (OD.on) return;                       // no charging while it is spending
+  S.kinetic = Math.min(1, S.kinetic + v);
+  if (S.kinetic >= 1) startOverdrive();
+}
+
+function startOverdrive() {
+  OD.on = true; OD.t = CFG.odTime;
+  S.kinetic = 1;
+  S.freeze = Math.max(S.freeze, 0.22);
+  banner("OVERDRIVE");
+  toast("Overdrive — free focus, wider reach, heavier hits", 2200);
+  SFX.overdrive();
+  S.shake = Math.min(1, S.shake + 0.5);
+  document.body.classList.add("od");
+}
+
+function endOverdrive() {
+  OD.on = false; OD.t = 0; S.kinetic = 0;
+  document.body.classList.remove("od");
+  SFX.odEnd();
+}
 
 function addCombo(n) {
   S.combo += n;
@@ -5500,10 +5835,17 @@ function killWalker(w) {
   // point, and killing one next to a barrel is better.
   if (w.E.onDeath === "blast") queueBlast(w.pos, { r:6.5, dmg:150 }, null);
   S.kills++;
-  S.score += (w.E.score || 100) * Math.max(1, S.combo);
-  if (MOD.voidwell) pullToward(w.pos, 8, 16);
+  const st = addStyle(w.lastHit || "impact");
+  if (st.fresh && S.combo >= 1) banner(st.label);
+  S.score += Math.round((w.E.score || 100) * Math.max(1, S.combo) * rankFor(S.style).mult);
+  if (MOD.voidwell) {
+    pullToward(w.pos, MOD.singularity ? 11 : 8, MOD.singularity ? 26 : 16);
+    if (MOD.singularity) { queueBlast(w.pos, { r:5.5, dmg:90 }, null);
+                           shell(w.pos, 5.5, 0x9B6BFF); }
+  }
   if (MOD.lightning && S.kills % MOD.lightning === 0) arcLightning(w.pos);
   S.shake = Math.min(0.9, S.shake + 0.35);
+  S.freeze = Math.max(S.freeze, 0.045);
   SFX.kill();
   addCombo(1);
   updateHUD();
@@ -5532,11 +5874,12 @@ function launchWalker(w, dir, power) {
 function flyingHit(w, other, speed) {
   // Both parties take it — a body used as a projectile breaks on impact too.
   const dmg = Math.min(220, speed * 9);
-  damageWalker(other, dmg, null, 0);
-  damageWalker(w, dmg * 0.6, null, 0);
+  damageWalker(other, dmg, null, 0, "env");
+  damageWalker(w, dmg * 0.6, null, 0, "env");
   sparks(w.pos, 0x8a5a4a, 8, 14);
   SFX.impact(2.2, 1.2);
   S.shake = Math.min(0.9, S.shake + 0.2);
+  S.freeze = Math.max(S.freeze, 0.12);
   banner("ENVIRONMENTAL KILL");
 }
 
@@ -5557,7 +5900,7 @@ function pullToward(pos, r, force) {
 function arcLightning(from) {
   let src = from.clone();
   const hit = [];
-  for (let n = 0; n < 3; n++) {
+  for (let n = 0; n < MOD.arcHops; n++) {
     let best = null, bd = 16;
     for (const w of walkers) {
       if (w.dead || hit.includes(w)) continue;
@@ -5567,7 +5910,7 @@ function arcLightning(from) {
     if (!best) break;
     hit.push(best);
     bolt(src, best.pos);
-    damageWalker(best, 95, null, 0);
+    damageWalker(best, 95, null, 0, "arc");
     src = best.pos.clone();
   }
   if (hit.length) { SFX.weak(); banner("ARC x" + hit.length); }
@@ -5609,8 +5952,25 @@ function bolt(a, b2) {
   bolts.push({ mesh:m, life:0.22 });
 }
 
-function damageWalker(w, amount, dir, knock) {
+// Every route that hurts the player goes through here, so GLASS only has to
+// be honoured in one place.
+function hurtHero() {
+  hero.hp = WMOD.oneHp ? 0 : hero.hp - 1;
+  if (MOD.secondWind && !S.windUsed && hero.hp > 0 && hero.hp <= 2) {
+    S.windUsed = true;
+    S.focus = 1;
+    banner("SECOND WIND");
+    SFX.rankUp(3);
+  }
+}
+
+function damageWalker(w, amount, dir, knock, kind) {
   if (w.dead) return;
+  // Whatever landed last is what the kill gets credited to. Recorded before
+  // the damage resolves so killWalker can read it without another argument
+  // threaded through every death path.
+  if (kind) w.lastHit = kind;
+  amount *= OD.on ? CFG.odDamage : 1;
   // Armour subtracts flat, with a small floor so nothing is fully immune.
   // A rock into a Tank is a chip; a boulder or a blast is a real hit.
   // A plated boss takes almost nothing on the body. The plates ARE the
@@ -5625,17 +5985,23 @@ function damageWalker(w, amount, dir, knock) {
         sparks(w.pos, 0xaab4c4, 16, 20);
         SFX.boom();
         S.shake = Math.min(1, S.shake + 0.5);
+        S.freeze = Math.max(S.freeze, 0.16);
         banner(w.platesLeft ? "PLATE DOWN · " + w.platesLeft + " LEFT" : "CORE EXPOSED");
       }
     }
     w.flash = 1;
     return;                      // body damage is absorbed entirely
   }
-  const ar = w.E.armor || 0;
+  // IRON TIDE plates everything but hands blasts a way through it, so the
+  // wave has an answer rather than just being slower.
+  const ar = (WMOD.blastPierce && kind === "blast") ? 0 : (w.E.armor || 0);
   if (ar) amount = Math.max(amount * 0.08, amount - ar);
   w.hp -= amount;
   w.flash = 1;
   if (dir && knock) w.kb.addScaledVector(dir, knock);
+  // Damage dealt is what charges the kinetic meter. Not kills — damage — so
+  // chipping a Tank still builds toward the payoff instead of feeling wasted.
+  addKinetic(Math.min(amount, w.maxHp) * CFG.kinPerDamage);
   if (w.hp <= 0) killWalker(w);
 }
 
@@ -5676,7 +6042,7 @@ function queueBlast(pos, ex, src) {
 
 function runBlast(b) {
   const { pos } = b;
-  const ex = { r: b.ex.r * MOD.blastR, dmg: b.ex.dmg };
+  const ex = { r: b.ex.r * MOD.blastR * WMOD.blastR, dmg: b.ex.dmg * MOD.blastDmg };
   shell(pos, ex.r, 0xffa542);
   sparks(pos, 0xff8a3c, 14, 22);
   SFX.boom();
@@ -5690,7 +6056,7 @@ function runBlast(b) {
       const fall = 1 - d/ex.r;                       // linear falloff
       tmp.set(w.pos.x-pos.x, 0, w.pos.z-pos.z).normalize();
       const before = w.dead;
-      damageWalker(w, ex.dmg*fall, tmp, 9*fall);
+      damageWalker(w, ex.dmg*fall, tmp, 9*fall, "blast");
       // Blasts throw bodies outward, which is what turns one barrel into a
       // cascade: the launched walkers go on to hit cover and each other.
       if (!w.dead && fall > 0.35) launchWalker(w, tmp, 12 + 26*fall);
@@ -5751,10 +6117,13 @@ function burst(pos, color) {
 const S = {
   phase:"menu", wave:1, kills:0, focus:1, shake:0, t:0,
   combo:0, comboT:0, score:0, recycleT:0,
+  style:0, styleT:0, rank:"D", recent:[],   // see addStyle
+  kinetic:0,
   held: [],
   mode: "single",          // "single" | "aoe"
   modeCd: 0,               // seconds left on the switch cooldown
-  dashT: 0, dashCd: 0, dashDir: new T.Vector3(), repCd: 0,
+  dashT: 0, dashCd: 0, dashDir: new T.Vector3(), repCd: 0, windUsed: false,
+  freeze: 0,               // hit stop, in real seconds — see frame()
   lock: null,              // walker currently under the crosshair
 };
 const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2 };
@@ -5774,12 +6143,17 @@ function clearAll() {
 
 function buildWave(n) {
   clearAll();
+  rollModifier(n);
 
   // Scatter the catalogue rather than a pile of identical rocks, so what is
   // lying near you is itself a tactical fact.
   for (const key in OBJECTS) {
     const def = OBJECTS[key];
-    const n2 = Math.max(1, Math.round(def.count * (1.4 + n*0.15)));
+    // Modifiers reshape what is lying around, which is a bigger lever on how
+    // a wave plays than the enemy statline is.
+    const pm = (WMOD.props && WMOD.props[key] !== undefined ? WMOD.props[key] : 1)
+             * WMOD.propsAll;
+    const n2 = Math.max(1, Math.round(def.count * (1.4 + n*0.15) * pm));
     for (let i = 0; i < n2; i++) {
       const a = rand(0,Math.PI*2);
       // Uniform over a disc is sqrt-distributed, which piles everything at
@@ -5792,7 +6166,8 @@ function buildWave(n) {
   const extra = Math.max(0, n - WAVES.length);        // past the table, scale up
   const list = [];
   for (const t in comp) {
-    const c = comp[t] + Math.round(comp[t] * extra * 0.35);
+    let c = comp[t] + Math.round(comp[t] * extra * 0.35);
+    if (t !== "boss") c = Math.round(c * WMOD.count);
     for (let i = 0; i < c; i++) list.push(t);
   }
   list.forEach((t, i) => {
@@ -5801,10 +6176,16 @@ function buildWave(n) {
   });
   hero.pos.set(0,0,0); hero.yaw = Math.PI;
   hero.vy = 0; hero.grounded = true;
-  S.dashT = 0; S.dashCd = 0;
+  S.dashT = 0; S.dashCd = 0; S.windUsed = false; S.freeze = 0;
   cam.yaw = Math.PI; cam.pitch = 0.26;
   S.focus = 1;
   el("wave").textContent = n;
+  const mn = el("modName2");
+  if (mn) {
+    mn.textContent = WMOD.name || "";
+    mn.classList.toggle("show", !!WMOD.name);
+  }
+  if (WMOD.name) setTimeout(() => { banner(WMOD.name); toast(WMOD.desc, 3200); }, 420);
   updateHUD();
 }
 
@@ -5837,6 +6218,35 @@ function updateHUD() {
   const sc = el("score"); if (sc) sc.textContent = S.score;
   const cv = el("comboVal"); if (cv) cv.textContent = "x" + Math.max(1, S.combo);
   const cw = el("comboWrap"); if (cw) cw.classList.toggle("hot", S.combo > 1);
+
+  updateMeters();
+}
+
+// The two continuous meters, cheap enough to touch every frame. Kept out of
+// updateHUD, which walks the walker list and rebuilds strings.
+let lastRank = "", lastStyleW = -1, lastKinW = -1;
+function updateMeters() {
+  const rv = el("rankVal");
+  if (!rv) return;
+  const r = rankFor(S.style);
+  const i = RANKS.indexOf(r);
+  if (r.name !== lastRank) {
+    lastRank = r.name;
+    rv.textContent = r.name;
+    rv.style.color = r.color;
+    rv.style.textShadow = i > 1 ? "0 0 12px " + r.color : "none";
+    el("styleWrap").style.color = r.color;
+  }
+  // The bar fills across the current rank, not across the whole scale, so it
+  // always reads as "this much further to the next letter".
+  const lo = r.at, hi = i+1 < RANKS.length ? RANKS[i+1].at : STYLE_MAX;
+  const w = Math.round(Math.max(0, Math.min(100, (S.style-lo)/(hi-lo)*100)));
+  if (w !== lastStyleW) { lastStyleW = w; el("styleFill").style.width = w + "%"; }
+  el("styleWrap").classList.toggle("fade", S.styleT <= 0 && S.style > 0);
+
+  const k = Math.round(S.kinetic*100);
+  if (k !== lastKinW) { lastKinW = k; el("kinFill").style.width = k + "%"; }
+  el("kinWrap").classList.toggle("full", OD.on);
 }
 
 let toastT = 0;
@@ -5868,8 +6278,9 @@ function setMode(m, silent) {
   el("modeBtn").classList.toggle("aoe", m === "aoe");
   el("cross").classList.toggle("aoe", m === "aoe");
   updateForceLabel();
-  if (!silent) toast(m === "single" ? "Single — one press, one guided shot"
-                                    : "Burst — everything at once");
+  if (!silent) toast(m === "single"
+    ? "Single — aims for the head, executes the wounded"
+    : "Burst — three landing together detonate a kinetic wave");
 }
 
 function switchMode() {
@@ -5896,7 +6307,7 @@ function doRepulse() {
     if (d < CFG.repulseR && d > 0.1) {
       const k = 26 * (1 - d/CFG.repulseR) / d;
       w.kb.x += dx*k; w.kb.z += dz*k;
-      damageWalker(w, 45, null, 0);
+      damageWalker(w, 45, null, 0, "repulse");
       if (!w.dead && d < CFG.repulseR*0.55) {
         tmp.set(dx/d, 0, dz/d);
         launchWalker(w, tmp, 16);
@@ -6009,16 +6420,21 @@ function pressForce() {
   gather();
 }
 
+function grabReach() {
+  return CFG.grabRadius + MOD.grabR + (OD.on ? CFG.odGrabR : 0);
+}
+
 function gather() {
   if (S.focus < CFG.gatherFloor) { toast("Not enough focus"); return; }
   const near = rocks
-    .filter(o => !o.held && !o.gone && o.seekT <= 0 && o.pos.distanceTo(hero.pos) < CFG.grabRadius + MOD.grabR)
+    .filter(o => !o.held && !o.gone && o.seekT <= 0 && o.pos.distanceTo(hero.pos) < grabReach())
     .sort((a,b) => a.pos.distanceTo(hero.pos) - b.pos.distanceTo(hero.pos))
     .slice(0, CFG.maxHeld + MOD.maxHeld);
   if (!near.length) { toast("No stones in reach"); return; }
   let heaviest = 0;
   near.forEach((o,i) => {
     o.held = true; o.slot = i; o.mesh.material = heldMat;
+    o.fireMode = null; o.volleyId = -1;
     // Snap it off the floor so the grab reads as a yank rather than a fade.
     // Kept small and capped: the carry spring has to stay dominant, and an
     // earlier value of 7/mass flung light props clean over the treeline.
@@ -6035,6 +6451,29 @@ function gather() {
 }
 
 const aimDir = new T.Vector3();
+
+// One burst = one id. Stones remember which volley they belong to, so three
+// landing together can be recognised as a volley rather than three unrelated
+// hits, and collapse into a shockwave at their centroid.
+const volley = { id:0, t:0, hits:[], fired:false };
+
+function noteVolleyHit(o, pos) {
+  if (o.volleyId !== volley.id || volley.fired || volley.t <= 0) return;
+  volley.hits.push(pos.clone());
+  if (volley.hits.length < (MOD.avalanche ? 2 : CFG.burstWaveMin)) return;
+  volley.fired = true;
+  const c = new T.Vector3();
+  volley.hits.forEach(h => c.add(h));
+  c.divideScalar(volley.hits.length);
+  c.y = 0;
+  const wr = CFG.burstWaveR * (MOD.avalanche ? 1.5 : 1);
+  queueBlast(c, { r:wr, dmg:CFG.burstWaveDmg }, null);
+  shell(c, wr, 0x4FD6E9);
+  S.shake = Math.min(1, S.shake + 0.45);
+  S.freeze = Math.max(S.freeze, 0.14);
+  banner("KINETIC WAVE");
+  SFX.boom();
+}
 
 function shootOne() {
   if (S.focus < CFG.throwCost) { toast("No focus"); return; }
@@ -6065,8 +6504,11 @@ function burstAll() {
     return { w, d, dot: tmp.divideScalar(d).dot(aimDir) };
   }).filter(m => m.dot > CFG.burstCone).sort((a,b) => a.d - b.d);
 
+  volley.id++; volley.t = CFG.burstWaveWin; volley.hits.length = 0; volley.fired = false;
   S.held.forEach((o,i) => {
     o.held = false;
+    o.fireMode = "aoe";
+    o.volleyId = volley.id;
     o.mult = CFG.burstMul * MOD.burstDmg;
     o.boostT = 0.12; o.boostTo = CFG.throwSpeed*(o.def.speedMul||1);
     const mark = marks.length ? marks[i % marks.length] : null;
@@ -6093,6 +6535,8 @@ function burstAll() {
 
 function launchSeeker(o) {
   o.held = false;
+  o.fireMode = "single";
+  o.volleyId = -1;
   o.mesh.material = seekMat;
   o.seek = S.lock && !S.lock.dead ? S.lock : nearestInCone();
   o.seekT = o.seek ? CFG.seekTime : 0;
@@ -6128,9 +6572,10 @@ function nearestInCone() {
 function step(dt) {
   S.t += dt;
 
-  S.focus = Math.min(1, S.focus + CFG.focusRegen*MOD.focusRegen*dt);
+  S.focus = OD.on ? 1 : Math.min(1, S.focus + CFG.focusRegen*MOD.focusRegen*WMOD.focus*dt);
   el("focusFill").style.width = (S.focus*100) + "%";
   el("focusFill").classList.toggle("spent", S.focus < CFG.gatherFloor);
+  updateMeters();
 
   if (S.modeCd > 0) {
     S.modeCd = Math.max(0, S.modeCd - dt);
@@ -6257,7 +6702,10 @@ function step(dt) {
       const target = o.seek && !o.seek.dead ? o.seek : null;
       if (target) {
         const speed = o.vel.length();
-        tmp.set(target.pos.x - o.pos.x, (target.pos.y+1.2) - o.pos.y, target.pos.z - o.pos.z);
+        // Single guides onto the head, burst onto centre mass. Weak-point
+        // crits are then a property of the mode, not of luck.
+        const aimY = target.pos.y + (o.fireMode === "single" ? 1.85 : 1.15);
+        tmp.set(target.pos.x - o.pos.x, aimY - o.pos.y, target.pos.z - o.pos.z);
         if (tmp.lengthSq() > 1e-6) {
           tmp.normalize();
           tmp2.copy(o.vel).normalize();
@@ -6331,7 +6779,7 @@ function step(dt) {
         o.hostile = 0;
         o.mesh.material = matFor(o.key, o.def);
         o.vel.multiplyScalar(0.2);
-        hero.hp--;
+        hurtHero();
         SFX.hurt();
         S.shake = Math.min(1, S.shake+0.5);
         el("dmg").classList.add("on");
@@ -6459,7 +6907,7 @@ function step(dt) {
             const dd = Math.hypot(w.pos.x-ob.pos.x, w.pos.z-ob.pos.z);
             if (dd < ob.r + w.r) {
               w.tvel.multiplyScalar(-0.25);
-              damageWalker(w, Math.min(260, sp3*11), null, 0);
+              damageWalker(w, Math.min(260, sp3*11), null, 0, "env");
               sparks(w.pos, 0x8a5a4a, 10, 16);
               SFX.impact(2.6, 1.3);
               S.shake = Math.min(1, S.shake + 0.3);
@@ -6488,7 +6936,7 @@ function step(dt) {
 
         if (w.pos.y <= 0) {
           w.pos.y = 0;
-          if (sp3 > LAUNCH_MIN) damageWalker(w, sp3*5, null, 0);
+          if (sp3 > LAUNCH_MIN) damageWalker(w, sp3*5, null, 0, "crush");
           w.thrown = 0; w.air = false; w.g.rotation.z = 0;
           break;
         }
@@ -6519,7 +6967,7 @@ function step(dt) {
     const reach = w.boss ? BOSS.reach : CFG.zReach * (w.E.scale || 1);
     if (dist < reach && w.cool <= 0 && hero.pos.y < CFG.dodgeHeight) {
       w.cool = CFG.zCooldown;
-      hero.hp--;
+      hurtHero();
       SFX.hurt();
       S.shake = Math.min(1, S.shake+0.45);
       el("dmg").classList.add("on");
@@ -6554,14 +7002,35 @@ function step(dt) {
           // Head box scales with the archetype, so a Crawler's weak point is
           // genuinely harder to hit than a Tank's.
           const hy = o.pos.y / Math.max(0.4, w.E.scale);
-          const weak = hy > 1.52 && hy < 2.25;
-          let dmg = o.def.dmg * scale * (o.mult || 1) * MOD.allDmg;
+          // Marksman widens the head box, but only for a shot you aimed.
+          const wide = MOD.marksman && o.fireMode === "single";
+          const weak = wide ? (hy > 1.20 && hy < 2.60) : (hy > 1.52 && hy < 2.25);
+          let dmg = o.def.dmg * scale * (o.mult || 1) * MOD.allDmg * WMOD.dmg;
           if (MOD.berserk && hero.hp <= 2) dmg *= 2;
           const hardness = Math.min(1.8, scale) * Math.sqrt(o.def.mass);
-          if (weak) { dmg *= CFG.weakMul; banner("WEAK POINT"); SFX.weak(); }
+          if (weak) { dmg *= CFG.weakMul; banner("WEAK POINT"); SFX.weak();
+                      S.freeze = Math.max(S.freeze, 0.09); }
           else SFX.impact(o.def.mass, Math.min(1.6, scale));
           tmp.y = 0; tmp.normalize();
-          damageWalker(w, dmg, tmp, 4.5*(o.def.knock||1));
+          // Single is the finisher: a wounded body hit by an aimed shot dies
+          // outright. It gives the precision mode a reason to exist once the
+          // crowd is already softened, and it is the loop that makes picking
+          // targets feel better than spraying.
+          const exec = o.fireMode === "single" && !w.boss &&
+                       w.hp <= w.maxHp * CFG.execAt && w.hp > 0;
+          if (exec) {
+            S.freeze = Math.max(S.freeze, 0.13);
+            banner("EXECUTE");
+            SFX.weak();
+            sparks(tmp3.set(o.pos.x, 1.8, o.pos.z), 0xffd23c, 16, 22);
+            damageWalker(w, w.hp + 1, tmp, 4.5*(o.def.knock||1), "impact");
+          } else {
+            // Piercing props read as a different kill from a blunt impact,
+            // and the style system pays for the distinction.
+            damageWalker(w, dmg, tmp, 4.5*(o.def.knock||1),
+                         (o.def.pierce && o.pierced > 0) ? "pierce" : "impact");
+          }
+          noteVolleyHit(o, o.pos);
           // A heavy prop at speed does not shove a body, it throws it.
           const punch = scale * o.def.mass * (o.def.knock||1);
           if (punch > 2.4 && !w.dead) launchWalker(w, tmp, 9 + punch*3.2);
@@ -6577,6 +7046,7 @@ function step(dt) {
           if (o.pierced > (o.def.pierce || 0)) {
             o.vel.multiplyScalar(0.32);          // spent
             o.seekT = 0; o.mesh.material = matFor(o.key, o.def);
+            o.fireMode = null; o.volleyId = -1;  // no longer an aimed shot
           } else {
             o.vel.multiplyScalar(0.86);          // punches through
           }
@@ -6609,7 +7079,7 @@ function step(dt) {
     S.recycleT = 1.4;
     let inReach = 0;
     for (const o of rocks)
-      if (!o.gone && !o.held && o.pos.distanceTo(hero.pos) < CFG.grabRadius) inReach++;
+      if (!o.gone && !o.held && o.pos.distanceTo(hero.pos) < grabReach()) inReach++;
     if (inReach < 6) {
       let moved = 0;
       for (const o of rocks) {
@@ -6633,7 +7103,7 @@ function step(dt) {
     p.mesh.scale.setScalar(0.6 + 0.4*Math.min(1, (p.max-p.life)*3));
     for (const w of walkers) {
       if (w.dead) continue;
-      if (Math.hypot(w.pos.x-p.pos.x, w.pos.z-p.pos.z) < p.r) damageWalker(w, p.dps*dt, null, 0);
+      if (Math.hypot(w.pos.x-p.pos.x, w.pos.z-p.pos.z) < p.r) damageWalker(w, p.dps*dt, null, 0, "chem");
     }
     if (p.life <= 0) { scene.remove(p.mesh); p.mesh.material.dispose(); puddles.splice(i,1); }
   }
@@ -6654,6 +7124,27 @@ function step(dt) {
     if (s.life <= 0) s.mesh.visible = false;
   }
 
+  // Style bleeds once you stop killing. The grace window is generous enough
+  // to cross the arena, short enough that camping loses the rank you earned.
+  if (S.style > 0) {
+    if (S.styleT > 0) S.styleT -= dt;
+    else {
+      const was = S.rank;
+      // Bleed proportionally: a high rank you fought for takes a while to
+      // lose, a low one does not evaporate before you can reach the next
+      // target. A flat rate made D→C feel like it never stuck.
+      const rate = CFG.styleDecay * (0.4 + 0.6*(S.style/STYLE_MAX));
+      S.style = Math.max(0, S.style - rate*dt);
+      const r = rankFor(S.style);
+      if (r.name !== was) { S.rank = r.name; SFX.rankDown(); }
+    }
+  }
+  if (OD.on) {
+    OD.t -= dt;
+    S.kinetic = Math.max(0, OD.t / CFG.odTime);
+    if (OD.t <= 0) endOverdrive();
+  }
+  if (volley.t > 0) volley.t -= dt;
   if (S.comboT > 0) {
     S.comboT -= dt;
     if (S.comboT <= 0 && S.combo) { S.combo = 0; updateHUD(); }
@@ -6692,7 +7183,7 @@ function step(dt) {
 function nextWave() {
   if (S.wave >= WAVES.length) {
     S.phase = "done";
-    show(`<h1>Survived</h1><p class="sub">${WAVES.length} waves · ${S.kills} put down · ${S.score} points</p>
+    show(`<h1>Survived</h1>${runSummary()}
           <p class="rule">Nothing walked away from you.</p><button id="again">Again</button>`);
     el("again").onclick = restart;
     return;
@@ -6713,15 +7204,36 @@ function startNextWave() {
   toast("Wave " + S.wave);
 }
 
+// The scoreboard the end screens share: what this run did, and whether any
+// of it was the best you have managed.
+function runSummary() {
+  const beat = recordRun();
+  const row = (label, val, isBest) =>
+    `<div class="stat"><span>${label}</span><b class="${isBest ? "best" : ""}">${val}` +
+    (isBest ? ' <i class="pb">best</i>' : '') + `</b></div>`;
+  return `<div class="stats">
+      ${row("Score", S.score.toLocaleString(), beat.score)}
+      ${row("Wave reached", S.wave, beat.wave)}
+      ${row("Style rank", S.rank, beat.rank)}
+      ${row("Put down", S.kills, false)}
+    </div>
+    <p class="rule career">Career · ${PROFILE.runs} run${PROFILE.runs === 1 ? "" : "s"}
+       · ${PROFILE.kills.toLocaleString()} killed
+       · best ${PROFILE.best.toLocaleString()} (wave ${PROFILE.bestWave}, rank ${PROFILE.bestRank})
+       · ${Object.keys(PROFILE.seen).length}/${MODIFIERS.length} conditions met</p>`;
+}
+
 function gameOver() {
   S.phase = "dead";
-  show(`<h1>Overrun</h1><p class="sub">Wave ${S.wave} · ${S.kills} put down</p>
+  show(`<h1>Overrun</h1>${runSummary()}
         <p class="rule">They got close enough to touch you.</p><button id="again">Try again</button>`);
   el("again").onclick = restart;
 }
 
 function show(html) {
   el("card").innerHTML = html;
+  el("modName2").classList.remove("show");
+  el("bossBar").classList.remove("show");
   el("overlay").classList.remove("hide");
   ["hud","touch","cross"].forEach(i => el(i).classList.add("hide"));
 }
@@ -6730,9 +7242,14 @@ function restart() {
   // A run's build does not carry into the next one.
   Object.assign(MOD, { singleDmg:1, burstDmg:1, allDmg:1, maxHeld:0, grabR:0,
     focusRegen:1, hpBonus:0, berserk:false, gravity:false, voidwell:false,
-    lightning:0, blastR:1 });
+    lightning:0, blastR:1, blastDmg:1, arcHops:3,
+    singularity:false, marksman:false, secondWind:false, avalanche:false });
+  SYNERGIES.forEach(sy => { sy.got = false; });
   taken.length = 0;
-  S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0; start();
+  S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0;
+  S.style = 0; S.styleT = 0; S.rank = "D"; S.recent.length = 0;
+  S.kinetic = 0; endOverdrive();
+  start();
 }
 
 // Adaptive quality. Bloom re-renders the scene several times at reduced
@@ -6751,8 +7268,13 @@ function dropEffects() {
 
 let last = performance.now();
 function frame(now) {
-  const dt = Math.min((now-last)/1000, 1/30);
+  const real = Math.min((now-last)/1000, 1/30);
   last = now;
+  // Hit stop. A few frames of near-frozen time on a heavy hit is the single
+  // cheapest way to make an impact land: the eye reads the pause as weight.
+  // Real time still advances so the freeze always ends.
+  let dt = real;
+  if (S.freeze > 0) { S.freeze -= real; dt = real * 0.14; }
   if (S.phase === "play" || S.phase === "clear") {
     step(dt);
     if (!fxJudged) {
@@ -6790,6 +7312,16 @@ function start() {
 // Browsers only allow audio to start from a gesture, so the first tap of
 // the run is where the context is created.
 el("startBtn").addEventListener("click", () => { audioInit(); start(); });
+
+loadProfile();
+if (PROFILE.runs > 0) {
+  const m = el("menuBest");
+  if (m) {
+    m.innerHTML = `Best ${PROFILE.best.toLocaleString()} · wave ${PROFILE.bestWave}` +
+                  ` · rank ${PROFILE.bestRank} · ${PROFILE.kills.toLocaleString()} put down`;
+    m.classList.add("show");
+  }
+}
 resize();
 requestAnimationFrame(frame);
 })();
