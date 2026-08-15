@@ -7265,8 +7265,19 @@ function rollModifier(n) {
   Object.assign(WMOD, WMOD_BASE);
   WMOD.props = null;
   if (n < 3) return;                       // the first two waves teach, plainly
-  // Glass is a run-ender if it lands while you are already on one heart.
-  const pool = MODIFIERS.filter(m => !(m.id === "glass" && hero.hp <= 2));
+  const pool = MODIFIERS.filter(m => {
+    // Glass is a run-ender if it lands while you are already on one heart.
+    if (m.id === "glass" && hero.hp <= 2) return false;
+    // It is also a run-ender at wave 3, where the curve is still teaching
+    // that fast enemies exist. Measured idle survival at waves 5-10 came out
+    // at one second flat, which was GLASS rolling early, not the difficulty
+    // curve doing its job.
+    if (m.id === "glass" && n < 7) return false;
+    // Iron Tide before there is anything heavy to answer it with is just a
+    // damage wall.
+    if (m.id === "armored" && n < 5) return false;
+    return true;
+  });
   const m = pool[Math.floor(Math.random()*pool.length)];
   WMOD.name = m.name; WMOD.desc = m.desc;
   PROFILE.seen[m.id] = true; saveProfile();
