@@ -50,10 +50,24 @@
   }
   @media (max-width: 620px) { #scoreChip { display: none; } }
   #focusBar { height: 5px; border-radius: 3px; background: rgba(232,228,240,.13); overflow: hidden; }
-  #focusFill { height: 100%; width: 100%;
+  /* Strain FILLS rather than drains, so a full bar is a warning and not a
+     full tank. Colour turns in the last quarter, before overload. */
+  #focusFill { height: 100%; width: 0%;
                background: linear-gradient(90deg, #7A2A66, var(--force));
                transition: width .08s linear; }
-  #focusFill.spent { background: linear-gradient(90deg, #5A2020, #C4443A); }
+  #focusFill.spent { background: linear-gradient(90deg, #C4443A, #FF5A3C); }
+  #focusWrap.ovl { animation: kinpulse .7s ease-in-out infinite; }
+  #focusWrap.ovl .lbl { color: var(--blood); }
+
+  /* Overloaded: the frame goes cold and the crosshair loses its charge, so
+     the state is legible without reading the bar. */
+  body.ovl #ovl { opacity: 1; }
+  #ovl {
+    position: fixed; inset: 0; z-index: 4; pointer-events: none; opacity: 0;
+    transition: opacity .25s ease;
+    box-shadow: inset 0 0 140px rgba(60,120,200,.5);
+  }
+  body.ovl #cross { filter: grayscale(1) brightness(.6); }
 
   /* Style rank + the bar showing how far into the rank you are. The rank
      letter is the readout; the bar is the "don't stop" pressure. */
@@ -100,6 +114,12 @@
   /* compact roll-call of what is still standing: W3 R2 T1 */
   #threat { display:block; font-family: var(--mono); font-size: 8.5px;
             letter-spacing: .1em; color: var(--dim); margin-top: 1px; }
+  /* Objects within grab range. A resource the player has to watch now, so it
+     takes a colour as it runs down. */
+  #ammoWrap .val { transition: color .15s ease; }
+  #ammoWrap.low .val { color: #E8C24F; text-shadow: 0 0 10px rgba(232,194,79,.6); }
+  #ammoWrap.dry .val { color: var(--blood); text-shadow: 0 0 10px rgba(255,90,60,.8); }
+  #ammoWrap.dry { animation: kinpulse 1s ease-in-out infinite; }
   #comboWrap .val { color: var(--dim); transition: color .15s ease; }
   #comboWrap.hot .val { color: var(--blood); text-shadow: 0 0 10px rgba(255,90,60,.7); }
 
@@ -400,9 +420,10 @@
     <span id="arena"></span>
     <span id="modName2"></span></div>
   <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
-  <div class="chip" id="focusWrap"><span class="lbl">Focus</span>
+  <div class="chip" id="focusWrap"><span class="lbl">Strain</span>
     <div id="focusBar"><div id="focusFill"></div></div></div>
   <div class="chip"><span class="lbl">Carry</span><span class="val" id="carry">0</span></div>
+  <div class="chip" id="ammoWrap"><span class="lbl">In reach</span><span class="val" id="ammo">0</span></div>
   <div class="chip" id="comboWrap"><span class="lbl">Combo</span><span class="val" id="comboVal">x1</span></div>
   <div class="chip" id="styleWrap"><span class="lbl">Style</span>
     <span class="val" id="rankVal">D</span>
@@ -418,6 +439,7 @@
 <div id="cross" class="hide"><i></i><i></i><i></i><i></i><u></u></div>
 <div id="dmg"></div>
 <div id="od"></div>
+<div id="ovl"></div>
 
 <div id="touch" class="hide">
   <div id="stick"><div id="knob"></div></div>
@@ -5581,6 +5603,7 @@ const CFG = {
   moveSpeed:    7.6,
   turnLerp:     11,
   grabRadius:   13,
+  arenaStock:   26,      // props kept alive in the arena; spent ones return here
   maxHeld:      7,
 
   // The carry wheel is a halo ABOVE the character. "Behind the character" is
@@ -5620,9 +5643,25 @@ const CFG = {
   seekTime:     1.5,     // how long guidance lasts
   seekGrav:     0.25,    // gravity multiplier while guided
 
-  throwCost:    0.085,   // focus spent PER STONE thrown; holding is free
-  focusRegen:   0.34,
-  gatherFloor:  0.15,    // need at least this much focus to gather
+  // Kinetic strain. FOCUS used to be a pool you spent down; strain is the
+  // same meter read the other way up, and it is the same meter deliberately
+  // — a separate strain bar alongside focus and the kinetic meter would be
+  // three readouts of "how much telekinesis can I do", which is two too many.
+  // The difference that matters is the failure mode: focus running out just
+  // stopped you, strain maxing out OVERLOADS you, which is a state with
+  // consequences you have to play around.
+  strainGather: 0.030,   // per unit of mass lifted
+  strainSingle: 0.035,   // per aimed shot, scaled by mass — sustainable
+  strainBurst:  0.105,   // PER STONE in a volley — this IS the tradeoff.
+                         // Three times what an aimed shot costs each, so a
+                         // full volley of ordinary stone lands at ~0.95 and
+                         // a volley of boulders overloads outright. Burst is
+                         // affordable once, never twice, and never free.
+  strainRepulse:0.20,
+  strainRecover:0.30,    // per second
+  strainRested: 1.9,     // recovery multiplier after a moment of not acting
+  overloadTime: 3.4,
+  overloadClear:0.55,    // strain must fall here before telekinesis returns
 
   modeCooldown: 10,
 
@@ -6600,8 +6639,17 @@ function geomFor(def, r) {
 // Move a spent or stranded prop back into play near the player. Keeps the
 // object count bounded (good for the physics loop) while guaranteeing there
 // is always something to pick up.
+// Returns a spent prop to the ARENA, not to the player's feet.
+//
+// This used to drop strays at 7-13 metres — inside grab range — whenever
+// fewer than six were reachable, every 1.4 seconds. It was written to fix a
+// real softlock (nothing left to throw, game unwinnable) and it
+// over-corrected into infinite ammunition permanently underfoot, which is
+// the single largest reason the game plays as too easy. Replenishment now
+// lands well outside reach: it restocks the ARENA, and the player still has
+// to go and get it.
 function recycleObject(o) {
-  const a = rand(0, Math.PI*2), d = rand(7, CFG.grabRadius - 1.5);
+  const a = rand(0, Math.PI*2), d = rand(CFG.grabRadius + 5, CFG.arena - 4);
   o.pos.set(hero.pos.x + Math.cos(a)*d, o.r + 6, hero.pos.z + Math.sin(a)*d);
   const lim = CFG.arena - 3;
   const hd = Math.hypot(o.pos.x, o.pos.z);
@@ -6982,7 +7030,7 @@ const UPGRADES = [
     desc:"Telekinesis reaches 5 metres further.",
     take(){ MOD.grabR += 5; } },
   { id:"flow",     name:"Flow State",      tag:"Utility",
-    desc:"Focus recovers 55% faster.",
+    desc:"Kinetic strain clears 55% faster.",
     take(){ MOD.focusRegen *= 1.55; } },
   { id:"hardened", name:"Hardened",        tag:"Defence",
     desc:"+2 maximum health, and refill now.",
@@ -7127,7 +7175,7 @@ const MODIFIERS = [
     apply(){ WMOD.count = 1.5; WMOD.hp = 0.75; } },
   { id:"volatile", name:"VOLATILE",    desc:"Twice the barrels. Everything explodes bigger.",
     apply(){ WMOD.props = { barrel:2.5, chem:2 }; WMOD.blastR = 1.35; } },
-  { id:"scarcity", name:"SCARCITY",    desc:"Little to throw. Focus returns twice as fast.",
+  { id:"scarcity", name:"SCARCITY",    desc:"Little to throw. Strain clears twice as fast.",
     apply(){ WMOD.propsAll = 0.5; WMOD.focus = 2; } },
   { id:"heavy",    name:"DEAD WEIGHT", desc:"Only the heavy props spawned. They hit harder.",
     apply(){ WMOD.props = { rock:0.35, plank:0.3, heavy:2.4, metal:2.2 }; WMOD.dmg = 1.25; } },
@@ -7151,6 +7199,93 @@ function rollModifier(n) {
   WMOD.name = m.name; WMOD.desc = m.desc;
   PROFILE.seen[m.id] = true; saveProfile();
   m.apply();
+}
+
+// ─────────────────────────────────────────────────────────── spawning
+// Every enemy used to arrive at wave start, evenly around one circle. That
+// makes a wave a single problem you solve once and then mop up. Bodies now
+// arrive in pulses from chosen bearings, so a wave is a sequence of
+// situations and the safe side of the arena keeps moving.
+//
+// Two hard rules, from the anti-frustration list: nothing spawns closer than
+// SPAWN_MIN, and nothing spawns inside the arc the player is currently
+// looking at unless there is nowhere else — you get told about a threat
+// before it can touch you.
+const SPAWN_MIN = 19;
+const SECTORS = 8;
+
+const spawnQ = [];              // { type, at } — pending reinforcements
+let recentSector = -1;
+
+// Pick a bearing to send bodies from: prefer sectors that are currently
+// empty, so pressure arrives where the player is NOT looking, but never the
+// same sector twice running.
+function pickSector(avoidFacing) {
+  const load = new Array(SECTORS).fill(0);
+  for (const w of walkers) {
+    if (w.dead) continue;
+    const b = Math.atan2(w.pos.x - hero.pos.x, w.pos.z - hero.pos.z);
+    load[Math.floor(((b + Math.PI) / (Math.PI*2)) * SECTORS) % SECTORS]++;
+  }
+  const facing = Math.floor(((cam.yaw % (Math.PI*2) + Math.PI*2) % (Math.PI*2))
+                            / (Math.PI*2) * SECTORS) % SECTORS;
+  let best = -1, bestScore = -Infinity;
+  for (let i = 0; i < SECTORS; i++) {
+    if (i === recentSector) continue;
+    // Emptier is better. Behind the player is better, but never so much that
+    // everything arrives from behind.
+    let score = -load[i] * 2 + Math.random()*0.8;
+    const away = Math.min(Math.abs(i - facing), SECTORS - Math.abs(i - facing));
+    if (avoidFacing) score += away * 0.5;
+    if (score > bestScore) { bestScore = score; best = i; }
+  }
+  recentSector = best;
+  return (best / SECTORS) * Math.PI*2 - Math.PI;
+}
+
+// Where a body actually appears: on the chosen bearing, outside SPAWN_MIN of
+// the player and inside the arena.
+function spawnAt(type, bearing, jitter) {
+  const a = bearing + rand(-jitter, jitter);
+  const sx = Math.sin(a), sz = Math.cos(a);
+  let d = Math.max(SPAWN_MIN, CFG.arena - rand(1, 6));
+  // Keep it in the arena even when the player is standing near the rim.
+  for (let i = 0; i < 6; i++) {
+    const x = hero.pos.x + sx*d, z = hero.pos.z + sz*d;
+    if (Math.hypot(x, z) < CFG.arena - 1) { spawnWalker(type, x, z); return true; }
+    d -= 3;
+    if (d < SPAWN_MIN) break;
+  }
+  // Fell off the arena on that bearing: put it on the rim instead, still at
+  // a readable distance if we possibly can.
+  const rim = CFG.arena - 2;
+  const x = Math.cos(a)*rim, z = Math.sin(a)*rim;
+  if (Math.hypot(x - hero.pos.x, z - hero.pos.z) > 10) { spawnWalker(type, x, z); return true; }
+  return false;
+}
+
+const SECTOR_NAME = (bearing) => {
+  // Named relative to where the player is looking, which is the only frame
+  // of reference that means anything to them.
+  let d = bearing - cam.yaw;
+  while (d >  Math.PI) d -= Math.PI*2;
+  while (d < -Math.PI) d += Math.PI*2;
+  const a = Math.abs(d);
+  if (a < Math.PI*0.25) return "AHEAD";
+  if (a > Math.PI*0.75) return "BEHIND YOU";
+  return d > 0 ? "ON YOUR RIGHT" : "ON YOUR LEFT";
+};
+
+// Send a group in from one bearing, announced.
+function reinforce(types, label) {
+  const bearing = pickSector(true);
+  let n = 0;
+  for (const t of types) if (spawnAt(t, bearing, 0.35)) n++;
+  if (!n) return 0;
+  banner((label || "REINFORCEMENTS") + " · " + SECTOR_NAME(bearing));
+  SFX.arena();
+  updateHUD();
+  return n;
 }
 
 // ─────────────────────────────────────────────────────────── audio
@@ -7239,6 +7374,8 @@ const SFX = {
   // The wind-up needs an audio tell too — the attacker is often off-screen.
   tell:   () => { tone(210, 0.16, "square", 0.10, 150); },
   whiff:  () => { noise(0.14, 0.10, 900, 300); },
+  dry:    () => { tone(180, 0.18, "square", 0.10, 90); },
+  overload: () => { tone(70, 0.9, "sawtooth", 0.3, 40); noise(0.7, 0.24, 400, 90); },
   overdrive: () => { tone(120, 0.75, "sawtooth", 0.26, 460);
                      tone(240, 0.7, "square", 0.14, 700);
                      noise(0.5, 0.3, 3000, 300); },
@@ -7491,7 +7628,7 @@ function hurtHero() {
   hero.hp = WMOD.oneHp ? 0 : hero.hp - 1;
   if (MOD.secondWind && !S.windUsed && hero.hp > 0 && hero.hp <= 2) {
     S.windUsed = true;
-    S.focus = 1;
+    S.strain = 0; S.overload = 0;
     banner("SECOND WIND");
     SFX.rankUp(3);
   }
@@ -7681,7 +7818,9 @@ function burst(pos, color) {
 // ─────────────────────────────────────────────────────────── state
 const S = {
   phase:"menu", wave:1, kills:0, focus:1, shake:0, t:0,
-  combo:0, comboT:0, score:0, recycleT:0,
+  combo:0, comboT:0, score:0, recycleT:0, waveT:0,
+  inReach:0, reachT:0, dryWarned:false,
+  strain:0, overload:0, idleT:0,
   style:0, styleT:0, rank:"D", recent:[],   // see addStyle
   kinetic:0,
   held: [],
@@ -7760,16 +7899,37 @@ function buildWave(n) {
     if (t !== "boss") c = Math.round(c * WMOD.count);
     for (let i = 0; i < c; i++) list.push(t);
   }
-  list.forEach((t, i) => {
-    const a = (i/list.length)*Math.PI*2 + rand(-0.25,0.25), d = CFG.arena - rand(2,8);
+  // Shuffle so the held-back half is not always the same archetypes.
+  for (let i = list.length-1; i > 0; i--) {
+    const j = Math.floor(Math.random()*(i+1));
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  // The opening group still arrives evenly all round — that is the wave's
+  // starting shape. The rest is held back and arrives in pulses from chosen
+  // bearings, so the wave keeps developing instead of being one problem.
+  spawnQ.length = 0;
+  recentSector = -1;
+  const opening = n <= 2 ? list.length : Math.max(3, Math.round(list.length * 0.6));
+  list.slice(0, opening).forEach((t, i) => {
+    const a = (i/opening)*Math.PI*2 + rand(-0.25,0.25), d = CFG.arena - rand(2,8);
     spawnWalker(t, Math.cos(a)*d, Math.sin(a)*d);
   });
+  // Remaining bodies go into pulses of two or three, spaced out across the
+  // wave. Boss never gets held back.
+  let t0 = rand(7, 10);
+  let rest = list.slice(opening);
+  while (rest.length) {
+    const grp = rest.splice(0, 1 + Math.floor(Math.random()*3));
+    spawnQ.push({ types: grp, at: t0 });
+    t0 += rand(8, 13);
+  }
+  S.waveT = 0;
   hero.pos.set(0,0,0); hero.yaw = Math.PI;
   hero.vy = 0; hero.grounded = true;
   hero.lastX = 0; hero.lastZ = 0; hero.speed = 0; hero.gait = 0;
   S.dashT = 0; S.dashCd = 0; S.windUsed = false; S.freeze = 0;
   cam.yaw = Math.PI; cam.pitch = 0.26;
-  S.focus = 1;
+  S.strain = 0; S.overload = 0; document.body.classList.remove("ovl");
   el("wave").textContent = n;
   const mn = el("modName2");
   if (mn) {
@@ -7906,6 +8066,7 @@ function doJump() {
 function doRepulse() {
   if (S.phase !== "play" || S.repCd > 0) return;
   S.repCd = CFG.repulseCd;
+  addStrain(CFG.strainRepulse);
   let n = 0;
   for (const w of walkers) {
     if (w.dead) continue;
@@ -8027,17 +8188,44 @@ function pressForce() {
   gather();
 }
 
+// ── kinetic strain
+// Builds with telekinetic throughput and recovers on its own. At maximum the
+// player OVERLOADS: reach collapses, carry shrinks, throws lose speed, and
+// gathering is refused until it has bled back down. Every part of that is
+// signposted before it happens — the bar fills visibly, changes colour in
+// the last quarter, and the overload itself is announced.
+function addStrain(v) {
+  if (OD.on) return;                    // Overdrive is the reward for building it
+  S.strain = Math.min(1, S.strain + v);
+  S.idleT = 0;
+  if (S.strain >= 1 && S.overload <= 0) {
+    S.overload = CFG.overloadTime;
+    banner("TELEKINESIS OVERLOAD");
+    toast("Overloaded — reach and carry cut until it clears", 2400);
+    SFX.overload();
+    S.shake = Math.min(1, S.shake + 0.3);
+    document.body.classList.add("ovl");
+  }
+}
+
+function overloaded() { return S.overload > 0; }
+
 function grabReach() {
-  return CFG.grabRadius + MOD.grabR + (OD.on ? CFG.odGrabR : 0);
+  const base = CFG.grabRadius + MOD.grabR + (OD.on ? CFG.odGrabR : 0);
+  return overloaded() ? base * 0.55 : base;
+}
+
+function carryCap() {
+  return Math.max(2, CFG.maxHeld + MOD.maxHeld - (overloaded() ? 3 : 0));
 }
 
 function gather() {
-  if (S.focus < CFG.gatherFloor) { toast("Not enough focus"); return; }
+  if (overloaded()) { toast("Overloaded — telekinesis recovering"); SFX.dry(); return; }
   const near = rocks
     .filter(o => !o.held && !o.gone && o.seekT <= 0 && o.pos.distanceTo(hero.pos) < grabReach())
     .sort((a,b) => a.pos.distanceTo(hero.pos) - b.pos.distanceTo(hero.pos))
-    .slice(0, CFG.maxHeld + MOD.maxHeld);
-  if (!near.length) { toast("No stones in reach"); return; }
+    .slice(0, carryCap());
+  if (!near.length) { toast("NO OBJECTS IN RANGE — move"); SFX.dry(); return; }
   let heaviest = 0;
   near.forEach((o,i) => {
     o.held = true; o.slot = i; o.mesh.material = heldMat;
@@ -8051,6 +8239,10 @@ function gather() {
     heaviest = Math.max(heaviest, o.def.mass);
   });
   S.held = near;
+  // Heavier loads strain more, which is what makes a boulder a decision.
+  let mass = 0;
+  near.forEach(o => { mass += o.def.mass; });
+  addStrain(CFG.strainGather * mass);
   SFX.gather(heaviest);
   S.shake = Math.min(0.4, S.shake + 0.06*heaviest);
   updateHUD();
@@ -8083,9 +8275,8 @@ function noteVolleyHit(o, pos) {
 }
 
 function shootOne() {
-  if (S.focus < CFG.throwCost) { toast("No focus"); return; }
-  S.focus = Math.max(0, S.focus - CFG.throwCost);
   const o = S.held.shift();
+  addStrain(CFG.strainSingle * Math.sqrt(o.def.mass));
   // Re-index the survivors so the wheel stays evenly spaced as it empties,
   // instead of leaving a growing gap where the fired stones used to sit.
   S.held.forEach((s, i) => { s.slot = i; });
@@ -8098,8 +8289,12 @@ function shootOne() {
 function burstAll() {
   const n = S.held.length;
   if (!n) return;
-  if (S.focus <= 0.02) { toast("No focus left"); return; }
-  S.focus = Math.max(0, S.focus - CFG.throwCost * n);
+  // Per stone, and roughly twice what an aimed shot costs each. A full seven
+  // stone volley very nearly overloads from neutral — which is the point:
+  // Burst is the emergency button, not the default.
+  let mass = 0;
+  S.held.forEach(o => { mass += Math.sqrt(o.def.mass); });
+  addStrain(CFG.strainBurst * mass);
   aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
 
   // Burst assigns a DIFFERENT mark per stone across a wide forward arc.
@@ -8179,9 +8374,27 @@ function nearestInCone() {
 function step(dt) {
   S.t += dt;
 
-  S.focus = OD.on ? 1 : Math.min(1, S.focus + CFG.focusRegen*MOD.focusRegen*WMOD.focus*dt);
-  el("focusFill").style.width = (S.focus*100) + "%";
-  el("focusFill").classList.toggle("spent", S.focus < CFG.gatherFloor);
+  // Strain bleeds off on its own, and faster once you have stopped acting
+  // for a moment — so backing out of a fight is a real way to reset.
+  S.idleT += dt;
+  const rested = S.idleT > 1.4 ? CFG.strainRested : 1;
+  const rate = CFG.strainRecover * MOD.focusRegen * WMOD.focus * rested;
+  S.strain = OD.on ? 0 : Math.max(0, S.strain - rate*dt);
+  if (S.overload > 0) {
+    S.overload -= dt;
+    // Cannot clear until the meter has actually come down, so a long
+    // overload is always the consequence of how hard you were pushing.
+    if (S.overload <= 0 && S.strain > CFG.overloadClear) S.overload = 0.25;
+    else if (S.overload <= 0) {
+      S.overload = 0;
+      document.body.classList.remove("ovl");
+      banner("KINESIS RESTORED");
+      SFX.rankUp(2);
+    }
+  }
+  el("focusFill").style.width = (S.strain*100) + "%";
+  el("focusFill").classList.toggle("spent", S.strain > 0.75);
+  el("focusWrap").classList.toggle("ovl", overloaded());
   updateMeters();
 
   if (S.modeCd > 0) {
@@ -8851,19 +9064,43 @@ function step(dt) {
   // than spawning more keeps the simulation size flat.
   S.recycleT -= dt;
   if (S.recycleT <= 0) {
-    S.recycleT = 1.4;
-    let inReach = 0;
-    for (const o of rocks)
-      if (!o.gone && !o.held && o.pos.distanceTo(hero.pos) < grabReach()) inReach++;
-    if (inReach < 6) {
+    S.recycleT = 3.0;
+    // The trigger is ARENA stock now, not what is under the player's feet.
+    // Only props consumed outright — detonated barrels, spilled chem — come
+    // back, and they come back far away. A prop lying somewhere inconvenient
+    // is not restocked; going to fetch it IS the decision.
+    let stock = 0, dead = 0;
+    for (const o of rocks) {
+      if (o.gone) dead++;
+      else if (!o.held) stock++;
+    }
+    if (stock < CFG.arenaStock && dead > 0) {
       let moved = 0;
       for (const o of rocks) {
-        if (moved >= 3) break;
-        if (o.held) continue;
-        const far = o.pos.distanceTo(hero.pos) > CFG.grabRadius + 6;
-        if (o.gone || (far && o.restT > 2)) { recycleObject(o); moved++; }
+        if (moved >= 2) break;
+        if (o.gone) { recycleObject(o); moved++; }
       }
     }
+  }
+
+  // Live count of what is actually reachable, for the HUD and the warning.
+  S.reachT -= dt;
+  if (S.reachT <= 0) {
+    S.reachT = 0.25;
+    let n = 0;
+    for (const o of rocks)
+      if (!o.gone && !o.held && o.seekT <= 0 && o.pos.distanceTo(hero.pos) < grabReach()) n++;
+    S.inReach = n;
+    const ammo = el("ammo");
+    if (ammo) {
+      ammo.textContent = n;
+      el("ammoWrap").classList.toggle("dry", n === 0);
+      el("ammoWrap").classList.toggle("low", n > 0 && n <= 2);
+    }
+    // Only nags when it is actionable: empty-handed with nothing in reach.
+    if (n === 0 && !S.held.length && S.phase === "play") {
+      if (!S.dryWarned) { S.dryWarned = true; toast("NO OBJECTS IN RANGE — move", 2000); }
+    } else S.dryWarned = false;
   }
 
   // Explosions are drained a few per frame. A dense barrel chain would
@@ -8919,6 +9156,14 @@ function step(dt) {
     S.kinetic = Math.max(0, OD.t / CFG.odTime);
     if (OD.t <= 0) endOverdrive();
   }
+  // Reinforcement clock.
+  if (S.phase === "play") {
+    S.waveT += dt;
+    while (spawnQ.length && spawnQ[0].at <= S.waveT) {
+      const g = spawnQ.shift();
+      reinforce(g.types);
+    }
+  }
   if (volley.t > 0) volley.t -= dt;
   if (S.comboT > 0) {
     S.comboT -= dt;
@@ -8952,7 +9197,14 @@ function step(dt) {
   sun.target.position.copy(hero.pos);
   sun.target.updateMatrixWorld();
 
-  if (alive === 0 && S.phase === "play") { S.phase = "clear"; setTimeout(nextWave, 1200); }
+  if (alive === 0 && spawnQ.length === 0 && S.phase === "play") {
+    S.phase = "clear"; setTimeout(nextWave, 1200);
+  }
+  // Cleared the field early but reinforcements are still coming: pull the
+  // next pulse forward rather than making the player stand in an empty arena.
+  else if (alive === 0 && spawnQ.length && S.phase === "play") {
+    spawnQ[0].at = Math.min(spawnQ[0].at, S.waveT + 1.2);
+  }
 }
 
 function nextWave() {

@@ -50,10 +50,24 @@
   }
   @media (max-width: 620px) { #scoreChip { display: none; } }
   #focusBar { height: 5px; border-radius: 3px; background: rgba(232,228,240,.13); overflow: hidden; }
-  #focusFill { height: 100%; width: 100%;
+  /* Strain FILLS rather than drains, so a full bar is a warning and not a
+     full tank. Colour turns in the last quarter, before overload. */
+  #focusFill { height: 100%; width: 0%;
                background: linear-gradient(90deg, #7A2A66, var(--force));
                transition: width .08s linear; }
-  #focusFill.spent { background: linear-gradient(90deg, #5A2020, #C4443A); }
+  #focusFill.spent { background: linear-gradient(90deg, #C4443A, #FF5A3C); }
+  #focusWrap.ovl { animation: kinpulse .7s ease-in-out infinite; }
+  #focusWrap.ovl .lbl { color: var(--blood); }
+
+  /* Overloaded: the frame goes cold and the crosshair loses its charge, so
+     the state is legible without reading the bar. */
+  body.ovl #ovl { opacity: 1; }
+  #ovl {
+    position: fixed; inset: 0; z-index: 4; pointer-events: none; opacity: 0;
+    transition: opacity .25s ease;
+    box-shadow: inset 0 0 140px rgba(60,120,200,.5);
+  }
+  body.ovl #cross { filter: grayscale(1) brightness(.6); }
 
   /* Style rank + the bar showing how far into the rank you are. The rank
      letter is the readout; the bar is the "don't stop" pressure. */
@@ -100,6 +114,12 @@
   /* compact roll-call of what is still standing: W3 R2 T1 */
   #threat { display:block; font-family: var(--mono); font-size: 8.5px;
             letter-spacing: .1em; color: var(--dim); margin-top: 1px; }
+  /* Objects within grab range. A resource the player has to watch now, so it
+     takes a colour as it runs down. */
+  #ammoWrap .val { transition: color .15s ease; }
+  #ammoWrap.low .val { color: #E8C24F; text-shadow: 0 0 10px rgba(232,194,79,.6); }
+  #ammoWrap.dry .val { color: var(--blood); text-shadow: 0 0 10px rgba(255,90,60,.8); }
+  #ammoWrap.dry { animation: kinpulse 1s ease-in-out infinite; }
   #comboWrap .val { color: var(--dim); transition: color .15s ease; }
   #comboWrap.hot .val { color: var(--blood); text-shadow: 0 0 10px rgba(255,90,60,.7); }
 
@@ -400,9 +420,10 @@
     <span id="arena"></span>
     <span id="modName2"></span></div>
   <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
-  <div class="chip" id="focusWrap"><span class="lbl">Focus</span>
+  <div class="chip" id="focusWrap"><span class="lbl">Strain</span>
     <div id="focusBar"><div id="focusFill"></div></div></div>
   <div class="chip"><span class="lbl">Carry</span><span class="val" id="carry">0</span></div>
+  <div class="chip" id="ammoWrap"><span class="lbl">In reach</span><span class="val" id="ammo">0</span></div>
   <div class="chip" id="comboWrap"><span class="lbl">Combo</span><span class="val" id="comboVal">x1</span></div>
   <div class="chip" id="styleWrap"><span class="lbl">Style</span>
     <span class="val" id="rankVal">D</span>
@@ -418,6 +439,7 @@
 <div id="cross" class="hide"><i></i><i></i><i></i><i></i><u></u></div>
 <div id="dmg"></div>
 <div id="od"></div>
+<div id="ovl"></div>
 
 <div id="touch" class="hide">
   <div id="stick"><div id="knob"></div></div>
