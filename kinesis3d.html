@@ -5755,23 +5755,109 @@ renderer.toneMappingExposure = 1.38;
 const maxAniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 
 const scene = new T.Scene();
-scene.background = new T.Color(0x0b1310);
+scene.background = null;             // replaced by the sky texture per arena
 scene.fog = new T.Fog(0x0b1310, 26, 72);
 const camera = new T.PerspectiveCamera(62, 1, 0.1, 200);
 
 // Threshold sits above the diffuse range, so only genuinely hot things —
 // the psychic light, walker eyes, guided stones — actually bleed.
-const composer = new PP.EffectComposer(renderer);
+// The renderer's own `antialias: true` does nothing once everything is drawn
+// through EffectComposer — the composer renders into its own target, and
+// unless that target is multisampled every edge in the game is a staircase.
+// This one line is the difference between "hobby project" and "shipped".
+const msaaTarget = new T.WebGLRenderTarget(1, 1, {
+  type: T.HalfFloatType, samples: 4,
+  colorSpace: T.LinearSRGBColorSpace,
+});
+const composer = new PP.EffectComposer(renderer, msaaTarget);
 composer.addPass(new PP.RenderPass(scene, camera));
+
+// Ambient occlusion. Contact darkness where geometry meets geometry is most
+// of what separates a lit scene from a grounded one — without it every prop
+// looks like a sticker lying on the floor.
+const gtao = new PP.GTAOPass(scene, camera, 1, 1);
+gtao.output = PP.GTAOPass.OUTPUT.Default;
+composer.addPass(gtao);
 const bloom = new PP.UnrealBloomPass(new T.Vector2(1, 1), 0.68, 0.5, 0.82);
 composer.addPass(bloom);
+
+// Grade. A filmic contrast curve, a little desaturation in the shadows, a
+// vignette, and per-pixel grain. None of it is expensive and together it is
+// most of the difference between "a render" and "a shot".
+const GradeShader = {
+  uniforms: {
+    tDiffuse:   { value: null },
+    uTime:      { value: 0 },
+    uGrain:     { value: 0.055 },
+    uVignette:  { value: 0.30 },
+    uContrast:  { value: 1.09 },
+    uSaturation:{ value: 1.06 },
+    uAberration:{ value: 0.0016 },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float uTime, uGrain, uVignette, uContrast, uSaturation, uAberration;
+    varying vec2 vUv;
+
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+    void main() {
+      vec2 uv = vUv;
+      vec2 fromCentre = uv - 0.5;
+      float r2 = dot(fromCentre, fromCentre);
+
+      // Chromatic aberration, scaled by distance from centre so the middle of
+      // the frame — where the crosshair is — stays clean.
+      vec2 off = fromCentre * uAberration * r2 * 4.0;
+      vec3 col;
+      col.r = texture2D(tDiffuse, uv + off).r;
+      col.g = texture2D(tDiffuse, uv).g;
+      col.b = texture2D(tDiffuse, uv - off).b;
+
+      // Contrast around mid grey, then saturation.
+      col = (col - 0.5) * uContrast + 0.5;
+      float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col = mix(vec3(lum), col, uSaturation);
+      // Shadows lose a little colour, which reads as film rather than video.
+      col = mix(col, vec3(lum), (1.0 - smoothstep(0.0, 0.35, lum)) * 0.18);
+
+      // Vignette.
+      col *= 1.0 - uVignette * smoothstep(0.15, 0.85, r2 * 2.0);
+
+      // Grain, animated so it does not look like dirt on the lens.
+      float g = hash(uv * 1024.0 + fract(uTime) * 91.7) - 0.5;
+      col += g * uGrain * (1.0 - lum * 0.6);
+
+      gl_FragColor = vec4(max(col, 0.0), 1.0);
+    }
+  `,
+};
+// ORDER MATTERS. OutputPass does tone mapping and the conversion to display
+// colour space; everything before it is linear HDR, where mid grey is 0.18
+// and not 0.5. A contrast curve pivoted on 0.5 applied to linear values
+// crushes the whole image — it measured a 50% loss of brightness and turned
+// the arena black. The grade belongs AFTER the output pass, on
+// display-referred values, which is what it was written for.
 composer.addPass(new PP.OutputPass());
+
+const grade = new PP.ShaderPass(GradeShader);
+composer.addPass(grade);
+
+// Edge cleanup last, on the graded image.
+const smaa = new PP.SMAAPass(1, 1);
+composer.addPass(smaa);
 
 function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h, false);
   composer.setSize(w, h);
   bloom.setSize(w, h);
+  if (gtao) gtao.setSize(w, h);
+  if (smaa) smaa.setSize(w, h);
   camera.aspect = w / h;
   camera.fov = w < h ? 74 : 62;
   camera.updateProjectionMatrix();
@@ -5804,7 +5890,6 @@ scene.add(sun);
 // is what makes wet stone look wet and a girder look like metal.
 const pmrem = new T.PMREMGenerator(renderer);
 pmrem.compileEquirectangularShader();
-let envRT = null;
 
 // The ground needs large-scale colour variation, not just bump. Built per
 // arena from that arena's own two floor colours so the patches always belong
@@ -5832,33 +5917,89 @@ function buildGroundAlbedo(A) {
   clearMat.color.setHex(0xffffff);
 }
 
-function buildEnvironment(A) {
-  const c = document.createElement("canvas");
-  c.width = 128; c.height = 64;
-  const ctx = c.getContext("2d");
-  const sky = new T.Color(A.hemiSky), grd = new T.Color(A.hemiGround);
-  const sun = new T.Color(A.sun);
-  const g = ctx.createLinearGradient(0, 0, 0, 64);
-  g.addColorStop(0,    `rgb(${sky.r*255|0},${sky.g*255|0},${sky.b*255|0})`);
-  g.addColorStop(0.48, `rgb(${(sky.r*160)|0},${(sky.g*160)|0},${(sky.b*160)|0})`);
-  g.addColorStop(0.52, `rgb(${grd.r*255|0},${grd.g*255|0},${grd.b*255|0})`);
-  g.addColorStop(1,    `rgb(${(grd.r*120)|0},${(grd.g*120)|0},${(grd.b*120)|0})`);
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 64);
-  // A bright spot where the key light is, so speculars have something to
-  // catch rather than a uniform dome.
-  const rg = ctx.createRadialGradient(34, 16, 1, 34, 16, 26);
-  rg.addColorStop(0, `rgba(${sun.r*255|0},${sun.g*255|0},${sun.b*255|0},1)`);
-  rg.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = rg; ctx.fillRect(0, 0, 128, 64);
+// One sky canvas, used for BOTH the visible background and the reflection
+// probe, so what you see behind the treeline is literally what the wet stone
+// is reflecting. A flat background colour was the last thing making this read
+// as a tech demo rather than a place: no horizon, no depth, nothing above the
+// trees.
+let skyTex = null, envRT = null;
 
-  const t = new T.CanvasTexture(c);
-  t.mapping = T.EquirectangularReflectionMapping;
-  t.colorSpace = T.SRGBColorSpace;
+function buildSky(A) {
+  const W = 1024, H = 512;
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const ctx = c.getContext("2d");
+
+  const sky = new T.Color(A.hemiSky), grd = new T.Color(A.hemiGround);
+  const sun = new T.Color(A.sun), bg = new T.Color(A.bg);
+  const rgb = (col, m=1) => `rgb(${Math.min(255,col.r*255*m)|0},${Math.min(255,col.g*255*m)|0},${Math.min(255,col.b*255*m)|0})`;
+
+  // Vertical band: deep at the zenith, warming toward the horizon, then the
+  // ground colour below it.
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0.00, rgb(bg, 0.55));
+  g.addColorStop(0.30, rgb(bg, 1.0));
+  g.addColorStop(0.46, rgb(sky, 0.55));
+  g.addColorStop(0.50, rgb(sky, 0.85));
+  g.addColorStop(0.54, rgb(grd, 0.9));
+  g.addColorStop(1.00, rgb(grd, 0.45));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // Stars, thinning toward the horizon. Only above the skyline.
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 900; i++) {
+    const x = Math.random()*W;
+    const y = Math.pow(Math.random(), 1.7) * H * 0.46;
+    const a = (1 - y/(H*0.46)) * 0.9 * Math.random();
+    const s2 = Math.random() < 0.06 ? 1.8 : 0.9;
+    ctx.fillStyle = `rgba(255,252,240,${a.toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(x, y, s2, 0, 6.283); ctx.fill();
+  }
+
+  // Where the key light comes from: a broad glow sitting on the horizon,
+  // which is what gives the sky a direction and the scene a sense of place.
+  const sx = W * 0.17, sy = H * 0.46;
+  const rg = ctx.createRadialGradient(sx, sy, 2, sx, sy, W*0.34);
+  rg.addColorStop(0.0, rgb(sun, 1.0));
+  rg.addColorStop(0.25, rgb(sun, 0.35));
+  rg.addColorStop(1.0, "rgba(0,0,0,0)");
+  ctx.fillStyle = rg; ctx.fillRect(0, 0, W, H*0.62);
+
+  // A second, cooler bloom opposite it, so the sky is not lit from one side
+  // only and the silhouettes on that side still separate from it.
+  const rx = W * 0.72, ry = H * 0.44;
+  const rg2 = ctx.createRadialGradient(rx, ry, 2, rx, ry, W*0.24);
+  rg2.addColorStop(0.0, rgb(sky, 0.75));
+  rg2.addColorStop(1.0, "rgba(0,0,0,0)");
+  ctx.fillStyle = rg2; ctx.fillRect(0, 0, W, H*0.6);
+  ctx.globalCompositeOperation = "source-over";
+
+  // Cloud banding along the horizon — a few soft stretched ellipses, enough
+  // to break the gradient up so it does not read as a colour ramp.
+  ctx.globalAlpha = 0.16;
+  for (let i = 0; i < 26; i++) {
+    const x = Math.random()*W, y = H*(0.30 + Math.random()*0.15);
+    const w2 = 60 + Math.random()*230, h2 = 6 + Math.random()*16;
+    ctx.fillStyle = rgb(sky, 0.5 + Math.random()*0.6);
+    ctx.beginPath(); ctx.ellipse(x, y, w2, h2, 0, 0, 6.283); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  if (skyTex) skyTex.dispose();
+  skyTex = new T.CanvasTexture(c);
+  skyTex.mapping = T.EquirectangularReflectionMapping;
+  skyTex.colorSpace = T.SRGBColorSpace;
+  return skyTex;
+}
+
+function buildEnvironment(A) {
+  const t = buildSky(A);
+  scene.background = t;
+  scene.backgroundIntensity = 0.85;
   if (envRT) envRT.dispose();
   envRT = pmrem.fromEquirectangular(t);
   scene.environment = envRT.texture;
   scene.environmentIntensity = 0.8;
-  t.dispose();
 }
 
 // Cool rim from behind: separates silhouettes from a very dark ground,
@@ -6301,8 +6442,10 @@ let arena = ARENAS[0];
 
 function buildArena(A) {
   arena = A;
-  scene.background.setHex(A.bg);
-  scene.fog.color.setHex(A.bg);
+  // Fog should fade toward the HORIZON, not toward the old flat background —
+  // otherwise distant geometry dissolves into a dark band sitting in front of
+  // a bright sky, which reads as a missing skybox.
+  scene.fog.color.copy(new T.Color(A.bg).lerp(new T.Color(A.hemiSky), 0.45));
   scene.fog.near = A.fogNear; scene.fog.far = A.fogFar;
 
   buildEnvironment(A);
@@ -10150,8 +10293,16 @@ function setQuality(q) {
   quality = q;
 
   if (q !== "high") {
-    fxOn = false;
+    // MED keeps the grade and the edge cleanup — they are nearly free and
+    // they carry most of the look — but drops bloom and ambient occlusion,
+    // which are the passes that actually cost.
+    gtao.enabled = false;
+    bloom.enabled = false;
     renderer.setPixelRatio(1);
+  }
+  if (q === "low") {
+    // LOW drops the composer entirely and renders straight to the screen.
+    fxOn = false;
   }
   if (q === "low") {
     SURFACED.forEach(stripSurface);
@@ -10208,7 +10359,7 @@ function frame(now) {
     step(dt);
     judgeFrame(now);
   }
-  if (fxOn) composer.render();
+  if (fxOn) { grade.uniforms.uTime.value = now * 0.001; composer.render(); }
   else renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
