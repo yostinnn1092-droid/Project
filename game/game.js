@@ -9,6 +9,8 @@ const CFG = {
   turnLerp:     11,
   grabRadius:   13,
   arenaStock:   26,      // props kept alive in the arena; spent ones return here
+  zoneR:        6.5,
+  zoneTime:     14,
   maxHeld:      7,
 
   // The carry wheel is a halo ABOVE the character. "Behind the character" is
@@ -88,7 +90,8 @@ const CFG = {
   aimCone:      0.972,
   singleMul:    1.4,     // precision bonus: one deliberate, heavy shot
   burstMul:     0.6,     // each burst projectile hits softer, but spreads
-  weakMul:      2.0,     // head hit
+  weakMul:      2.5,     // head hit
+  critMul:      5.0,     // dead centre, aimed shots only
   burstCone:    0.72,
   repulseR:     13,
   repulseCd:    8,    // how wide burst will spread to find separate marks
@@ -840,6 +843,8 @@ const AI = {
   // These two fight from range and should never crowd into contact.
   spawner:  { ring: 12,  lateral: 0.55, spacing: 3.2, telegraph: 0.55 },
   warper:   { ring: 15,  lateral: 0.60, spacing: 3.0, telegraph: 0.50 },
+  disruptor:{ ring: 9,   lateral: 0.75, spacing: 2.4, telegraph: 0.40 },
+  grabber:  { ring: 1.2, lateral: 0.35, spacing: 1.8, telegraph: 0.45 },
 };
 const AI_DEFAULT = AI.walker;
 
@@ -1147,21 +1152,42 @@ const ENEMIES = {
   // which turns your own ammunition supply into a hazard.
   warper:  { name:"Warper",  code:"WP", hp:120, speed:1.70, scale:1.06, bulk:0.95,
              skin:0x8a6a9c, eye:0xe94fbf, psy:{ every:4.4, range:22 }, score:380 },
+  // Punishes careless positioning: closes and spikes your strain. It does
+  // NOT switch telekinesis off — an ability that simply stops working is
+  // frustration, not difficulty. It pushes you toward overload, which is
+  // visible on the bar and can be backed away from.
+  disruptor:{ name:"Disruptor", code:"DS", hp:95, speed:2.35, scale:1.00, bulk:0.9,
+             skin:0x4a6a8a, eye:0x4FD6E9,
+             disrupt:{ every:3.6, range:11, strain:0.28 }, score:420 },
+  // Punishes letting anything reach you: roots the player for a moment.
+  // Telegraphed, short, and broken by Dash.
+  grabber: { name:"Grabber",  code:"GR", hp:130, speed:2.60, scale:1.08, bulk:1.15,
+             skin:0x7a5a4a, eye:0xffb03c,
+             grab:{ every:5.5, range:3.2, hold:1.1 }, score:400 },
 };
 
 // Waves introduce a mechanic rather than a bigger number. Anything past the
 // table repeats the last row with a scaling multiplier.
+// Staged, not linear. Each block introduces ONE new idea and then combines
+// it with what came before, rather than adding bodies and health.
+//
+//   1-2   teach: slow bodies, plenty of room, nothing that punishes
+//   3-4   speed: runners and leapers — you have to react
+//   5-6   combinations: something that resists rocks, plus something fast
+//   7-8   resource and position pressure: disruptors, grabbers, spawners
+//   9-10  everything at once, and this is where events get dangerous
+//   11    the Warden
 const WAVES = [
   { walker:5 },
+  { walker:5, crawler:2 },
   { walker:4, runner:3 },
-  { walker:4, runner:2, crawler:3 },
-  { walker:3, runner:3, exploder:2 },
-  { walker:4, runner:3, shield:2 },
-  { walker:4, leaper:3, exploder:2, armored:1 },
-  { walker:3, runner:4, shield:2, spawner:1 },
-  { walker:4, leaper:3, crawler:4, exploder:3, warper:1 },
-  { runner:6, armored:3, tank:1, leaper:2, warper:2 },
-  { walker:5, shield:3, spawner:2, exploder:3, tank:2 },
+  { walker:3, runner:3, leaper:2 },
+  { walker:4, runner:2, shield:2 },
+  { walker:3, leaper:3, exploder:2, armored:1 },
+  { walker:3, runner:3, disruptor:2, spawner:1 },
+  { walker:3, grabber:2, shield:2, tank:1 },
+  { runner:4, leaper:2, disruptor:2, warper:1, armored:2 },
+  { walker:4, grabber:2, shield:2, spawner:2, tank:1, exploder:3 },
   { boss:1, walker:4, runner:3, shield:2 },
 ];
 
@@ -1309,12 +1335,23 @@ function spawnWalker(type, x, z) {
   // elites and a steady health ramp, so wave 40 is a real fight rather than a
   // frame-rate problem.
   const over = Math.max(0, S.wave - (WAVES.length + 4));
-  const elite = S.wave >= 5 && Math.random() < Math.min(0.5, 0.18 + over*0.02);
-  let EE = elite
+  // A named variant arriving as an ELITE ARRIVAL event takes precedence over
+  // the generic roll.
+  const named = pendingElite && pendingElite.base === type ? pendingElite : null;
+  // The curve introduces elites in the 9-10 block. Before that they are the
+  // named-variant event only, so the first one the player meets is announced
+  // rather than wandering in unremarked.
+  const elite = !!named ||
+                (S.wave >= 7 && Math.random() < Math.min(0.6, (0.10 + over*0.02) * DIFF.elite));
+  let EE = named
+    ? Object.assign({}, E, named.mod(E), { scale:E.scale*1.22, score:E.score*5,
+                                           name:named.name, code:E.code+"!" })
+    : elite
     ? Object.assign({}, E, { hp:Math.round(E.hp*2.1), scale:E.scale*1.28,
                              armor:(E.armor||0)+18, score:E.score*3,
                              name:"Elite "+E.name })
     : E;
+  if (named) EE.hp = Math.round(EE.hp);
   if (over > 0) {
     EE = Object.assign({}, EE, {
       hp: Math.round(EE.hp * (1 + over*0.12)),
@@ -1324,10 +1361,10 @@ function spawnWalker(type, x, z) {
   }
   // The wave modifier is the last word on the statline, applied on top of the
   // archetype and any elite promotion.
-  if (WMOD.hp !== 1 || WMOD.speed !== 1 || WMOD.armor) {
+  if (WMOD.hp !== 1 || WMOD.speed !== 1 || WMOD.armor || DIFF.speed !== 1) {
     EE = Object.assign({}, EE, {
       hp: Math.max(1, Math.round(EE.hp * WMOD.hp)),
-      speed: EE.speed * WMOD.speed,
+      speed: EE.speed * WMOD.speed * DIFF.speed,
       armor: (EE.armor||0) + WMOD.armor,
     });
   }
@@ -1693,6 +1730,152 @@ function reinforce(types, label) {
   return n;
 }
 
+// ─────────────────────────────────────────────────────────── difficulty
+// Not an HP slider. Each mode moves the variables the brief names —
+// aggression, composition, object availability, elite frequency, event
+// frequency — and Nightmare rewards mastery by making the same toolkit
+// carry more weight, not by inflating enemy health.
+const DIFFS = {
+  normal: { name:"NORMAL", desc:"Balanced.",
+            speed:1.00, stock:1.00, elite:1.00, events:1.00, eventGap:1.00,
+            strain:1.00, hp:1.00 },
+  hard:   { name:"HARD",   desc:"Faster, hungrier, less to throw.",
+            speed:1.15, stock:0.72, elite:1.7,  events:1.4,  eventGap:0.75,
+            strain:1.2,  hp:1.0 },
+  night:  { name:"NIGHTMARE", desc:"Elite-heavy. Little to throw. Strain bites.",
+            speed:1.28, stock:0.52, elite:2.6,  events:1.9,  eventGap:0.55,
+            strain:1.45, hp:1.0 },
+};
+let DIFF = DIFFS.normal;
+
+function setDifficulty(key) {
+  DIFF = DIFFS[key] || DIFFS.normal;
+  try { localStorage.setItem("kinesis.diff", key); } catch (e) {}
+  const d = el("diffName");
+  if (d) d.textContent = DIFF.name;
+}
+
+// ─────────────────────────────────────────────────────────── elites
+// The generic elite promotion (more health, bigger, worth more) makes a
+// tougher body but not a different problem. These are named variants that
+// each force a specific answer, and they arrive as an announced event.
+const ELITES = [
+  { id:"frenzied", name:"Frenzied Runner", base:"runner",
+    mod: E => ({ speed: E.speed*1.5, hp: E.hp*2.2, skin:0xffd23c, eye:0xff3c2a }) },
+  { id:"bulwark",  name:"Armored Tank",    base:"tank",
+    mod: E => ({ hp: E.hp*1.6, armor:(E.armor||0)+30, skin:0x9aa3ad }) },
+  { id:"void",     name:"Void Disruptor",  base:"disruptor",
+    mod: E => ({ hp: E.hp*2.4, disrupt:{ every:2.6, range:15, strain:0.34 },
+                 skin:0x2a4a8a, eye:0x9fe8ff }) },
+  { id:"telekin",  name:"Telekinetic Elite", base:"warper",
+    mod: E => ({ hp: E.hp*2.2, psy:{ every:2.8, range:26 }, skin:0xc06aff }) },
+  { id:"volatile", name:"Explosive Elite", base:"exploder",
+    mod: E => ({ hp: E.hp*3.0, onDeath:"blast", skin:0xff5a3c, eye:0xffd23c }) },
+];
+
+// ─────────────────────────────────────────────────────────── pressure events
+// Wave modifiers are conditions that hold for a whole wave. These are
+// MOMENTS inside one — a spike that arrives, resolves, and leaves. Each is
+// telegraphed before it lands, because an event you cannot see coming is
+// just damage.
+const EVENTS = [
+  { id:"horde", name:"HORDE INCOMING", warn:"A crowd is massing",
+    at: n => n >= 4,
+    fire() {
+      const pool = ["walker","runner","crawler","runner","walker"];
+      reinforce(pool.slice(0, 4 + Math.floor(Math.random()*3)), "HORDE");
+    } },
+  { id:"elite", name:"ELITE ARRIVAL", warn:"Something bigger is coming",
+    at: n => n >= 5,
+    fire() {
+      const kind = ELITES[Math.floor(Math.random()*ELITES.length)];
+      pendingElite = kind;
+      reinforce([kind.base], kind.name.toUpperCase());
+      pendingElite = null;
+    } },
+  { id:"scarce", name:"OBJECT SCARCITY", warn:"The ground is emptying",
+    at: n => n >= 6,
+    fire() {
+      // Removes half of what is lying around, briefly. Never all of it —
+      // the anti-frustration list rules that out explicitly.
+      const live = rocks.filter(o => !o.gone && !o.held);
+      const take = Math.floor(live.length * 0.5);
+      for (let i = 0; i < take; i++) {
+        const o = live[Math.floor(Math.random()*live.length)];
+        if (o && !o.gone) { o.gone = true; o.mesh.visible = false; }
+      }
+      toast("Objects are scarce — they will return", 2600);
+    } },
+  { id:"surge", name:"KINETIC SURGE", warn:"Kinetic pressure building",
+    at: n => n >= 3,
+    fire() {
+      // The risk/reward zone from the brief: a patch of ground that clears
+      // strain fast and charges the kinetic meter, and pulls the horde to it.
+      spawnZone();
+    } },
+  { id:"flank", name:"REINFORCEMENTS", warn:"Movement behind you",
+    at: n => n >= 3,
+    fire() { reinforce(["runner","runner","leaper"], "FLANKED"); } },
+];
+
+let eventT = 0, pendingEvent = null, pendingElite = null;
+
+function scheduleEvent(n) {
+  const pool = EVENTS.filter(e => e.at(n));
+  if (!pool.length) { eventT = 1e9; return; }
+  pendingEvent = pool[Math.floor(Math.random()*pool.length)];
+  eventT = rand(11, 17) * DIFF.eventGap;
+}
+
+function tickEvents(dt, n) {
+  if (!pendingEvent) return;
+  eventT -= dt;
+  // Two-stage: warn, then fire two seconds later.
+  if (eventT <= 2 && !pendingEvent.warned) {
+    pendingEvent.warned = true;
+    banner(pendingEvent.name);
+    toast(pendingEvent.warn, 2200);
+    SFX.warn();
+  }
+  if (eventT <= 0) {
+    const e = pendingEvent;
+    pendingEvent = null;
+    e.warned = false;
+    e.fire();
+    // Another one later in the wave, if it runs long.
+    if (Math.random() < Math.min(0.92, 0.6 * DIFF.events)) scheduleEvent(n);
+  }
+}
+
+// ── kinetic zones (brief §11)
+// Stand in it and strain clears fast and the kinetic meter fills; but it
+// drags the horde toward you, so the reward is paid for in exposure.
+const zones = [];
+function spawnZone() {
+  const a = rand(0, Math.PI*2), d = rand(6, CFG.arena*0.6);
+  const pos = new T.Vector3(Math.cos(a)*d, 0, Math.sin(a)*d);
+  const mesh = new T.Mesh(new T.RingGeometry(CFG.zoneR*0.82, CFG.zoneR, 36),
+    new T.MeshBasicMaterial({ color:0x4FD6E9, transparent:true, opacity:0.5,
+                              side:T.DoubleSide, depthWrite:false }));
+  mesh.rotation.x = -Math.PI/2;
+  mesh.position.copy(pos); mesh.position.y = 0.05;
+  scene.add(mesh);
+  const disc = new T.Mesh(new T.CircleGeometry(CFG.zoneR, 36),
+    new T.MeshBasicMaterial({ color:0x4FD6E9, transparent:true, opacity:0.10,
+                              side:T.DoubleSide, depthWrite:false }));
+  disc.rotation.x = -Math.PI/2;
+  disc.position.copy(pos); disc.position.y = 0.04;
+  scene.add(disc);
+  zones.push({ pos, mesh, disc, life: CFG.zoneTime });
+  toast("Kinetic surge — stand in it to vent strain, but they will come", 3000);
+}
+
+function clearZones() {
+  zones.forEach(z => { scene.remove(z.mesh); scene.remove(z.disc);
+                       z.mesh.geometry.dispose(); z.disc.geometry.dispose(); });
+  zones.length = 0;
+}
+
 // ─────────────────────────────────────────────────────────── audio
 // Synthesised on the fly. The page must stay a single self-contained file,
 // so there are no sample assets — every sound here is an oscillator or a
@@ -1760,6 +1943,8 @@ const SFX = {
     tone(95*p, 0.10+0.07*m, "square", 0.12*Math.sqrt(m), 42*p);
   },
   weak:   () => { tone(1150, 0.14, "square", 0.16, 1750); },
+  crit:   () => { tone(1500, 0.10, "square", 0.2, 2400);
+                  setTimeout(()=>tone(2100, 0.16, "triangle", 0.16, 2900), 55); },
   kill:   () => { noise(0.22, 0.26, 700, 120); tone(70, 0.2, "sine", 0.16, 34); },
   boom:   () => { noise(0.62, 0.5, 2400, 90); tone(58, 0.5, "sine", 0.3, 24);
                   tone(140, 0.28, "square", 0.14, 40); },
@@ -1781,6 +1966,10 @@ const SFX = {
   whiff:  () => { noise(0.14, 0.10, 900, 300); },
   dry:    () => { tone(180, 0.18, "square", 0.10, 90); },
   overload: () => { tone(70, 0.9, "sawtooth", 0.3, 40); noise(0.7, 0.24, 400, 90); },
+  disrupt: () => { tone(300, 0.3, "sawtooth", 0.18, 90); noise(0.25, 0.14, 2200, 400); },
+  warn:   () => { tone(160, 0.5, "square", 0.16, 240);
+                  setTimeout(()=>tone(160, 0.5, "square", 0.16, 240), 260); },
+  grabbed: () => { tone(110, 0.4, "square", 0.22, 55); noise(0.3, 0.18, 600, 150); },
   overdrive: () => { tone(120, 0.75, "sawtooth", 0.26, 460);
                      tone(240, 0.7, "square", 0.14, 700);
                      noise(0.5, 0.3, 3000, 300); },
@@ -1810,6 +1999,8 @@ const KILL_KINDS = {
   chem:    { label:"DISSOLVED",   style:14 },
   repulse: { label:"SHOCKWAVE",   style:14 },
   arc:     { label:"ARC",         style:16 },
+  weak:    { label:"WEAK POINT",  style:20 },
+  crit:    { label:"CRITICAL",    style:30 },
 };
 const RANKS = [
   { at:0,   name:"D",  mult:1.0,  color:"#7E7894" },
@@ -2094,7 +2285,12 @@ function damageWalker(w, amount, dir, knock, kind) {
   }
   // IRON TIDE plates everything but hands blasts a way through it, so the
   // wave has an answer rather than just being slower.
-  const ar = (WMOD.blastPierce && kind === "blast") ? 0 : (w.E.armor || 0);
+  let ar = (WMOD.blastPierce && kind === "blast") ? 0 : (w.E.armor || 0);
+  // Armour is flat subtraction, so it is light props it punishes — which is
+  // the point: a rock pings off a Tank and a boulder does not. A weak point
+  // or a critical bypasses most of it, which is what makes precision the
+  // answer to armour rather than raw output.
+  if (ar && (kind === "weak" || kind === "crit")) ar *= 0.25;
   if (ar) amount = Math.max(amount * 0.08, amount - ar);
   w.hp -= amount;
   w.flash = 1;
@@ -2224,8 +2420,8 @@ function burst(pos, color) {
 const S = {
   phase:"menu", wave:1, kills:0, focus:1, shake:0, t:0,
   combo:0, comboT:0, score:0, recycleT:0, waveT:0,
-  inReach:0, reachT:0, dryWarned:false,
-  strain:0, overload:0, idleT:0,
+  inReach:0, reachT:0, dryWarned:false, inZone:false,
+  strain:0, overload:0, idleT:0, grabbed:0,
   style:0, styleT:0, rank:"D", recent:[],   // see addStyle
   kinetic:0,
   held: [],
@@ -2283,7 +2479,7 @@ function buildWave(n) {
              * WMOD.propsAll;
     // Capped: past wave ~12 more props stop being more options and start
     // being a quadratic collision bill. The prop pass is O(n^2).
-    const dens = Math.min(3.2, 1.4 + n*0.15);
+    const dens = Math.min(3.2, 1.4 + n*0.15) * DIFF.stock;
     const n2 = Math.max(1, Math.round(def.count * dens * pm));
     for (let i = 0; i < n2; i++) {
       const a = rand(0,Math.PI*2);
@@ -2309,9 +2505,15 @@ function buildWave(n) {
     const j = Math.floor(Math.random()*(i+1));
     [list[i], list[j]] = [list[j], list[i]];
   }
-  // The opening group still arrives evenly all round — that is the wave's
-  // starting shape. The rest is held back and arrives in pulses from chosen
-  // bearings, so the wave keeps developing instead of being one problem.
+  // The Warden is never a reinforcement. The shuffle above could put it in
+  // the held-back half, which made it stroll in mid-wave as a "reinforcement"
+  // — and left wave 11 with no boss at all in its opening group.
+  const bi = list.indexOf("boss");
+  if (bi > 0) { list.splice(bi, 1); list.unshift("boss"); }
+
+  // The opening group arrives evenly all round — that is the wave's starting
+  // shape. The rest is held back and arrives in pulses from chosen bearings,
+  // so the wave keeps developing instead of being one problem.
   spawnQ.length = 0;
   recentSector = -1;
   const opening = n <= 2 ? list.length : Math.max(3, Math.round(list.length * 0.6));
@@ -2329,10 +2531,13 @@ function buildWave(n) {
     t0 += rand(8, 13);
   }
   S.waveT = 0;
+  clearZones();
+  pendingEvent = null;
+  scheduleEvent(n);
   hero.pos.set(0,0,0); hero.yaw = Math.PI;
   hero.vy = 0; hero.grounded = true;
   hero.lastX = 0; hero.lastZ = 0; hero.speed = 0; hero.gait = 0;
-  S.dashT = 0; S.dashCd = 0; S.windUsed = false; S.freeze = 0;
+  S.dashT = 0; S.dashCd = 0; S.windUsed = false; S.freeze = 0; S.grabbed = 0;
   cam.yaw = Math.PI; cam.pitch = 0.26;
   S.strain = 0; S.overload = 0; document.body.classList.remove("ovl");
   el("wave").textContent = n;
@@ -2505,6 +2710,9 @@ function doRepulse() {
 }
 
 function doDash() {
+  // Breaking a grab is the one thing dash always does, cooldown or not — a
+  // root you cannot escape is a stun-lock, which the brief rules out.
+  if (S.grabbed > 0) { S.grabbed = 0; banner("BROKE FREE"); SFX.rankUp(1); }
   if (S.phase !== "play" || S.dashCd > 0) return;
   // Dash along the stick if it is pushed, otherwise straight down the
   // crosshair — so a standing player still gets a forward blink.
@@ -2600,7 +2808,8 @@ function pressForce() {
 // signposted before it happens — the bar fills visibly, changes colour in
 // the last quarter, and the overload itself is announced.
 function addStrain(v) {
-  if (OD.on) return;                    // Overdrive is the reward for building it
+  if (OD.on) return;
+  v *= DIFF.strain;                    // Overdrive is the reward for building it
   S.strain = Math.min(1, S.strain + v);
   S.idleT = 0;
   if (S.strain >= 1 && S.overload <= 0) {
@@ -2822,11 +3031,17 @@ function step(dt) {
   const right = tmp2.set(-fwd.z, 0, fwd.x);   // forward x up
   const move = tmp3.set(0,0,0).addScaledVector(fwd, -iz).addScaledVector(right, ix);
 
+  // Held by a Grabber: steering still works, ground speed does not. Dash
+  // breaks it outright, which is the counterplay and is announced when it
+  // happens.
+  if (S.grabbed > 0) S.grabbed = Math.max(0, S.grabbed - dt);
+  const rooted = S.grabbed > 0;
+
   if (move.lengthSq() > 1e-6) {
     move.normalize();
     lastMove.copy(move);
     const ctl = hero.grounded ? 1 : CFG.airControl;
-    hero.pos.addScaledVector(move, CFG.moveSpeed*mag*ctl*dt);
+    if (!rooted) hero.pos.addScaledVector(move, CFG.moveSpeed*mag*ctl*dt);
     const want = Math.atan2(move.x, move.z);
     let d = want - hero.yaw;
     while (d >  Math.PI) d -= Math.PI*2;
@@ -3197,6 +3412,34 @@ function step(dt) {
       }
     }
 
+    // A Disruptor spikes your strain from close range. Announced, visible,
+    // and always survivable by backing off — the counter is distance, and it
+    // is the same counter every time.
+    if (w.E.disrupt && !w.thrown && dist < w.E.disrupt.range) {
+      w.psyT -= dt;
+      if (w.psyT <= 0) {
+        w.psyT = w.E.disrupt.every;
+        addStrain(w.E.disrupt.strain);
+        bolt(tmp3.set(w.pos.x, 2.2, w.pos.z), tmp2.set(hero.pos.x, hero.pos.y+1.4, hero.pos.z));
+        sparks(tmp3.set(hero.pos.x, 1.5, hero.pos.z), 0x4FD6E9, 10, 14);
+        banner("DISRUPTED");
+        SFX.disrupt();
+      }
+    }
+
+    // A Grabber roots the player for a beat. Dash breaks it, so it punishes
+    // standing still beside one — exactly the mistake it exists to punish.
+    if (w.E.grab && !w.thrown && dist < w.E.grab.range && S.grabbed <= 0) {
+      w.psyT -= dt;
+      if (w.psyT <= 0) {
+        w.psyT = w.E.grab.every;
+        S.grabbed = w.E.grab.hold;
+        banner("GRABBED — DASH FREE");
+        SFX.grabbed();
+        S.shake = Math.min(1, S.shake + 0.3);
+      }
+    }
+
     if (w.boss) {
       // Core only lights, and only becomes vulnerable, once stripped.
       w.glow.intensity = w.platesLeft ? 0 : 5 + Math.sin(S.t*6)*2.5;
@@ -3392,23 +3635,39 @@ function step(dt) {
           // Damage is proportional to how fast it was really going, capped
           // so a blast-launched prop cannot one-shot everything on the map.
           const scale = Math.min(1.6, sp / CFG.throwSpeed);
-          // Head box scales with the archetype, so a Crawler's weak point is
-          // genuinely harder to hit than a Tank's.
+          // Three tiers, not two. The head box scales with the archetype, so
+          // a Crawler's weak point is genuinely harder to hit than a Tank's,
+          // and the inner band is a CRITICAL — small, and worth going for.
           const hy = o.pos.y / Math.max(0.4, w.E.scale);
           // Marksman widens the head box, but only for a shot you aimed.
           const wide = MOD.marksman && o.fireMode === "single";
-          const weak = wide ? (hy > 1.20 && hy < 2.60) : (hy > 1.52 && hy < 2.25);
+          const lo = wide ? 1.20 : 1.52, hi = wide ? 2.60 : 2.25;
+          const weak = hy > lo && hy < hi;
+          // Dead centre of the head box, and only on a shot that was aimed —
+          // a burst projectile cannot roll a critical.
+          const mid = (lo + hi) * 0.5, half = (hi - lo) * 0.5;
+          const crit = weak && o.fireMode === "single" &&
+                       Math.abs(hy - mid) < half * 0.34;
           let dmg = o.def.dmg * scale * (o.mult || 1) * MOD.allDmg * WMOD.dmg;
           if (MOD.berserk && hero.hp <= 2) dmg *= 2;
           const hardness = Math.min(1.8, scale) * Math.sqrt(o.def.mass);
-          if (weak) { dmg *= CFG.weakMul; banner("WEAK POINT"); SFX.weak();
-                      S.freeze = Math.max(S.freeze, 0.09); }
+          if (crit) {
+            dmg *= CFG.critMul;
+            banner("CRITICAL");
+            SFX.crit();
+            S.freeze = Math.max(S.freeze, 0.14);
+            sparks(tmp3.set(o.pos.x, 2.0, o.pos.z), 0xffffff, 18, 26);
+          } else if (weak) {
+            dmg *= CFG.weakMul; banner("WEAK POINT"); SFX.weak();
+            S.freeze = Math.max(S.freeze, 0.09);
+          }
           else SFX.impact(o.def.mass, Math.min(1.6, scale));
           tmp.y = 0; tmp.normalize();
           // Single is the finisher: a wounded body hit by an aimed shot dies
           // outright. It gives the precision mode a reason to exist once the
           // crowd is already softened, and it is the loop that makes picking
           // targets feel better than spraying.
+          const hitKind = crit ? "crit" : weak ? "weak" : null;
           const exec = o.fireMode === "single" && !w.boss &&
                        w.hp <= w.maxHp * CFG.execAt && w.hp > 0;
           if (exec) {
@@ -3421,7 +3680,7 @@ function step(dt) {
             // Piercing props read as a different kill from a blunt impact,
             // and the style system pays for the distinction.
             damageWalker(w, dmg, tmp, 4.5*(o.def.knock||1),
-                         (o.def.pierce && o.pierced > 0) ? "pierce" : "impact");
+                         hitKind || ((o.def.pierce && o.pierced > 0) ? "pierce" : "impact"));
           }
           noteVolleyHit(o, o.pos);
           // A heavy prop at speed does not shove a body, it throws it.
@@ -3479,7 +3738,7 @@ function step(dt) {
       if (o.gone) dead++;
       else if (!o.held) stock++;
     }
-    if (stock < CFG.arenaStock && dead > 0) {
+    if (stock < CFG.arenaStock * DIFF.stock && dead > 0) {
       let moved = 0;
       for (const o of rocks) {
         if (moved >= 2) break;
@@ -3561,9 +3820,37 @@ function step(dt) {
     S.kinetic = Math.max(0, OD.t / CFG.odTime);
     if (OD.t <= 0) endOverdrive();
   }
+  // Kinetic zones: vent strain fast inside one, and pull the horde to it.
+  for (let i = zones.length-1; i >= 0; i--) {
+    const z = zones[i];
+    z.life -= dt;
+    const pulse = 0.35 + 0.25*Math.sin(S.t*3);
+    z.mesh.material.opacity = pulse;
+    z.disc.material.opacity = pulse*0.22;
+    if (z.life <= 0) {
+      scene.remove(z.mesh); scene.remove(z.disc);
+      z.mesh.geometry.dispose(); z.disc.geometry.dispose();
+      zones.splice(i,1);
+      continue;
+    }
+    // Everything is drawn to it, which is the cost of standing there.
+    for (const w of walkers) {
+      if (w.dead || w.thrown > 0) continue;
+      const dx = z.pos.x - w.pos.x, dz = z.pos.z - w.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.5 && d < 26) { w.pos.x += (dx/d)*1.1*dt; w.pos.z += (dz/d)*1.1*dt; }
+    }
+    if (Math.hypot(hero.pos.x-z.pos.x, hero.pos.z-z.pos.z) < CFG.zoneR) {
+      S.strain = Math.max(0, S.strain - 0.55*dt);
+      addKinetic(0.035*dt);
+      S.inZone = true;
+    }
+  }
+
   // Reinforcement clock.
   if (S.phase === "play") {
     S.waveT += dt;
+    tickEvents(dt, S.wave);
     while (spawnQ.length && spawnQ[0].at <= S.waveT) {
       const g = spawnQ.shift();
       reinforce(g.types);
@@ -3807,6 +4094,27 @@ function start() {
 // Browsers only allow audio to start from a gesture, so the first tap of
 // the run is where the context is created.
 el("startBtn").addEventListener("click", () => { audioInit(); start(); });
+
+// Difficulty picker on the menu. Remembered between sessions.
+(function initDifficulty() {
+  let saved = "normal";
+  try { saved = localStorage.getItem("kinesis.diff") || "normal"; } catch (e) {}
+  if (!DIFFS[saved]) saved = "normal";
+  setDifficulty(saved);
+  const box = el("diffPick");
+  if (!box) return;
+  for (const key in DIFFS) {
+    const btn = document.createElement("button");
+    btn.className = "diffBtn" + (key === saved ? " on" : "");
+    btn.innerHTML = '<b>' + DIFFS[key].name + '</b><i>' + DIFFS[key].desc + '</i>';
+    btn.onclick = () => {
+      setDifficulty(key);
+      [...box.children].forEach(c => c.classList.remove("on"));
+      btn.classList.add("on");
+    };
+    box.appendChild(btn);
+  }
+})();
 
 // The module-level declarations create the meshes; nothing is placed until
 // here, so the opening arena goes through exactly the same path as every

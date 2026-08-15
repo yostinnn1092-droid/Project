@@ -167,6 +167,30 @@
   .pb { font-style: normal; font-size: 8px; letter-spacing: .16em;
         text-transform: uppercase; color: var(--force); vertical-align: middle; }
   .career { margin-top: 10px; font-size: 10.5px; opacity: .7; line-height: 1.6; }
+  /* Condensed briefing. The old one ran long enough to push the difficulty
+     picker and the Begin button below the fold on a laptop. */
+  .brief { text-align: left; max-width: 600px; margin: 8px auto 0; }
+  .brief p { font-size: 11.5px; line-height: 1.55; color: var(--dim); margin-bottom: 7px; }
+  .brief b { color: var(--ink); font-weight: 600; }
+  .brief em { color: var(--blood); font-style: normal; }
+  .brief .keys { font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
+                 opacity: .6; margin-top: 8px; }
+  /* difficulty picker on the menu */
+  #diffPick { display: flex; gap: 7px; justify-content: center; margin: 10px 0 2px;
+              flex-wrap: wrap; }
+  .diffBtn { background: rgba(232,228,240,.04); border: 1px solid rgba(232,228,240,.16);
+             border-radius: 5px; padding: 6px 10px; cursor: pointer; color: var(--ink);
+             font-family: var(--sans); text-align: left; min-width: 116px;
+             transition: border-color .15s ease, background .15s ease; }
+  .diffBtn b { display: block; font-family: var(--mono); font-size: 11px;
+               letter-spacing: .14em; }
+  .diffBtn i { display: block; font-style: normal; font-size: 10px; color: var(--dim);
+               margin-top: 3px; line-height: 1.4; }
+  .diffBtn:hover { border-color: rgba(232,228,240,.4); }
+  .diffBtn.on { border-color: var(--force); background: rgba(233,79,191,.12); }
+  .diffBtn.on b { color: var(--force); }
+  #diffTag { display: block; font-family: var(--mono); font-size: 8px;
+             letter-spacing: .16em; color: var(--dim); margin-top: 2px; }
   #menuBest { display: none; margin-top: 10px; font-size: 11px; color: var(--force); opacity: .85; }
   #menuBest.show { display: block; }
   /* the line on a draft card that says what this pick would complete */
@@ -391,13 +415,18 @@
     padding: 20px; text-align: center; overflow-y: auto;
   }
   #card { max-width: 430px; }
+  #overlay > #card { max-width: 660px; }
+  /* The menu now carries a briefing, a difficulty picker and the button, so
+     it has to be able to scroll rather than run off the bottom. */
+  #overlay { overflow-y: auto; }
+  #card { max-height: 92vh; }
   h1 {
-    font-size: clamp(32px, 8vh, 58px); font-weight: 300;
-    letter-spacing: .24em; text-transform: uppercase; margin-bottom: 5px;
+    font-size: clamp(24px, 6vh, 46px); font-weight: 300;
+    letter-spacing: .24em; text-transform: uppercase; margin-bottom: 4px;
     text-shadow: 0 0 30px rgba(233,79,191,.6);
   }
-  .sub { font-family: var(--mono); font-size: 9.5px; letter-spacing: .28em;
-         text-transform: uppercase; color: var(--force); margin-bottom: 18px; }
+  .sub { font-family: var(--mono); font-size: 9px; letter-spacing: .28em;
+         text-transform: uppercase; color: var(--force); margin-bottom: 10px; }
   .rule { font-size: 13.5px; line-height: 1.6; color: var(--dim); margin-bottom: 7px; }
   .rule b { color: var(--ink); font-weight: 600; }
   .rule em { color: var(--blood); font-style: normal; }
@@ -418,6 +447,7 @@
 <div id="hud" class="hide">
   <div class="chip" id="waveChip"><span class="lbl">Wave</span><span class="val" id="wave">1</span>
     <span id="arena"></span>
+    <span id="diffTag"><span id="diffName">NORMAL</span></span>
     <span id="modName2"></span></div>
   <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
   <div class="chip" id="focusWrap"><span class="lbl">Strain</span>
@@ -471,23 +501,28 @@
   <div id="card">
     <h1>Kinesis</h1>
     <p class="sub">Best played in landscape</p>
-    <p class="rule"><b>Move</b> with the left stick (or WASD). <b>Drag</b> anywhere to aim.</p>
-    <p class="rule"><b>Tap FORCE</b> to gather stones — they ride a wheel behind you. Holding them is free.</p>
-    <p class="rule">The button then becomes <b>SHOOT</b> and stays there until the wheel is empty.</p>
-    <p class="rule"><b>Single</b> fires one stone per press, each bending into the crosshair.
-       <b>Burst</b> throws the lot at once, unguided. <b>MODE</b> swaps them — 10s cooldown.</p>
-    <p class="rule"><b>JUMP</b> clears a swipe — walkers cannot reach you at the top of one.
-       <b>DASH</b> blinks you out of a closing circle, 1.3s cooldown.</p>
-    <p class="rule">Not everything on the ground is a rock. <b>Barrels</b> detonate and set each
-       other off, <b>chem</b> leaves a burning pool, <b>boulders</b> hit like a truck but haul slowly,
-       <b>planks</b> and <b>girders</b> punch straight through a line of them.</p>
-    <p class="rule">Kill fast to build a <em>combo</em>. Chains and multi-kills score hardest.</p>
-    <p class="rule"><b>Single</b> is one heavy guided shot — head hits double it.
-       <b>Burst</b> locks a different target per stone but each lands softer.</p>
-    <p class="rule">Runners are fast and frail. <em>Armored</em> and <em>Tanks</em> shrug off rocks —
-       use boulders, girders or barrels. <em>Exploders</em> detonate when they die.</p>
-    <p class="rule" style="margin-top:12px;font-size:11px;opacity:.7">
-       Keyboard — WASD move · Space jump · Shift dash · R push · F fire · Q mode</p>
+
+    <div class="brief">
+      <p><b>FORCE</b> gathers what is in reach; the button becomes <b>SHOOT</b> until the wheel
+         is empty. <b>Single</b> guides one stone into the crosshair and executes the wounded.
+         <b>Burst</b> throws the lot — three landing together detonate a kinetic wave.</p>
+
+      <p><b>Strain</b> builds as you use the power and recovers when you ease off. Burst costs
+         about twice what an aimed shot does. Max it and you <em>overload</em>: reach and carry
+         cut until it clears. <b>Watch the bar.</b></p>
+
+      <p><b>Objects run out where you are standing.</b> Fire everything nearby and you will read
+         NO OBJECTS IN RANGE. They are still out there — move. Boulders and girders beat armour;
+         barrels chain; chem burns.</p>
+
+      <p>Every attack has a <b>wind-up</b> — a flaring ring and a sound. Step, dash or jump out
+         of it and it whiffs. <em>Grabbers</em> root you; <b>DASH</b> always breaks it.
+         <em>Disruptors</em> spike your strain from range. Kill them first.</p>
+
+      <p class="keys">WASD move · Space jump · Shift dash · R push · F fire · Q mode</p>
+    </div>
+
+    <div id="diffPick"></div>
     <p class="rule" id="menuBest"></p>
     <button id="startBtn">Begin</button>
   </div>
