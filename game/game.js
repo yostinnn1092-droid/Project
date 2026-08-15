@@ -2210,6 +2210,68 @@ for (let i = 0; i < 12; i++) {
   scene.add(m);
   tethers.push(m);
 }
+// Aura pool. A shell around every object currently under control, so the
+// telekinesis reads on the OBJECTS and not only on the character. Pooled
+// rather than parented per prop: there are up to ~170 props in an arena and
+// at most a dozen under control at once, so a dozen meshes is the honest
+// number.
+//
+// Additive blending, so it adds light rather than tinting — and it feeds the
+// bloom pass on the high quality tier, which is what turns it from a
+// coloured shell into a glow.
+const auraGeo = new T.SphereGeometry(1, 14, 10);
+const auras = [];
+// Carry caps at 7, or 10 with Swarm. A full volley of 10 can be in flight
+// while the next 10 are already gathered, plus whatever a Warper has thrown
+// back — so 14 was not enough and the overflow would silently go unlit.
+for (let i = 0; i < 24; i++) {
+  const m = new T.Mesh(auraGeo, new T.MeshBasicMaterial({
+    color: 0xe94fbf, transparent: true, opacity: 0,
+    blending: T.AdditiveBlending, depthWrite: false, side: T.BackSide }));
+  m.visible = false;
+  m.frustumCulled = false;
+  scene.add(m);
+  auras.push(m);
+}
+
+// Colours by what kind of control the object is under, so the aura carries
+// information rather than just decoration.
+const AURA_HELD   = new T.Color(0xe94fbf);   // in your carry
+const AURA_SEEK   = new T.Color(0xffb060);   // launched and guiding
+const AURA_HOSTILE= new T.Color(0xff3020);   // thrown back at you
+
+function updateAuras() {
+  let i = 0;
+  const claim = (o, col, base, pulseHz) => {
+    if (i >= auras.length) return;
+    const m = auras[i++];
+    m.visible = true;
+    m.position.copy(o.pos);
+    // Follows the prop's own scale, which the zoom shrinks when held, so the
+    // aura never becomes the thing filling the screen.
+    // Just over the prop's own size. The shell is BackSide, so the prop —
+    // which writes depth — hides everything except the sliver that peeks out
+    // around its silhouette. That sliver is the glow. At 1.85 the whole far
+    // hemisphere showed and each one read as a filled bubble instead, and
+    // seven of them merged into a single pink mass.
+    const s = o.r * o.mesh.scale.x * 1.24;
+    const pulse = 1 + 0.07*Math.sin(S.t*pulseHz + o.slot*1.7);
+    m.scale.setScalar(s * pulse);
+    m.material.color.copy(col);
+    // A fresh grab flares, then settles.
+    m.material.opacity = base + 0.30*Math.max(0, o.grabT||0)
+                       + 0.06*Math.sin(S.t*pulseHz*1.6 + o.slot);
+  };
+
+  for (const o of S.held) claim(o, AURA_HELD, 0.55, 7);
+  for (const o of rocks) {
+    if (o.gone || o.held) continue;
+    if (o.hostile > 0)     claim(o, AURA_HOSTILE, 0.75, 13);
+    else if (o.seekT > 0)  claim(o, AURA_SEEK, 0.62, 11);
+  }
+  for (; i < auras.length; i++) auras[i].visible = false;
+}
+
 function updateTethers() {
   const n = S.held.length;
   for (let i = 0; i < tethers.length; i++) {
@@ -2463,6 +2525,7 @@ function clearAll() {
   blastQ.length = 0;
   bolts.forEach(b2 => scene.remove(b2.mesh)); bolts.length = 0;
   tethers.forEach(t2 => { t2.visible = false; });
+  auras.forEach(a2 => { a2.visible = false; });
   S.held = []; S.lock = null; S.combo = 0; S.comboT = 0;
   resetObstacles();
 }
@@ -3972,6 +4035,7 @@ function step(dt) {
   }
 
   updateTethers();
+  updateAuras();
 
   motes.rotation.y += dt*0.012;
   motes.position.y = Math.sin(S.t*0.25)*0.4;
