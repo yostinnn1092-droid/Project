@@ -88,7 +88,8 @@ renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.75));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = T.PCFSoftShadowMap;
 renderer.toneMapping = T.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.38;
+const maxAniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 
 const scene = new T.Scene();
 scene.background = new T.Color(0x0b1310);
@@ -123,12 +124,79 @@ const sun = new T.DirectionalLight(0xc3d8f5, 2.1);   // moonlight through the ca
 sun.position.set(14, 22, 10);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
+// A wide PCF radius over a big flat plane at a grazing sun angle banded the
+// ground with straight seams. Soft shadows are not worth streaking the floor
+// they fall on.
 sun.shadow.bias = -0.0006;
-sun.shadow.normalBias = 0.02;
+sun.shadow.normalBias = 0.022;
+sun.shadow.radius = 1.6;
 // Tighter frustum over the same map size = sharper contact shadows. The
 // light follows the hero, so a wide arena still stays covered.
 Object.assign(sun.shadow.camera, { left:-22, right:22, top:22, bottom:-22, near:1, far:60 });
 scene.add(sun);
+
+// PBR materials without an environment read as flat paint — roughness has
+// nothing to blur and metalness has nothing to mirror. A single prefiltered
+// probe, regenerated per arena from that arena's own sky and ground colours,
+// is what makes wet stone look wet and a girder look like metal.
+const pmrem = new T.PMREMGenerator(renderer);
+pmrem.compileEquirectangularShader();
+let envRT = null;
+
+// The ground needs large-scale colour variation, not just bump. Built per
+// arena from that arena's own two floor colours so the patches always belong
+// to the place.
+let groundAlbedo = null, clearAlbedo = null;
+
+function buildGroundAlbedo(A) {
+  if (groundAlbedo) groundAlbedo.dispose();
+  if (clearAlbedo)  clearAlbedo.dispose();
+  const gLo = new T.Color(A.ground).multiplyScalar(0.82).getHex();
+  const gHi = new T.Color(A.ground).multiplyScalar(1.5).getHex();
+  groundAlbedo = albedoFrom(TEX._soil, TEX._soil2, TSIZE, gLo, gHi, 9);
+  const cLo = new T.Color(A.clearing).multiplyScalar(0.84).getHex();
+  const cHi = new T.Color(A.clearing).multiplyScalar(1.45).getHex();
+  clearAlbedo = albedoFrom(TEX._soil, TEX._soil2, TSIZE, cLo, cHi, 9);
+  groundMat.map = groundAlbedo; groundMat.needsUpdate = true;
+  clearMat.map  = clearAlbedo;  clearMat.needsUpdate  = true;
+  // Ground cover shares the floor's own albedo. It was the last surface still
+  // lit off a flat colour once the ground moved to a mottled map, which is
+  // why it kept reading as bright plates lying on top of the earth rather
+  // than as part of it.
+  scrubMat.map  = clearAlbedo;  scrubMat.needsUpdate  = true;
+  // The map carries the colour now; leaving the tint on multiplies it twice.
+  groundMat.color.setHex(0xffffff);
+  clearMat.color.setHex(0xffffff);
+}
+
+function buildEnvironment(A) {
+  const c = document.createElement("canvas");
+  c.width = 128; c.height = 64;
+  const ctx = c.getContext("2d");
+  const sky = new T.Color(A.hemiSky), grd = new T.Color(A.hemiGround);
+  const sun = new T.Color(A.sun);
+  const g = ctx.createLinearGradient(0, 0, 0, 64);
+  g.addColorStop(0,    `rgb(${sky.r*255|0},${sky.g*255|0},${sky.b*255|0})`);
+  g.addColorStop(0.48, `rgb(${(sky.r*160)|0},${(sky.g*160)|0},${(sky.b*160)|0})`);
+  g.addColorStop(0.52, `rgb(${grd.r*255|0},${grd.g*255|0},${grd.b*255|0})`);
+  g.addColorStop(1,    `rgb(${(grd.r*120)|0},${(grd.g*120)|0},${(grd.b*120)|0})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 64);
+  // A bright spot where the key light is, so speculars have something to
+  // catch rather than a uniform dome.
+  const rg = ctx.createRadialGradient(34, 16, 1, 34, 16, 26);
+  rg.addColorStop(0, `rgba(${sun.r*255|0},${sun.g*255|0},${sun.b*255|0},1)`);
+  rg.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = rg; ctx.fillRect(0, 0, 128, 64);
+
+  const t = new T.CanvasTexture(c);
+  t.mapping = T.EquirectangularReflectionMapping;
+  t.colorSpace = T.SRGBColorSpace;
+  if (envRT) envRT.dispose();
+  envRT = pmrem.fromEquirectangular(t);
+  scene.environment = envRT.texture;
+  scene.environmentIntensity = 0.8;
+  t.dispose();
+}
 
 // Cool rim from behind: separates silhouettes from a very dark ground,
 // which is what stops walkers vanishing into the backdrop at range.
@@ -137,6 +205,160 @@ rim.position.set(-12, 9, -14);
 scene.add(rim);
 const psi = new T.PointLight(0xe94fbf, 0, 24, 2);
 scene.add(psi);
+
+// ─────────────────────────────────────────────────────────── textures
+// Every surface here is generated at runtime on a 2D canvas. The artifact
+// CSP blocks every external host, so there is no such thing as loading a
+// texture file — a procedural library is the only way to get off flat
+// untextured colour. All of it is built once, at load, and shared.
+const TEX = {};
+
+// Value noise, fBm-stacked. The grid for each octave is sized to exactly the
+// number of cells that octave spans across the texture, so index wrapping at
+// the grid edge IS the texture edge and every layer tiles seamlessly. A first
+// pass sampled every octave from one fixed 64-cell grid at frequencies that
+// did not divide 64, which does not tile — and at repeat(9,9) across the
+// ground that showed up as a hard grid of seams straight across the floor.
+function noiseLayer(out, size, fx, fy, amp, seed) {
+  const g = new Float32Array(fx*fy);
+  let st = (seed >>> 0) || 1;
+  const rnd = () => (st = (st*1664525 + 1013904223) >>> 0) / 4294967296;
+  for (let i = 0; i < g.length; i++) g[i] = rnd();
+  const at = (a, b) => g[(((b % fy) + fy) % fy) * fx + (((a % fx) + fx) % fx)];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const gx = x/size*fx, gy = y/size*fy;
+      const xi = Math.floor(gx), yi = Math.floor(gy);
+      const tx = gx - xi, ty = gy - yi;
+      const sx = tx*tx*(3-2*tx), sy = ty*ty*(3-2*ty);
+      const a = at(xi,yi), b = at(xi+1,yi), c = at(xi,yi+1), d = at(xi+1,yi+1);
+      out[y*size+x] += amp * ((a*(1-sx)+b*sx)*(1-sy) + (c*(1-sx)+d*sx)*sy);
+    }
+  }
+}
+
+function fbm(size, octaves, seed) {
+  const out = new Float32Array(size*size);
+  let amp = 1, norm = 0, freq = 4;
+  for (let o = 0; o < octaves; o++) {
+    noiseLayer(out, size, freq, freq, amp, seed + o*977);
+    norm += amp; amp *= 0.5; freq *= 2;
+  }
+  for (let i = 0; i < out.length; i++) out[i] /= norm;
+  return out;
+}
+
+function canvasOf(size) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  return c;
+}
+
+function texFrom(canvas, repeat) {
+  const t = new T.CanvasTexture(canvas);
+  t.wrapS = t.wrapT = T.RepeatWrapping;
+  t.repeat.set(repeat, repeat);
+  t.anisotropy = maxAniso;
+  return t;
+}
+
+// Height field -> tangent-space normal map. This is what actually sells a
+// surface: colour variation alone still reads as flat paint under a moving
+// light, and the whole point of the exercise is that the light moves.
+function normalFromHeight(h, size, strength, repeat) {
+  const c = canvasOf(size), ctx = c.getContext("2d");
+  const img = ctx.createImageData(size, size);
+  const at = (x,y) => h[((y+size)%size)*size + ((x+size)%size)];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = (at(x+1,y) - at(x-1,y)) * strength;
+      const dy = (at(x,y+1) - at(x,y-1)) * strength;
+      // normalize(-dx, -dy, 1) mapped into 0..255
+      const len = Math.hypot(dx, dy, 1);
+      const i = (y*size+x)*4;
+      img.data[i]   = (-dx/len * 0.5 + 0.5) * 255;
+      img.data[i+1] = (-dy/len * 0.5 + 0.5) * 255;
+      img.data[i+2] = ( 1  /len * 0.5 + 0.5) * 255;
+      img.data[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return texFrom(c, repeat);
+}
+
+// Greyscale field -> single-channel-ish map, used for roughness and AO.
+function grayFrom(h, size, lo, hi, repeat) {
+  const c = canvasOf(size), ctx = c.getContext("2d");
+  const img = ctx.createImageData(size, size);
+  for (let i = 0; i < h.length; i++) {
+    const v = (lo + (hi-lo)*h[i]) * 255;
+    img.data[i*4] = img.data[i*4+1] = img.data[i*4+2] = v;
+    img.data[i*4+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return texFrom(c, repeat);
+}
+
+// Colour field: a base tint modulated by the same height field, with a
+// second field mixing in a contrasting tone so it does not read as one
+// colour with the brightness wobbling.
+function albedoFrom(h, h2, size, colA, colB, repeat, srgb) {
+  const c = canvasOf(size), ctx = c.getContext("2d");
+  const img = ctx.createImageData(size, size);
+  const a = new T.Color(colA), b = new T.Color(colB);
+  for (let i = 0; i < h.length; i++) {
+    const t = Math.min(1, Math.max(0, h2[i]*1.35 - 0.15));
+    const shade = 0.86 + 0.28*h[i];
+    img.data[i*4]   = Math.min(255, (a.r + (b.r-a.r)*t) * shade * 255);
+    img.data[i*4+1] = Math.min(255, (a.g + (b.g-a.g)*t) * shade * 255);
+    img.data[i*4+2] = Math.min(255, (a.b + (b.b-a.b)*t) * shade * 255);
+    img.data[i*4+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = texFrom(c, repeat);
+  t.colorSpace = srgb === false ? T.NoColorSpace : T.SRGBColorSpace;
+  return t;
+}
+
+// Bark: anisotropic layers — many cells across, few down — so the grain runs
+// as long vertical fibres rather than as blobs.
+function barkHeight(size, seed) {
+  const out = new Float32Array(size*size);
+  noiseLayer(out, size, 24, 3,  0.62, seed);
+  noiseLayer(out, size, 48, 6,  0.24, seed + 31);
+  noiseLayer(out, size,  8, 12, 0.14, seed + 57);
+  return out;
+}
+
+const TSIZE = 256;
+
+function buildTextures() {
+  const rock  = fbm(TSIZE, 4, 11);
+  const rock2 = fbm(TSIZE, 3, 77);
+  const soil  = fbm(TSIZE, 5, 203);
+  const soil2 = fbm(TSIZE, 3, 401);
+  const bark  = barkHeight(TSIZE, 613);
+  const cloth = fbm(TSIZE, 4, 821);
+  const flesh = fbm(TSIZE, 3, 929);
+
+  TEX.groundN = normalFromHeight(soil, TSIZE, 26, 9);
+  TEX.groundR = grayFrom(soil, TSIZE, 0.72, 1.0, 9);
+  TEX.rockN   = normalFromHeight(rock, TSIZE, 40, 2);
+  TEX.rockR   = grayFrom(rock, TSIZE, 0.55, 0.95, 2);
+  TEX.barkN   = normalFromHeight(bark, TSIZE, 34, 3);
+  TEX.barkR   = grayFrom(bark, TSIZE, 0.7, 1.0, 3);
+  TEX.clothN  = normalFromHeight(cloth, TSIZE, 12, 2);
+  TEX.fleshN  = normalFromHeight(flesh, TSIZE, 9, 1.5);
+
+  // Held for re-tinting: every arena rebuilds its own ground albedo from
+  // these, because a mottle that reads as leaf litter reads as nothing at
+  // all on quarry stone.
+  TEX._soil = soil; TEX._soil2 = soil2;
+  TEX._rock = rock; TEX._rock2 = rock2;
+  TEX._bark = bark;
+}
+
+buildTextures();
 
 // ─────────────────────────────────────────────────────────── arenas
 // Four places to fight, cycling every three waves. They are not reskins:
@@ -153,7 +375,7 @@ const ARENAS = [
     sun:0xc3d8f5, sunI:2.1, rim:0x7fd0a0, rimI:1.0,
     trunk:0x3b2f26, foliaA:0x24401f, foliaB:0x2f5228,
     treeH:[7,15], trunkW:1.0, canopyScale:1.0, treeRing:23,
-    scrub:0x1d3018, scrubN:64,
+    scrub:0x223a1a, scrubTint:0x9fc98a, scrubN:260,
     bole:0x4a3b2c, stone:0x8d9199, log:0x342a22,
     mote:0xd8e878, moteSize:0.13, moteHi:6,
     coverTrees:6, coverStones:4, logs:7 },
@@ -165,7 +387,7 @@ const ARENAS = [
     sun:0xffd9a8, sunI:2.4, rim:0xc98f5a, rimI:0.8,
     trunk:0x6e6355, foliaA:0x7d7263, foliaB:0x5f564a,
     treeH:[3.5,7.5], trunkW:2.7, canopyScale:0.5, treeRing:30,
-    scrub:0x554b3e, scrubN:40,
+    scrub:0x574b3a, scrubTint:0xc9bda6, scrubN:120,
     bole:0x6e6355, stone:0x9a9188, log:0x554b3e,
     mote:0xe8d9a8, moteSize:0.10, moteHi:9,
     coverTrees:3, coverStones:8, logs:4 },
@@ -177,7 +399,7 @@ const ARENAS = [
     sun:0xffb079, sunI:2.15, rim:0xff4a2a, rimI:0.9,
     trunk:0x241a16, foliaA:0x2e201a, foliaB:0x1c1310,
     treeH:[6,13], trunkW:0.72, canopyScale:0.22, treeRing:26,
-    scrub:0x2a1a14, scrubN:30,
+    scrub:0x2e1c12, scrubTint:0xb08a70, scrubN:90,
     bole:0x2b1f19, stone:0x6b5a52, log:0x1f1512,
     mote:0xff7a3c, moteSize:0.16, moteHi:11,
     coverTrees:4, coverStones:3, logs:9 },
@@ -189,21 +411,27 @@ const ARENAS = [
     sun:0xa8d8f0, sunI:1.9, rim:0x4fd6e9, rimI:1.2,
     trunk:0x6d7a80, foliaA:0x2c4a44, foliaB:0x223a38,
     treeH:[5,12], trunkW:1.7, canopyScale:0.55, treeRing:25,
-    scrub:0x1a2e2a, scrubN:52,
+    scrub:0x1f3a34, scrubTint:0x8fc9bd, scrubN:200,
     bole:0x7a838a, stone:0x8fa0a8, log:0x3a4a50,
     mote:0x9fe8ff, moteSize:0.12, moteHi:8,
     coverTrees:5, coverStones:6, logs:5 },
 ];
 
 // ─────────────────────────────────────────────────────────── world
-const groundMat = new T.MeshStandardMaterial({ color: 0x33402a, roughness: 1.0 });
+const groundMat = new T.MeshStandardMaterial({
+  color: 0x33402a, roughness: 1.0, metalness: 0,
+  normalMap: TEX.groundN, roughnessMap: TEX.groundR,
+  normalScale: new T.Vector2(1.1, 1.1), envMapIntensity: 0.35 });
 const ground = new T.Mesh(new T.CircleGeometry(CFG.arena + 26, 96), groundMat);
 ground.rotation.x = -Math.PI/2; ground.receiveShadow = true;
 scene.add(ground);
 
 // A worn clearing floor, slightly lighter than the ground beyond it, so the
 // playable circle reads as a place rather than an invisible rule.
-const clearMat = new T.MeshStandardMaterial({ color: 0x46512f, roughness: 1.0 });
+const clearMat = new T.MeshStandardMaterial({
+  color: 0x46512f, roughness: 0.96, metalness: 0,
+  normalMap: TEX.groundN, roughnessMap: TEX.groundR,
+  normalScale: new T.Vector2(0.85, 0.85), envMapIntensity: 0.35 });
 const clearing = new T.Mesh(new T.CircleGeometry(CFG.arena, 72), clearMat);
 clearing.rotation.x = -Math.PI/2; clearing.position.y = 0.015;
 clearing.receiveShadow = true;
@@ -214,13 +442,23 @@ scene.add(clearing);
 // arena — a quarry is the same instances with rock colours, a squat profile
 // and the crowns scaled down to rubble.
 const TREES = 210;
-const trunkMat = new T.MeshStandardMaterial({ color: 0x3b2f26, roughness: 0.95 });
-const foliaA   = new T.MeshStandardMaterial({ color: 0x24401f, roughness: 0.95, flatShading: true });
-const foliaB   = new T.MeshStandardMaterial({ color: 0x2f5228, roughness: 0.95, flatShading: true });
+const trunkMat = new T.MeshStandardMaterial({
+  color: 0x3b2f26, roughness: 0.94, metalness: 0,
+  normalMap: TEX.barkN, roughnessMap: TEX.barkR,
+  normalScale: new T.Vector2(1.4, 1.4), envMapIntensity: 0.3 });
+const foliaA = new T.MeshStandardMaterial({
+  color: 0x24401f, roughness: 0.88, metalness: 0,
+  normalMap: TEX.fleshN, normalScale: new T.Vector2(0.9, 0.9), envMapIntensity: 0.4 });
+const foliaB = new T.MeshStandardMaterial({
+  color: 0x2f5228, roughness: 0.88, metalness: 0,
+  normalMap: TEX.fleshN, normalScale: new T.Vector2(0.9, 0.9), envMapIntensity: 0.4 });
 
-const trunks = new T.InstancedMesh(new T.CylinderGeometry(0.26, 0.46, 1, 6), trunkMat, TREES);
-const canopy1 = new T.InstancedMesh(new T.IcosahedronGeometry(1, 0), foliaA, TREES);
-const canopy2 = new T.InstancedMesh(new T.IcosahedronGeometry(1, 0), foliaB, TREES);
+// More sides on the trunks and a subdivision on the crowns: at 210 instances
+// this is three draw calls either way, and the silhouette stops reading as
+// origami the moment the profile has more than six faces.
+const trunks = new T.InstancedMesh(new T.CylinderGeometry(0.26, 0.46, 1, 10), trunkMat, TREES);
+const canopy1 = new T.InstancedMesh(new T.IcosahedronGeometry(1, 1), foliaA, TREES);
+const canopy2 = new T.InstancedMesh(new T.IcosahedronGeometry(1, 1), foliaB, TREES);
 trunks.castShadow = canopy1.castShadow = canopy2.castShadow = true;
 trunks.receiveShadow = canopy1.receiveShadow = canopy2.receiveShadow = true;
 scene.add(trunks, canopy1, canopy2);
@@ -260,8 +498,10 @@ function layTreeline(A) {
 // Ground cover inside the clearing: purely decorative and kept low, so it
 // dresses the floor without ever blocking a stone or a walker. Unused
 // instances are parked at zero scale rather than removed.
-const SCRUB = 64;
-const scrubMat = new T.MeshStandardMaterial({ color: 0x1d3018, roughness: 1, flatShading: true });
+const SCRUB = 260;
+const scrubMat = new T.MeshStandardMaterial({
+  color: 0x1d3018, roughness: 0.95, metalness: 0,
+  normalMap: TEX.fleshN, envMapIntensity: 0.3 });
 const scrub = new T.InstancedMesh(new T.IcosahedronGeometry(1, 0), scrubMat, SCRUB);
 scrub.receiveShadow = true;
 scene.add(scrub);
@@ -270,10 +510,11 @@ function layScrub(A) {
   for (let i = 0; i < SCRUB; i++) {
     if (i >= A.scrubN) { M.makeScale(0,0,0); scrub.setMatrixAt(i, M); continue; }
     const a = rand(0, Math.PI*2), d = Math.sqrt(Math.random()) * (CFG.arena - 2);
-    const s = rand(0.5, 1.25);
-    Q.setFromEuler(new T.Euler(0, rand(0,6.28), 0));
-    // Wide and very flat: a tuft, not a boulder.
-    M.compose(Vp.set(Math.cos(a)*d, 0.06, Math.sin(a)*d), Q, Vs.set(s*1.9, s*0.22, s*1.9));
+    const s = rand(0.2, 0.44);
+    Q.setFromEuler(new T.Euler(rand(-0.2,0.2), rand(0,6.28), rand(-0.2,0.2)));
+    // Small, rounded and half-buried. Wide flat plates caught the key light
+    // and read as dark tiles lying on the floor rather than as ground cover.
+    M.compose(Vp.set(Math.cos(a)*d, s*0.2, Math.sin(a)*d), Q, Vs.set(s*1.3, s*0.62, s*1.3));
     scrub.setMatrixAt(i, M);
   }
   scrub.instanceMatrix.needsUpdate = true;
@@ -283,13 +524,19 @@ function layScrub(A) {
 // empty and the treeline purely decorative, so there was nothing to slam
 // anything INTO — which is half of what environmental combat means.
 const obstacles = [];
-const boleMat  = new T.MeshStandardMaterial({ color: 0x4a3b2c, roughness: 0.95 });
-const stoneMat = new T.MeshStandardMaterial({ color: 0x8d9199, roughness: 0.9, flatShading: true });
+const boleMat  = new T.MeshStandardMaterial({
+  color: 0x4a3b2c, roughness: 0.93, metalness: 0,
+  normalMap: TEX.barkN, roughnessMap: TEX.barkR,
+  normalScale: new T.Vector2(1.5, 1.5), envMapIntensity: 0.3 });
+const stoneMat = new T.MeshStandardMaterial({
+  color: 0x8d9199, roughness: 0.82, metalness: 0.04,
+  normalMap: TEX.rockN, roughnessMap: TEX.rockR,
+  normalScale: new T.Vector2(1.6, 1.6), envMapIntensity: 0.7 });
 
 function addObstacle(x, z, r, h, kind) {
   const mesh = kind === "stone"
-    ? new T.Mesh(new T.DodecahedronGeometry(r*1.15, 0), stoneMat)
-    : new T.Mesh(new T.CylinderGeometry(r*0.85, r*1.1, h, 7), boleMat);
+    ? new T.Mesh(new T.DodecahedronGeometry(r*1.15, 1), stoneMat)
+    : new T.Mesh(new T.CylinderGeometry(r*0.85, r*1.1, h, 12), boleMat);
   mesh.position.set(x, h/2, z);
   if (kind === "stone") { mesh.position.y = r*0.75; mesh.rotation.set(rand(0,1), rand(0,6), rand(0,1)); }
   mesh.castShadow = mesh.receiveShadow = true;
@@ -342,7 +589,10 @@ function layCover(A) {
 }
 
 // Fallen logs and rubble, for silhouette interest at ground level.
-const logMat = new T.MeshStandardMaterial({ color: 0x342a22, roughness: 1 });
+const logMat = new T.MeshStandardMaterial({
+  color: 0x342a22, roughness: 0.95, metalness: 0,
+  normalMap: TEX.barkN, roughnessMap: TEX.barkR,
+  normalScale: new T.Vector2(1.3, 1.3), envMapIntensity: 0.28 });
 const logs = [];
 
 function layLogs(A) {
@@ -350,7 +600,7 @@ function layLogs(A) {
   logs.length = 0;
   for (let i = 0; i < A.logs; i++) {
     const a = rand(0, Math.PI*2), d = rand(CFG.arena*0.45, CFG.arena-3);
-    const L = new T.Mesh(new T.CylinderGeometry(0.34, 0.42, rand(3,6), 6), logMat);
+    const L = new T.Mesh(new T.CylinderGeometry(0.34, 0.42, rand(3,6), 12), logMat);
     L.position.set(Math.cos(a)*d, 0.36, Math.sin(a)*d);
     L.rotation.set(Math.PI/2, 0, rand(0, 6.28));
     L.rotation.z = rand(0, 6.28);
@@ -392,17 +642,17 @@ function buildArena(A) {
   scene.fog.color.setHex(A.bg);
   scene.fog.near = A.fogNear; scene.fog.far = A.fogFar;
 
+  buildEnvironment(A);
   hemi.color.setHex(A.hemiSky); hemi.groundColor.setHex(A.hemiGround);
   hemi.intensity = A.hemiI;
   sun.color.setHex(A.sun); sun.intensity = A.sunI;
   rim.color.setHex(A.rim);  rim.intensity = A.rimI;
 
-  groundMat.color.setHex(A.ground);
-  clearMat.color.setHex(A.clearing);
+  buildGroundAlbedo(A);
   trunkMat.color.setHex(A.trunk);
   foliaA.color.setHex(A.foliaA);
   foliaB.color.setHex(A.foliaB);
-  scrubMat.color.setHex(A.scrub);
+  scrubMat.color.setHex(A.scrubTint);
   boleMat.color.setHex(A.bole);
   stoneMat.color.setHex(A.stone);
   logMat.color.setHex(A.log);
@@ -424,10 +674,18 @@ function arenaFor(n) {
 const HERO = new T.Group();
 scene.add(HERO);
 
-const skin   = new T.MeshStandardMaterial({ color: 0xd8b49a, roughness: 0.8 });
-const cloak  = new T.MeshStandardMaterial({ color: 0x232b33, roughness: 0.92, flatShading: true });
-const under  = new T.MeshStandardMaterial({ color: 0x39424c, roughness: 0.9 });
-const leather= new T.MeshStandardMaterial({ color: 0x4a3524, roughness: 0.85 });
+const skin   = new T.MeshStandardMaterial({
+  color: 0xd8b49a, roughness: 0.74, metalness: 0,
+  normalMap: TEX.fleshN, normalScale: new T.Vector2(0.5,0.5), envMapIntensity: 0.5 });
+const cloak  = new T.MeshStandardMaterial({
+  color: 0x232b33, roughness: 0.88, metalness: 0.02,
+  normalMap: TEX.clothN, normalScale: new T.Vector2(1.5,1.5), envMapIntensity: 0.4 });
+const under  = new T.MeshStandardMaterial({
+  color: 0x39424c, roughness: 0.86, metalness: 0.02,
+  normalMap: TEX.clothN, normalScale: new T.Vector2(1.2,1.2), envMapIntensity: 0.4 });
+const leather= new T.MeshStandardMaterial({
+  color: 0x4a3524, roughness: 0.68, metalness: 0.05,
+  normalMap: TEX.clothN, normalScale: new T.Vector2(1.1,1.1), envMapIntensity: 0.7 });
 const trim   = new T.MeshStandardMaterial({ color: 0xe94fbf, roughness: 0.35,
                                             emissive: 0xe94fbf, emissiveIntensity: 0.5 });
 
@@ -522,9 +780,9 @@ function pushGhost() {
 //   speedMul multiplier on launch speed
 const OBJECTS = {
   rock:   { name:"Rock",    dmg:100, mass:1.0, knock:1.0, count:10,
-            size:[0.42,0.72], color:0xc9c2b4 },
+            size:[0.42,0.72], color:0x8f8a7e },
   heavy:  { name:"Boulder", dmg:265, mass:3.4, knock:2.6, count:2,
-            size:[1.00,1.30], color:0x8d8880 },
+            size:[1.00,1.30], color:0x6b6660 },
   plank:  { name:"Plank",   dmg:62,  mass:0.55, knock:2.0, pierce:3, count:3,
             size:[0.55,0.75], color:0x7a5330, shape:"plank", speedMul:1.15 },
   barrel: { name:"Barrel",  dmg:30,  mass:1.2, knock:1.0, count:4,
@@ -534,19 +792,42 @@ const OBJECTS = {
             size:[0.62,0.62], color:0x8ada4e, shape:"barrel",
             puddle:{ r:5.0, dps:70, life:7 }, emissive:0x2f6b18 },
   metal:  { name:"Girder",  dmg:150, mass:1.7, knock:1.6, pierce:2, count:3,
-            size:[0.5,0.7], color:0xa9b6c6, shape:"plank", speedMul:1.4 },
+            size:[0.5,0.7], color:0x8c99a8, shape:"plank", speedMul:1.4 },
 };
 
-const rockMat = new T.MeshStandardMaterial({ color:0xc9c2b4, roughness:0.85, flatShading:true });
-const heldMat = new T.MeshStandardMaterial({ color:0xc98fb8, roughness:0.6, flatShading:true,
+const rockMat = new T.MeshStandardMaterial({ color:0x8f8a7e, roughness:0.86, metalness:0.03,
+  normalMap:TEX.rockN, roughnessMap:TEX.rockR,
+  normalScale:new T.Vector2(1.4,1.4), envMapIntensity:0.55 });
+const heldMat = new T.MeshStandardMaterial({ color:0xc98fb8, roughness:0.42, metalness:0.15,
                                              emissive:0xe94fbf, emissiveIntensity:0.55 });
-const seekMat = new T.MeshStandardMaterial({ color:0xffb0a0, roughness:0.5, flatShading:true,
+const seekMat = new T.MeshStandardMaterial({ color:0xffb0a0, roughness:0.34, metalness:0.2,
                                              emissive:0xff5a3c, emissiveIntensity:0.85 });
 const matCache = {};
+// Props carry the surface of what they are: stone gets rock, timber gets
+// bark, and the girder gets metalness so it actually catches the key light
+// instead of being a grey box.
+const PROP_SURFACE = {
+  plank:  { normalMap: TEX.barkN, roughnessMap: TEX.barkR, roughness: 0.9,
+            metalness: 0, normalScale: 1.2, env: 0.3 },
+  barrel: { normalMap: TEX.clothN, roughness: 0.62, metalness: 0.18,
+            normalScale: 0.7, env: 0.9 },
+  metal:  { normalMap: TEX.clothN, roughness: 0.46, metalness: 0.7,
+            normalScale: 0.7, env: 0.85 },
+  stone:  { normalMap: TEX.rockN, roughnessMap: TEX.rockR, roughness: 0.88,
+            metalness: 0.03, normalScale: 1.5, env: 0.55 },
+};
+
 function matFor(key, def) {
-  if (!matCache[key]) matCache[key] = new T.MeshStandardMaterial({
-    color: def.color, roughness: 0.85, flatShading: true,
-    emissive: def.emissive || 0x000000, emissiveIntensity: def.emissive ? 0.7 : 0 });
+  if (!matCache[key]) {
+    const sfc = PROP_SURFACE[key] || PROP_SURFACE[def.shape] || PROP_SURFACE.stone;
+    const lo = quality === "low";
+    matCache[key] = new T.MeshStandardMaterial({
+      color: def.color, roughness: sfc.roughness, metalness: sfc.metalness,
+      normalMap: lo ? null : sfc.normalMap, roughnessMap: lo ? null : sfc.roughnessMap,
+      normalScale: new T.Vector2(sfc.normalScale, sfc.normalScale),
+      envMapIntensity: lo ? 0 : sfc.env,
+      emissive: def.emissive || 0x000000, emissiveIntensity: def.emissive ? 0.7 : 0 });
+  }
   return matCache[key];
 }
 
@@ -554,11 +835,14 @@ const rocks = [];
 
 function geomFor(def, r) {
   if (def.shape === "plank")  return new T.BoxGeometry(r*0.45, r*0.42, r*3.4);
-  if (def.shape === "barrel") return new T.CylinderGeometry(r, r, r*2.3, 9);
+  if (def.shape === "barrel") return new T.CylinderGeometry(r, r, r*2.3, 16);
+  // Subdivision 2 with jittered vertices and smooth normals reads as crumpled
+  // paper, not stone. One subdivision, gentler jitter, and let the normal map
+  // carry the surface instead of the silhouette.
   const geo = new T.IcosahedronGeometry(r, 1);
   const p = geo.attributes.position;
   for (let i = 0; i < p.count; i++) {
-    const s2 = rand(0.82,1.2);
+    const s2 = rand(0.9,1.1);
     p.setXYZ(i, p.getX(i)*s2, p.getY(i)*s2, p.getZ(i)*s2);
   }
   geo.computeVertexNormals();
@@ -599,12 +883,34 @@ function spawnObject(key, x, z) {
   });
 }
 
-const zSkin  = new T.MeshStandardMaterial({ color:0x7d8f66, roughness:1.0, flatShading:true });
-const zRot   = new T.MeshStandardMaterial({ color:0x76866a, roughness:1.0, flatShading:true });
-const zRag   = new T.MeshStandardMaterial({ color:0x55503f, roughness:1.0, flatShading:true,
+const zSkin  = new T.MeshStandardMaterial({ color:0x7d8f66, roughness:0.93, metalness:0,
+  normalMap:TEX.fleshN, normalScale:new T.Vector2(1.2,1.2), envMapIntensity:0.4 });
+const zRot   = new T.MeshStandardMaterial({
+  color:0x76866a, roughness:0.92, metalness:0,
+  normalMap:TEX.fleshN, normalScale:new T.Vector2(1.1,1.1), envMapIntensity:0.4 });
+const zRag   = new T.MeshStandardMaterial({
+  color:0x55503f, roughness:0.95, metalness:0,
+  normalMap:TEX.clothN, normalScale:new T.Vector2(1.6,1.6), envMapIntensity:0.35,
                                             side:T.DoubleSide });
 const zEye   = new T.MeshBasicMaterial({ color:0xff6a30 });
 const zJaw   = new T.MeshStandardMaterial({ color:0x8a3b32, roughness:0.9 });
+
+// Walkers build their own geometry and some of their own materials on spawn,
+// and clearAll only ever removed them from the scene. Over a run that leaked
+// every limb of every enemy of every wave — 216 live geometries on wave 1
+// climbing past 700 by wave 10. Disposal needs to know which materials are
+// shared and must survive.
+const SHARED_MATS = new Set([zSkin, zRot, zRag, zJaw]);
+
+function disposeGroup(g) {
+  g.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    const m = o.material;
+    if (!m) return;
+    if (Array.isArray(m)) m.forEach(x => { if (!SHARED_MATS.has(x)) x.dispose(); });
+    else if (!SHARED_MATS.has(m)) m.dispose();
+  });
+}
 // Archetypes are a table for the same reason objects are: a new enemy
 // should be an entry, not a new branch in the AI loop.
 //
@@ -670,9 +976,11 @@ const walkers = [];
 
 function spawnBoss(x, z) {
   const g = new T.Group();
-  const skinM = new T.MeshStandardMaterial({ color:0x4d5a44, roughness:1, flatShading:true });
-  const plateM= new T.MeshStandardMaterial({ color:0x6d7686, roughness:0.55, metalness:0.5,
-                                             flatShading:true });
+  const skinM = new T.MeshStandardMaterial({
+    color:0x4d5a44, roughness:0.93, metalness:0,
+    normalMap:TEX.fleshN, normalScale:new T.Vector2(1.2,1.2), envMapIntensity:0.4 });
+  const plateM= new T.MeshStandardMaterial({ color:0x6d7686, roughness:0.42, metalness:0.72,
+    normalMap:TEX.rockN, normalScale:new T.Vector2(0.5,0.5), envMapIntensity:1.0 });
   const coreM = new T.MeshStandardMaterial({ color:0xff3c2a, emissive:0xff3c2a,
                                              emissiveIntensity:1.4, roughness:0.3 });
   g.add(part(new T.CylinderGeometry(1.15, 1.55, 3.1, 9), skinM, 0, 2.0, 0));
@@ -728,7 +1036,11 @@ function spawnWalker(type, x, z) {
   torso.rotation.x = 0.34;
   body.add(torso);
 
-  const skinM = new T.MeshStandardMaterial({ color:E.skin, roughness:1, flatShading:true });
+  const skinM = new T.MeshStandardMaterial({
+    color:E.skin, roughness:0.93, metalness:0,
+    normalMap: quality === "low" ? null : TEX.fleshN,
+    normalScale:new T.Vector2(1.2,1.2),
+    envMapIntensity: quality === "low" ? 0 : 0.4 });
   const eyeM  = new T.MeshBasicMaterial({ color:E.eye });
   const B = E.bulk;
   torso.add(part(new T.CylinderGeometry(0.24*B, 0.33*B, 0.78, 7), zRot, 0, 0.34, 0));
@@ -794,7 +1106,8 @@ function spawnWalker(type, x, z) {
   let slab = null;
   if (EE.shield) {
     slab = new T.Mesh(new T.BoxGeometry(1.5, 1.7, 0.22),
-      new T.MeshStandardMaterial({ color:0x9aa3ad, roughness:0.72, flatShading:true }));
+      new T.MeshStandardMaterial({ color:0x9aa3ad, roughness:0.45, metalness:0.6,
+        normalMap:TEX.rockN, normalScale:new T.Vector2(0.6,0.6), envMapIntensity:0.9 }));
     slab.position.set(0, 1.15, 0.72);
     slab.castShadow = true;
     body.add(slab);
@@ -1581,7 +1894,7 @@ const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2 };
 function clearAll() {
   rocks.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); });
   rocks.length = 0;
-  walkers.forEach(w => scene.remove(w.g)); walkers.length = 0;
+  walkers.forEach(w => { scene.remove(w.g); disposeGroup(w.g); }); walkers.length = 0;
   gibs.forEach(x => scene.remove(x.mesh)); gibs.length = 0;
   puddles.forEach(p => scene.remove(p.mesh)); puddles.length = 0;
   shells.forEach(s => { s.life = 0; s.mesh.visible = false; });
@@ -2786,14 +3099,87 @@ function restart() {
 // resolution, which a desktop GPU shrugs off and a weak phone does not.
 // Rather than guess the target device, sample the real framerate for the
 // first few seconds of play and drop the expensive pass if it cannot hold up.
-let fxOn = true, fpsFrames = 0, fpsT0 = 0, fxJudged = false;
+// Realistic surfaces are fragment work: a normal map, a roughness map and a
+// prefiltered environment on every material is roughly 3x the per-pixel cost
+// of the flat-shaded version this replaced. That is nothing on a real GPU and
+// fatal on a weak one, so quality is a ladder the game walks DOWN on its own
+// rather than a guess about the device.
+//
+// HIGH  everything
+// MED   no bloom, native pixel ratio, half the ground cover
+// LOW   surface maps stripped, no environment probe, small shadow map
+let quality = "high";
+let fxOn = true, fpsFrames = 0, fpsT0 = 0, stage = 0;
 
-function dropEffects() {
-  fxOn = false;
-  fxJudged = true;
-  renderer.setPixelRatio(1);
+// Every material carrying surface detail, so LOW can strip them in one pass.
+// Registered at build time rather than discovered by traversing the scene,
+// because instanced and pooled meshes are not all attached when this runs.
+const SURFACED = [];
+function surfaced(m) { SURFACED.push(m); return m; }
+
+// Registered in one block after every module-level material exists, rather
+// than wrapped at each declaration — the list is the point, and a list is
+// easier to keep honest than seventeen call sites.
+[groundMat, clearMat, trunkMat, foliaA, foliaB, scrubMat, boleMat, stoneMat,
+ logMat, rockMat, skin, cloak, under, leather, zSkin, zRot, zRag]
+  .forEach(m => SURFACED.push(m));
+
+function stripSurface(m) {
+  if (!m || !m.isMeshStandardMaterial) return;
+  m.normalMap = null;
+  m.roughnessMap = null;
+  m.envMapIntensity = 0;
+  m.needsUpdate = true;
+}
+
+function setQuality(q) {
+  if (q === quality) return;
+  quality = q;
+
+  if (q !== "high") {
+    fxOn = false;
+    renderer.setPixelRatio(1);
+  }
+  if (q === "low") {
+    SURFACED.forEach(stripSurface);
+    // Props and enemies mint their own materials at spawn; the ones already
+    // standing have to be caught by a sweep, and the ones spawned later are
+    // caught by the quality check in their factories.
+    scene.traverse(o => {
+      if (!o.material) return;
+      if (Array.isArray(o.material)) o.material.forEach(stripSurface);
+      else stripSurface(o.material);
+    });
+    scene.environment = null;
+    sun.shadow.mapSize.set(1024, 1024);
+    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+    scrub.count = Math.min(scrub.count, 60);
+  } else if (q === "med") {
+    scene.environmentIntensity = 0.5;
+  }
   resize();
-  toast("Effects reduced to keep it smooth", 2600);
+}
+
+// Sampled against the WALL CLOCK, deliberately not the simulation clock: dt
+// is clamped to 1/30, so measuring against it caps the computed rate at 30
+// and would condemn every machine, fast or slow.
+function judgeFrame(now) {
+  if (stage > 1) return;
+  if (!fpsT0) { fpsT0 = now; return; }
+  fpsFrames++;
+  const elapsed = (now - fpsT0) / 1000;
+  if (elapsed < 3) return;
+  const fps = fpsFrames / elapsed;
+  fpsFrames = 0; fpsT0 = now;
+  if (stage === 0) {
+    if (fps < 40) { setQuality("med"); toast("Effects reduced to keep it smooth", 2600); }
+    stage = 1;
+  } else {
+    // A second window, so a machine that is merely loading is not condemned
+    // by the first three seconds of a run.
+    if (fps < 34) { setQuality("low"); toast("Detail reduced to keep it smooth", 2600); }
+    stage = 2;
+  }
 }
 
 let last = performance.now();
@@ -2807,18 +3193,7 @@ function frame(now) {
   if (S.freeze > 0) { S.freeze -= real; dt = real * 0.14; }
   if (S.phase === "play" || S.phase === "clear") {
     step(dt);
-    if (!fxJudged) {
-      // WALL-CLOCK rate, deliberately not the simulation clock: dt is
-      // clamped to 1/30, so measuring against it caps the computed rate at
-      // 30 and would condemn every machine, fast or slow.
-      if (!fpsT0) fpsT0 = now;
-      fpsFrames++;
-      const elapsed = (now - fpsT0) / 1000;
-      if (elapsed > 3) {
-        if (fpsFrames / elapsed < 40) dropEffects();
-        else fxJudged = true;
-      }
-    }
+    judgeFrame(now);
   }
   if (fxOn) composer.render();
   else renderer.render(scene, camera);
