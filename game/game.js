@@ -93,6 +93,11 @@ const CFG = {
   weakMul:      2.5,     // head hit
   critMul:      5.0,     // dead centre, aimed shots only
   burstCone:    0.72,
+  camMin:       7.0,     // shoulder-close; below this the hero's own aura
+                         // and carry halo take over the frame
+  camMax:       26,      // wide enough to see a whole flank coming
+  camStep:      1.6,     // per wheel notch / key press
+
   repulseR:     13,
   repulseCd:    8,    // how wide burst will spread to find separate marks
 };
@@ -2442,7 +2447,10 @@ const S = {
   freeze: 0,               // hit stop, in real seconds — see frame()
   lock: null,              // walker currently under the crosshair
 };
-const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2 };
+// `dist` is what the camera uses; `distWant` is what the player asked for.
+// Keeping them apart is what makes a wheel notch or a pinch feel like a
+// camera move rather than a jump cut.
+const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2, distWant: 11.2 };
 
 function clearAll() {
   rocks.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); });
@@ -2671,6 +2679,23 @@ function setMode(m, silent) {
     : "Burst — three landing together detonate a kinetic wave");
 }
 
+// Zoom. One entry point so the wheel, the pinch and the keys cannot drift
+// apart, and so the preference is saved in exactly one place.
+let zoomTold = 0;
+function setZoom(d, quiet) {
+  cam.distWant = clamp(d, CFG.camMin, CFG.camMax);
+  try { localStorage.setItem("kinesis.zoom", cam.distWant.toFixed(2)); } catch (e) {}
+  // Announce it a couple of times for discoverability, then shut up — the
+  // toast is shared with gameplay warnings like NO OBJECTS IN RANGE, and a
+  // readout on every wheel notch would bury them.
+  if (!quiet && zoomTold < 3) {
+    zoomTold++;
+    const pct = Math.round((1 - (cam.distWant - CFG.camMin) / (CFG.camMax - CFG.camMin)) * 100);
+    toast("Zoom " + pct + "%", 700);
+  }
+}
+function zoomBy(delta) { setZoom(cam.distWant + delta); }
+
 function switchMode() {
   if (S.modeCd > 0) { toast(`Switching in ${S.modeCd.toFixed(1)}s`, 900); return; }
   setMode(S.mode === "single" ? "aoe" : "single");
@@ -2751,6 +2776,11 @@ addEventListener("keydown", e => {
   if (e.code === "ShiftLeft" || e.code === "ShiftRight") { e.preventDefault(); doDash(); }
   if (e.code === "KeyR") { e.preventDefault(); doRepulse(); }
   if (e.code === "KeyQ" || e.code === "Tab") { e.preventDefault(); switchMode(); }
+  if (e.code === "Minus" || e.code === "NumpadSubtract" || e.code === "BracketLeft")
+    { e.preventDefault(); zoomBy(CFG.camStep); }
+  if (e.code === "Equal" || e.code === "NumpadAdd" || e.code === "BracketRight")
+    { e.preventDefault(); zoomBy(-CFG.camStep); }
+  if (e.code === "Digit0") { e.preventDefault(); setZoom(11.2); }
 });
 addEventListener("keyup", e => keys.delete(e.code));
 
@@ -2787,19 +2817,71 @@ el("dash").addEventListener("pointerdown", e => { e.preventDefault(); doDash(); 
 el("rep").addEventListener("pointerdown", e => { e.preventDefault(); doRepulse(); });
 
 let lookId = null, lp = {x:0,y:0};
+
+// Pointers currently down on the canvas. One is a look-drag; two is a pinch.
+// They have to be tracked together, because the moment a second finger lands
+// the first one must STOP steering the camera — otherwise pinching also
+// whips the view round.
+const camPointers = new Map();
+let pinchFrom = 0, pinchDist = 0;
+
+const spread = () => {
+  const [a2, b2] = [...camPointers.values()];
+  return Math.hypot(a2.x - b2.x, a2.y - b2.y);
+};
+
 canvas.addEventListener("pointerdown", e => {
-  if (lookId !== null) return;
-  lookId = e.pointerId; lp = { x:e.clientX, y:e.clientY };
+  camPointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  if (camPointers.size === 2) {
+    // Entering a pinch: drop the look-drag and take a reference reading.
+    lookId = null;
+    pinchFrom = spread();
+    pinchDist = cam.distWant;
+  } else if (camPointers.size === 1 && lookId === null) {
+    lookId = e.pointerId; lp = { x:e.clientX, y:e.clientY };
+  }
 });
+
 addEventListener("pointermove", e => {
+  if (camPointers.has(e.pointerId))
+    camPointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+
+  if (camPointers.size === 2) {
+    const now = spread();
+    // Fingers apart = closer in. Ratio rather than difference, so the
+    // gesture feels the same wherever it starts from.
+    if (pinchFrom > 8 && now > 8) setZoom(pinchDist * (pinchFrom / now), true);
+    return;
+  }
   if (e.pointerId !== lookId) return;
   cam.yaw  -= (e.clientX-lp.x)*0.005;
   cam.pitch = clamp(cam.pitch + (e.clientY-lp.y)*0.004, -0.2, 1.0);
   lp = { x:e.clientX, y:e.clientY };
 });
-function lookEnd(e) { if (e.pointerId === lookId) lookId = null; }
+
+function lookEnd(e) {
+  camPointers.delete(e.pointerId);
+  if (e.pointerId === lookId) lookId = null;
+  // Coming out of a pinch with a finger still down: hand it back to look,
+  // re-anchored, so the view does not snap to wherever that finger is.
+  if (camPointers.size === 1 && lookId === null) {
+    const [id] = [...camPointers.keys()];
+    lookId = id;
+    lp = { ...camPointers.get(id) };
+  }
+}
 addEventListener("pointerup", lookEnd);
 addEventListener("pointercancel", lookEnd);
+
+// Wheel / trackpad.
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  // deltaMode 1 is lines, 2 is pages; normalise so a trackpad and a mouse
+  // do not differ by two orders of magnitude.
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1;
+  // Finer than a key press: a wheel gets many notches, a key gets one press.
+  zoomBy(Math.sign(e.deltaY * unit) * CFG.camStep * 0.55);
+}, { passive: false });
 
 // ─────────────────────────────────────────────────────────── power
 function pressForce() {
@@ -3172,14 +3254,23 @@ function step(dt) {
     armR.joint.rotation.x += (-0.12 - armR.joint.rotation.x)*k;
   }
 
-  aura.material.opacity += ((channel?0.17:0)-aura.material.opacity)*Math.min(1,7*dt);
+  // Zoom factor: 0 at the closest the camera can get, 1 at the default
+  // framing. The aura and the carry halo were sized for the default and
+  // swallow the screen at close range, so both recede as the camera comes in.
+  const zf = clamp((cam.dist - CFG.camMin) / (11.2 - CFG.camMin), 0, 1);
+  const auraTarget = channel ? 0.17 * (0.25 + 0.75*zf) : 0;
+  aura.material.opacity += (auraTarget - aura.material.opacity)*Math.min(1,7*dt);
+  aura.scale.setScalar(0.55 + 0.45*zf);
   psi.position.set(hero.pos.x, hero.pos.y + 2.2, hero.pos.z);
   psi.intensity += ((channel?13:0)-psi.intensity)*Math.min(1,8*dt);
   visor.material.emissiveIntensity = channel ? 1.5 : 0.35;
 
   // ---- carry wheel, behind the character
   const back = new T.Vector3(-Math.sin(cam.yaw), 0, -Math.cos(cam.yaw));
-  const wr = S.mode === "single" ? CFG.wheelSingle : CFG.wheelAoe;
+  // Halo pulls in and drops closer to the head as the camera closes, so it
+  // keeps roughly the same share of the frame instead of filling it.
+  const zw = clamp(cam.dist / 11.2, 0.5, 1.25);
+  const wr = (S.mode === "single" ? CFG.wheelSingle : CFG.wheelAoe) * zw;
   const cx0 = hero.pos.x + back.x*CFG.wheelBack;
   const cz0 = hero.pos.z + back.z*CFG.wheelBack;
   const rightV = new T.Vector3(-Math.cos(cam.yaw), 0, Math.sin(cam.yaw));
@@ -3195,7 +3286,7 @@ function step(dt) {
       // halo of orbiting debris. A vertical ring would swing stones down
       // through the aim line twice per revolution.
       tmp.set(cx0 + rightV.x*Math.cos(a)*wr + fwdV.x*Math.sin(a)*wr,
-              CFG.wheelHeight + Math.sin(a*2)*0.35,
+              CFG.wheelHeight*(0.62 + 0.38*zw) + Math.sin(a*2)*0.35,
               cz0 + rightV.z*Math.cos(a)*wr + fwdV.z*Math.sin(a)*wr);
       // Divided by mass: a boulder swings wide and lags the wheel, a plank
       // snaps to it. The carry itself communicates what you picked up.
@@ -3305,6 +3396,13 @@ function step(dt) {
     }
 
     o.restT = o.vel.lengthSq() < 0.6 ? o.restT + dt : 0;
+
+    // Held props shrink with the camera. Purely visual — o.r, which is what
+    // physics and damage use, is untouched — but at close range a carry of
+    // boulders is otherwise most of the screen.
+    const want = o.held ? Math.min(1, zw*0.72) : 1;
+    const sc = o.mesh.scale.x + (want - o.mesh.scale.x) * Math.min(1, 9*dt);
+    o.mesh.scale.setScalar(sc);
 
     o.mesh.position.copy(o.pos);
     o.mesh.rotation.x += o.spin.x*dt;
@@ -3886,6 +3984,8 @@ function step(dt) {
   el("cross").classList.toggle("armed", S.held.length > 0);
 
   // ---- camera
+  // Ease toward the requested distance rather than snapping to it.
+  cam.dist += (cam.distWant - cam.dist) * Math.min(1, 9*dt);
   const cd = cam.dist;
   const cx = hero.pos.x - Math.sin(cam.yaw)*Math.cos(cam.pitch)*cd;
   const cz = hero.pos.z - Math.cos(cam.yaw)*Math.cos(cam.pitch)*cd;
@@ -4107,6 +4207,13 @@ function start() {
 el("startBtn").addEventListener("click", () => { audioInit(); start(); });
 
 // Difficulty picker on the menu. Remembered between sessions.
+// Remembered zoom, restored before the first frame.
+(function initZoom() {
+  let z = NaN;
+  try { z = parseFloat(localStorage.getItem("kinesis.zoom")); } catch (e) {}
+  if (isFinite(z)) { cam.distWant = clamp(z, CFG.camMin, CFG.camMax); cam.dist = cam.distWant; }
+})();
+
 (function initDifficulty() {
   let saved = "normal";
   try { saved = localStorage.getItem("kinesis.diff") || "normal"; } catch (e) {}
