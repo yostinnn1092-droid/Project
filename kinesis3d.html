@@ -5635,6 +5635,8 @@ const CFG = {
 
   restitution:  0.34,
   arena:        34,
+  walkSpeed:    1.8,     // at or below this the gait is a walk
+  runSpeed:     7.6,     // at or above this it is a full run (dash overshoots)
   zSpeed:       2.05,
   zReach:       1.7,
   zCooldown:    1.15,
@@ -6272,7 +6274,11 @@ function part(geo, mat, x, y, z) {
 // than a capsule, which always looks like a pill.
 HERO.add(part(new T.CylinderGeometry(0.30, 0.40, 0.95, 8), under, 0, 1.32, 0));
 // Cloak skirt, flared and faceted.
-const cloakSkirt = part(new T.CylinderGeometry(0.42, 0.72, 0.95, 8, 1, true), cloak, 0, 1.12, 0);
+// The skirt hung to mid-shin, which meant the legs were inside it and every
+// stride the character took was invisible from the game's own camera. Cut to
+// upper-thigh length so the gait actually reads, with more sides so the hem
+// is not a visible octagon.
+const cloakSkirt = part(new T.CylinderGeometry(0.40, 0.60, 0.62, 12, 1, true), cloak, 0, 1.30, 0);
 cloakSkirt.material.side = T.DoubleSide;
 HERO.add(cloakSkirt);
 // Shoulder mantle.
@@ -6294,24 +6300,41 @@ strap.rotation.z = 0.28;
 HERO.add(strap);
 HERO.add(part(new T.OctahedronGeometry(0.10, 0), trim, 0.02, 1.62, 0.30));
 
+// Two segments with a joint between them. A single straight capsule can be
+// swung but it cannot be BENT, and a leg that never bends cannot run — the
+// difference between a walk and a run is mostly knee, not stride. The pivot
+// is still what callers rotate, so it keeps behaving like the old one-piece
+// limb; `.joint` is the new half.
 function limb(parent, len, mat, px, py, pz, rad = 0.115, endMat) {
   const pivot = new T.Group();
   pivot.position.set(px,py,pz);
-  pivot.add(part(new T.CapsuleGeometry(rad, len, 5, 9), mat, 0, -len/2-0.05, 0));
+  const upper = len*0.52, lower = len - upper;
+  pivot.add(part(new T.CapsuleGeometry(rad, upper, 5, 9), mat, 0, -upper/2-0.05, 0));
+
+  const joint = new T.Group();
+  joint.position.y = -upper - 0.06;
+  joint.add(part(new T.CapsuleGeometry(rad*0.92, lower, 5, 9), mat, 0, -lower/2-0.04, 0));
   // A blob at the end of the limb: hands and boots stop the arms looking
   // like sticks, which is most of what "unfinished model" reads as.
   if (endMat) {
-    const end = part(new T.SphereGeometry(rad*1.5, 8, 6), endMat, 0, -len-0.1, 0);
+    const end = part(new T.SphereGeometry(rad*1.5, 8, 6), endMat, 0, -lower-0.08, 0);
     end.scale.set(1, 0.85, 1.15);
-    pivot.add(end);
+    joint.add(end);
   }
+  pivot.add(joint);
+  pivot.joint = joint;
+
   parent.add(pivot);
   return pivot;
 }
-const armL = limb(HERO, 0.52, under, -0.45, 1.74, 0, 0.105, skin);
-const armR = limb(HERO, 0.52, under,  0.45, 1.74, 0, 0.105, skin);
-const legL = limb(HERO, 0.58, under, -0.17, 0.95, 0, 0.125, leather);
-const legR = limb(HERO, 0.58, under,  0.17, 0.95, 0, 0.125, leather);
+// Pushed clear of the shoulder mantle; at 0.45 they swung inside it.
+const armL = limb(HERO, 0.52, under, -0.53, 1.72, 0, 0.105, skin);
+const armR = limb(HERO, 0.52, under,  0.53, 1.72, 0, 0.105, skin);
+// Length and hip height are set together so a straight leg puts the boot on
+// the floor. At 0.58 from a hip at 0.95 the foot hung ~0.18 above the ground
+// and the whole run read as levitating.
+const legL = limb(HERO, 0.70, under, -0.17, 1.00, 0, 0.125, leather);
+const legR = limb(HERO, 0.70, under,  0.17, 1.00, 0, 0.125, leather);
 
 const aura = new T.Mesh(new T.SphereGeometry(1.55,22,16),
   new T.MeshBasicMaterial({ color:0xe94fbf, transparent:true, opacity:0, side:T.BackSide }));
@@ -6319,6 +6342,7 @@ aura.position.y = 1.3;
 HERO.add(aura);
 
 const hero = { pos: new T.Vector3(0,0,0), yaw: 0, walk: 0, hp: CFG.maxHealth,
+  speed: 0, gait: 0, lastX: 0, lastZ: 0,
                vy: 0, grounded: true };
 
 // Dash ghosts: a handful of reusable translucent bodies, faded along the
@@ -6338,6 +6362,66 @@ function pushGhost() {
   gh.mesh.rotation.y = hero.yaw;
   gh.mesh.visible = true;
   gh.life = 0.34;
+}
+
+// ─────────────────────────────────────────────────────────── gait
+// Walking and running are not the same motion played at different rates.
+// A walk keeps a nearly straight leg, swings from the hip, stays level and
+// lets the arms hang. A run bends the knee hard on the recovery, drives the
+// arms with locked elbows, leans the torso in and leaves the ground twice a
+// cycle. Everything here is one continuous blend between those two poses on
+// `g` (0 = walk, 1 = run), so acceleration reads as a gait change rather
+// than as the same animation sped up.
+//
+// Returned angles are radians on the X axis unless noted. Phase is the
+// stride cycle; left and right are half a cycle apart.
+const GAIT = {
+  // Cadence in cycles per second at a given ground speed. Real gait scales
+  // roughly with the square root of speed, not linearly — that is why a
+  // linear speed-to-playback-rate mapping always looks like a cartoon.
+  cadence: (speed) => 1.05 * Math.sqrt(Math.max(0, speed)) + 0.35,
+
+  // Where in the walk-to-run blend a given speed sits.
+  blend: (speed, walkAt, runAt) =>
+    clamp((speed - walkAt) / Math.max(0.001, runAt - walkAt), 0, 1),
+};
+
+// Hip swing and knee bend for one leg. `ph` is that leg's phase in radians.
+function legPose(ph, g) {
+  const sw = Math.sin(ph);
+  // Stride opens up as the gait tips into a run — but only so far. At ±77
+  // degrees of thigh swing both feet leave the ground for most of the cycle
+  // and the run reads as bounding, not sprinting. The knee does the work
+  // instead; that is what it looks like on a real sprinter too.
+  const hip = sw * (0.55 + 0.42*g);
+  // The knee is the whole tell. It bends on the recovery half of the cycle
+  // (leg travelling forward) and straightens to plant. Walk barely bends;
+  // run tucks the heel almost to the backside.
+  const recover = Math.max(0, -Math.cos(ph));       // 0..1 over the swing half
+  // Positive X rotation swings the segment backward, so a knee that bends the
+  // heel toward the backside is POSITIVE. Negative hyperextends it forward,
+  // which is a knee bending the wrong way — the pose reads as broken legs.
+  const knee = (0.14 + 1.75*g) * recover + 0.06;
+  return { hip, knee };
+}
+
+// Shoulder and elbow for one arm. Arms are counter-phase to the legs.
+function armPose(ph, g) {
+  const sw = Math.sin(ph);
+  const shoulder = sw * (0.42 + 0.68*g);
+  // Elbows straighten in a walk and lock near a right angle in a run, which
+  // is most of what separates the two silhouettes from a distance.
+  const elbow = -(0.12 + 1.15*g) - Math.max(0, sw) * 0.45 * g;
+  return { shoulder, elbow };
+}
+
+// Vertical bob, two dips per stride cycle, growing with the gait. Biased
+// downward on purpose: a bob that only ever ADDS height lifts the planted
+// foot off the floor every step, and the character reads as hovering. The
+// body drops through midstance and returns to neutral at the extremes,
+// which is also what a real gait does.
+function gaitBob(ph, g) {
+  return (Math.abs(Math.sin(ph)) - 0.62) * (0.05 + 0.13*g);
 }
 
 // ─────────────────────────────────────────────────────────── objects
@@ -6641,10 +6725,18 @@ function spawnWalker(type, x, z) {
   function zLimb(parent, len, px, py, rad) {
     const pv = new T.Group();
     pv.position.set(px, py, 0);
-    pv.add(part(new T.CapsuleGeometry(rad, len, 4, 7), skinM, 0, -len/2-0.04, 0));
-    const hand = part(new T.ConeGeometry(rad*1.7, rad*3.2, 5), skinM, 0, -len-0.14, 0);
+    const upper = len*0.5, lower = len - upper;
+    pv.add(part(new T.CapsuleGeometry(rad, upper, 4, 7), skinM, 0, -upper/2-0.04, 0));
+
+    const joint = new T.Group();
+    joint.position.y = -upper - 0.05;
+    joint.add(part(new T.CapsuleGeometry(rad*0.9, lower, 4, 7), skinM, 0, -lower/2-0.04, 0));
+    const hand = part(new T.ConeGeometry(rad*1.7, rad*3.2, 5), skinM, 0, -lower-0.12, 0);
     hand.rotation.x = Math.PI;
-    pv.add(hand);
+    joint.add(hand);
+    pv.add(joint);
+    pv.joint = joint;
+
     parent.add(pv);
     return pv;
   }
@@ -6718,7 +6810,7 @@ function spawnWalker(type, x, z) {
   scene.add(g);
   walkers.push({ g, body, torso, aL, aR, lL, lR, pos:g.position, elite,
                  type, E:EE, r:0.75*EE.scale,
-                 walk:rand(0,6), dead:false, cool:0,
+                 walk:rand(0,6), gait:0, spd:0, dead:false, cool:0,
                  hp:EE.hp, maxHp:EE.hp, flash:0, kb:new T.Vector3(),
                  leapT:rand(1,3), vy:0, air:false,
                  slab, slabHp: EE.shield ? EE.shield.hp : 0,
@@ -7530,6 +7622,7 @@ function buildWave(n) {
   });
   hero.pos.set(0,0,0); hero.yaw = Math.PI;
   hero.vy = 0; hero.grounded = true;
+  hero.lastX = 0; hero.lastZ = 0; hero.speed = 0; hero.gait = 0;
   S.dashT = 0; S.dashCd = 0; S.windUsed = false; S.freeze = 0;
   cam.yaw = Math.PI; cam.pitch = 0.26;
   S.focus = 1;
@@ -7977,7 +8070,6 @@ function step(dt) {
     while (d >  Math.PI) d -= Math.PI*2;
     while (d < -Math.PI) d += Math.PI*2;
     hero.yaw += d * Math.min(1, CFG.turnLerp*dt);
-    if (hero.grounded) hero.walk += dt*10*mag;
   }
 
   // dash overrides normal steering for its brief window
@@ -8012,22 +8104,85 @@ function step(dt) {
   }
   const hd = Math.hypot(hero.pos.x, hero.pos.z);
   if (hd > CFG.arena-1) { hero.pos.x *= (CFG.arena-1)/hd; hero.pos.z *= (CFG.arena-1)/hd; }
-  HERO.position.copy(hero.pos);
   HERO.rotation.y = hero.yaw;
 
-  // Airborne: tuck the legs instead of running on nothing.
+  // ---- gait
+  // Measured ground speed, not input magnitude: a dash is movement the stick
+  // never asked for, and driving the animation off the stick means the
+  // fastest thing the character ever does is also the only thing that is not
+  // animated.
+  const moved = Math.hypot(hero.pos.x - hero.lastX, hero.pos.z - hero.lastZ);
+  hero.lastX = hero.pos.x; hero.lastZ = hero.pos.z;
+  const inst = dt > 0 ? moved/dt : 0;
+  hero.speed += (inst - hero.speed) * Math.min(1, 11*dt);
+  hero.gait  += (GAIT.blend(hero.speed, CFG.walkSpeed, CFG.runSpeed) - hero.gait)
+                * Math.min(1, 6*dt);
+
+  const moving = hero.speed > 0.35 && hero.grounded;
+  if (moving) hero.walk += dt * GAIT.cadence(hero.speed) * Math.PI*2;
+
+  const g = hero.gait;
+  const kk = Math.min(1, 12*dt);
   const airT = hero.grounded ? 0 : 1;
-  const sw = Math.sin(hero.walk) * (mag > 1e-3 && hero.grounded ? 0.7 : 0);
-  const kk = Math.min(1, 10*dt);
-  legL.rotation.x += ((airT ? -0.75 : sw)  - legL.rotation.x) * (airT ? kk : 1);
-  legR.rotation.x += ((airT ?  0.35 : -sw) - legR.rotation.x) * (airT ? kk : 1);
+
+  if (airT) {
+    // Airborne: tuck, do not run on nothing.
+    legL.rotation.x += (-0.75 - legL.rotation.x) * kk;
+    legR.rotation.x += ( 0.35 - legR.rotation.x) * kk;
+    legL.joint.rotation.x += (1.05 - legL.joint.rotation.x) * kk;
+    legR.joint.rotation.x += (0.45 - legR.joint.rotation.x) * kk;
+  } else if (moving) {
+    const L = legPose(hero.walk, g), R = legPose(hero.walk + Math.PI, g);
+    legL.rotation.x = L.hip;  legL.joint.rotation.x = L.knee;
+    legR.rotation.x = R.hip;  legR.joint.rotation.x = R.knee;
+  } else {
+    legL.rotation.x += (0 - legL.rotation.x) * kk;
+    legR.rotation.x += (0 - legR.rotation.x) * kk;
+    legL.joint.rotation.x += (0.05 - legL.joint.rotation.x) * kk;
+    legR.joint.rotation.x += (0.05 - legR.joint.rotation.x) * kk;
+  }
+
+  // Cloth lags the body: the skirt kicks back as the run builds and sways
+  // against the stride. Two numbers, and it does more for the read of speed
+  // than another ten degrees of stride would.
+  cloakSkirt.rotation.x = -g*0.15 - (moving && !airT ? Math.sin(hero.walk*2)*0.04*g : 0);
+  cloakSkirt.rotation.z = (moving && !airT) ? Math.sin(hero.walk)*0.07*(0.3+g) : 0;
+
+  // Bob and lean. Running pitches the whole body forward into the run, which
+  // is the single clearest read that the gait has changed.
+  const bob = (moving && !airT) ? gaitBob(hero.walk, g) : 0;
+  HERO.position.set(hero.pos.x, hero.pos.y + bob, hero.pos.z);
+  HERO.rotation.x = (moving && !airT) ? g * 0.20 : 0;
+  // Shoulders counter-rotate against the hips; the amount grows with gait.
+  HERO.rotation.z = (moving && !airT) ? Math.sin(hero.walk) * -0.045 * (0.4 + g) : 0;
+
+  // Arms: carrying overrides the swing entirely — both hands go up to hold
+  // the wheel, and that pose has to win over any gait.
   const channel = S.held.length > 0;
-  const at = channel ? -2.25 : 0, k = Math.min(1, 9*dt);
-  armL.rotation.x += (at-armL.rotation.x)*k;
-  armR.rotation.x += (at-armR.rotation.x)*k;
-  armL.rotation.z += ((channel?-0.45:0)-armL.rotation.z)*k;
-  armR.rotation.z += ((channel? 0.45:0)-armR.rotation.z)*k;
-  if (!channel) { armL.rotation.x += -sw*0.55; armR.rotation.x += sw*0.55; }
+  const k = Math.min(1, 9*dt);
+  if (channel) {
+    armL.rotation.x += (-2.25 - armL.rotation.x)*k;
+    armR.rotation.x += (-2.25 - armR.rotation.x)*k;
+    armL.rotation.z += (-0.45 - armL.rotation.z)*k;
+    armR.rotation.z += ( 0.45 - armR.rotation.z)*k;
+    armL.joint.rotation.x += (-0.55 - armL.joint.rotation.x)*k;
+    armR.joint.rotation.x += (-0.55 - armR.joint.rotation.x)*k;
+  } else if (moving && !airT) {
+    // Counter-phase to the legs, and the elbows tighten as the run builds.
+    const A = armPose(hero.walk + Math.PI, g), B = armPose(hero.walk, g);
+    armL.rotation.x = A.shoulder;  armL.joint.rotation.x = A.elbow;
+    armR.rotation.x = B.shoulder;  armR.joint.rotation.x = B.elbow;
+    // Elbows tuck in against the ribs at speed instead of flapping wide.
+    armL.rotation.z += (-0.06 - 0.12*g - armL.rotation.z)*k;
+    armR.rotation.z += ( 0.06 + 0.12*g - armR.rotation.z)*k;
+  } else {
+    armL.rotation.x += (0 - armL.rotation.x)*k;
+    armR.rotation.x += (0 - armR.rotation.x)*k;
+    armL.rotation.z += (-0.04 - armL.rotation.z)*k;
+    armR.rotation.z += ( 0.04 - armR.rotation.z)*k;
+    armL.joint.rotation.x += (-0.12 - armL.joint.rotation.x)*k;
+    armR.joint.rotation.x += (-0.12 - armR.joint.rotation.x)*k;
+  }
 
   aura.material.opacity += ((channel?0.17:0)-aura.material.opacity)*Math.min(1,7*dt);
   psi.position.set(hero.pos.x, hero.pos.y + 2.2, hero.pos.z);
@@ -8225,6 +8380,7 @@ function step(dt) {
       // A body in flight is cargo, not a walker — it does not get to steer.
       if (w.thrown <= 0) w.pos.addScaledVector(tmp, spd*dt);
       w.g.rotation.y = Math.atan2(tmp.x, tmp.z);
+      w.spd = w.thrown > 0 ? 0 : spd;
     }
 
     // A Spawner is a clock. Ignore it and the arena fills; the cap keeps a
@@ -8369,14 +8525,34 @@ function step(dt) {
       w.flash = Math.max(0, w.flash - dt*4);
       w.body.scale.setScalar(1 + w.flash*0.14);
     }
-    w.walk += dt*5.5;
-    w.body.rotation.z = Math.sin(w.walk)*0.11;
-    w.body.position.y = Math.abs(Math.sin(w.walk))*0.075;
-    w.torso.rotation.x = 0.34 + Math.sin(w.walk*0.5)*0.06;
-    w.aL.rotation.x = -1.6 + Math.sin(w.walk*0.55)*0.14;
-    w.aR.rotation.x = -1.6 - Math.sin(w.walk*0.55)*0.14;
-    w.lL.rotation.x =  Math.sin(w.walk)*0.6;
-    w.lR.rotation.x = -Math.sin(w.walk)*0.6;
+    // ---- walker gait
+    // Same blend as the hero, driven by the archetype's own speed, so a
+    // Walker shambles, a Runner actually runs, and a leaper's burst reads as
+    // a sprint rather than as a shamble played fast. FRENZY, which multiplies
+    // speed, therefore changes how the wave MOVES and not just how quickly.
+    const wspd = w.spd || 0;
+    const wg = GAIT.blend(wspd, 1.6, 4.6);
+    w.gait += (wg - (w.gait||0)) * Math.min(1, 5*dt);
+    const gz = w.gait;
+    w.walk += dt * GAIT.cadence(wspd) * Math.PI*2;
+
+    const L = legPose(w.walk, gz), R = legPose(w.walk + Math.PI, gz);
+    w.lL.rotation.x = L.hip;  w.lL.joint.rotation.x = L.knee;
+    w.lR.rotation.x = R.hip;  w.lR.joint.rotation.x = R.knee;
+
+    // The reach is the shamble's signature, so it survives at low speed and
+    // gives way to a pumping arm as the thing starts to sprint.
+    const A = armPose(w.walk + Math.PI, gz), B = armPose(w.walk, gz);
+    const shamble = -1.6 * (1 - gz);
+    w.aL.rotation.x = shamble + A.shoulder*gz + Math.sin(w.walk*0.55)*0.14*(1-gz);
+    w.aR.rotation.x = shamble + B.shoulder*gz - Math.sin(w.walk*0.55)*0.14*(1-gz);
+    w.aL.joint.rotation.x = -0.25 - 1.1*gz + A.elbow*gz*0.5;
+    w.aR.joint.rotation.x = -0.25 - 1.1*gz + B.elbow*gz*0.5;
+
+    w.body.rotation.z = Math.sin(w.walk)*(0.11 - 0.05*gz);
+    w.body.position.y = gaitBob(w.walk, gz);
+    // Hunched when shambling, driving forward when sprinting.
+    w.torso.rotation.x = 0.34 + 0.30*gz + Math.sin(w.walk*0.5)*0.06;
 
     const reach = w.boss ? BOSS.reach : CFG.zReach * (w.E.scale || 1);
     if (dist < reach && w.cool <= 0 && hero.pos.y < CFG.dodgeHeight) {
