@@ -6247,6 +6247,13 @@ function arenaFor(n) {
 
 // ─────────────────────────────────────────────────────────── hero
 const HERO = new T.Group();
+// Default Euler order is XYZ, which resolves to yaw applied BEFORE pitch —
+// so a lean set on rotation.x tips the body toward world +Z no matter which
+// way the character faces, and running "south" leans backwards. YXZ applies
+// the lean in the body's own frame, which is the only thing that means
+// "forward". Verified by checking where the head actually moves at four
+// facings, not by reading the matrix convention.
+HERO.rotation.order = "YXZ";
 scene.add(HERO);
 
 const skin   = new T.MeshStandardMaterial({
@@ -6750,12 +6757,23 @@ function spawnWalker(type, x, z) {
 
   // Elites appear once the waves get serious: same archetype, harder, worth
   // more — a reason to change target priority rather than a new model.
-  const elite = S.wave >= 5 && Math.random() < 0.18;
+  // Beyond the table the horde stops growing and starts getting harder: more
+  // elites and a steady health ramp, so wave 40 is a real fight rather than a
+  // frame-rate problem.
+  const over = Math.max(0, S.wave - (WAVES.length + 4));
+  const elite = S.wave >= 5 && Math.random() < Math.min(0.5, 0.18 + over*0.02);
   let EE = elite
     ? Object.assign({}, E, { hp:Math.round(E.hp*2.1), scale:E.scale*1.28,
                              armor:(E.armor||0)+18, score:E.score*3,
                              name:"Elite "+E.name })
     : E;
+  if (over > 0) {
+    EE = Object.assign({}, EE, {
+      hp: Math.round(EE.hp * (1 + over*0.12)),
+      armor: (EE.armor||0) + over*3,
+      score: Math.round(EE.score * (1 + over*0.1)),
+    });
+  }
   // The wave modifier is the last word on the statline, applied on top of the
   // archetype and any elite promotion.
   if (WMOD.hp !== 1 || WMOD.speed !== 1 || WMOD.armor) {
@@ -7226,6 +7244,13 @@ function killWalker(w) {
   if (w.dead) return;
   w.dead = true;
   scene.remove(w.g);
+  // Free it here rather than at the end of the wave. The record stays in the
+  // array (guided stones still hold references to their marks) but its
+  // geometry and its own materials are done with the moment it comes off
+  // screen — and a long wave with a Spawner in it kills enough bodies to
+  // matter. w.pos aliases w.g.position, which survives disposal.
+  disposeGroup(w.g);
+  w.disposed = true;
   burst(w.pos, w.E.skin);
   // An Exploder is a delivery mechanism: killing one near a crowd is the
   // point, and killing one next to a barrel is better.
@@ -7559,7 +7584,8 @@ const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2 };
 function clearAll() {
   rocks.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); });
   rocks.length = 0;
-  walkers.forEach(w => { scene.remove(w.g); disposeGroup(w.g); }); walkers.length = 0;
+  walkers.forEach(w => { scene.remove(w.g); if (!w.disposed) disposeGroup(w.g); });
+  walkers.length = 0;
   gibs.forEach(x => scene.remove(x.mesh)); gibs.length = 0;
   puddles.forEach(p => scene.remove(p.mesh)); puddles.length = 0;
   shells.forEach(s => { s.life = 0; s.mesh.visible = false; });
@@ -7599,7 +7625,10 @@ function buildWave(n) {
     // a wave plays than the enemy statline is.
     const pm = (WMOD.props && WMOD.props[key] !== undefined ? WMOD.props[key] : 1)
              * WMOD.propsAll;
-    const n2 = Math.max(1, Math.round(def.count * (1.4 + n*0.15) * pm));
+    // Capped: past wave ~12 more props stop being more options and start
+    // being a quadratic collision bill. The prop pass is O(n^2).
+    const dens = Math.min(3.2, 1.4 + n*0.15);
+    const n2 = Math.max(1, Math.round(def.count * dens * pm));
     for (let i = 0; i < n2; i++) {
       const a = rand(0,Math.PI*2);
       // Uniform over a disc is sqrt-distributed, which piles everything at
@@ -7609,7 +7638,10 @@ function buildWave(n) {
     }
   }
   const comp = WAVES[Math.min(n, WAVES.length) - 1];
-  const extra = Math.max(0, n - WAVES.length);        // past the table, scale up
+  // Past the table the wave scales up, but the count stops growing after a
+  // point and the difficulty moves into the enemies themselves — see
+  // LATE_RAMP. Eighty bodies is not harder than forty, it is just slower.
+  const extra = Math.min(4, Math.max(0, n - WAVES.length));
   const list = [];
   for (const t in comp) {
     let c = comp[t] + Math.round(comp[t] * extra * 0.35);
@@ -8861,10 +8893,9 @@ let quality = "high";
 let fxOn = true, fpsFrames = 0, fpsT0 = 0, stage = 0;
 
 // Every material carrying surface detail, so LOW can strip them in one pass.
-// Registered at build time rather than discovered by traversing the scene,
+// Registered explicitly rather than discovered by traversing the scene,
 // because instanced and pooled meshes are not all attached when this runs.
 const SURFACED = [];
-function surfaced(m) { SURFACED.push(m); return m; }
 
 // Registered in one block after every module-level material exists, rather
 // than wrapped at each declaration — the list is the point, and a list is
