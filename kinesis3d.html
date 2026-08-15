@@ -5644,6 +5644,17 @@ const CFG = {
   moveSpeed:    7.6,
   turnLerp:     11,
   grabRadius:   13,
+  // Wave scaling knobs, kept together so they are easy to find and re-tune.
+  enemyMul:     2.0,     // every wave composition is doubled
+  waveStrength: 0.01,    // compounding survivability per wave: 1% = 1.01^(n-1)
+  // Hard ceiling on bodies per wave, applied AFTER every multiplier. The
+  // doubling compounds with the late-wave ramp and the HORDE modifier, and
+  // unchecked that reached 68 in a single wave — the walker separation pass
+  // is O(n^2), so that is 4,600 distance checks per frame before anything
+  // else happens. The cap keeps the doubling everywhere it is affordable and
+  // only bites at the extreme end.
+  maxWaveBodies: 44,
+
   arenaStock:   26,      // props kept alive in the arena; spent ones return here
   zoneR:        6.5,
   zoneTime:     14,
@@ -7309,6 +7320,17 @@ function spawnWalker(type, x, z) {
       score: Math.round(EE.score * (1 + over*0.1)),
     });
   }
+  // Compounding per-wave strength. Survivability rather than damage: contact
+  // damage is a flat one heart, so scaling that would jump straight from
+  // survivable to lethal, and scaling speed changes how a wave FEELS rather
+  // than how tough it is.
+  const grit = Math.pow(1 + CFG.waveStrength, Math.max(0, S.wave - 1));
+  if (grit !== 1) {
+    EE = Object.assign({}, EE, {
+      hp: Math.round(EE.hp * grit),
+      armor: Math.round((EE.armor||0) * grit),
+    });
+  }
   // The wave modifier is the last word on the statline, applied on top of the
   // archetype and any elite promotion.
   if (WMOD.hp !== 1 || WMOD.speed !== 1 || WMOD.armor || DIFF.speed !== 1) {
@@ -8551,9 +8573,26 @@ function buildWave(n) {
     // one endless wave.
     const isBig = t === "boss" || t === "maw";
     let c = isBig ? comp[t] : comp[t] + Math.round(comp[t] * extra * 0.35);
-    if (!isBig) c = Math.round(c * WMOD.count);
+    if (!isBig) c = Math.round(c * WMOD.count * CFG.enemyMul);
     for (let i = 0; i < c; i++) list.push(t);
   }
+  // Trim to the ceiling, dropping the most numerous archetypes first so the
+  // wave keeps its variety rather than losing whatever happens to be last.
+  if (list.length > CFG.maxWaveBodies) {
+    const count = {};
+    list.forEach(t => { count[t] = (count[t]||0)+1; });
+    while (list.length > CFG.maxWaveBodies) {
+      let worst = null, most = 0;
+      for (const t in count) {
+        if (t === "boss" || t === "maw") continue;
+        if (count[t] > most) { most = count[t]; worst = t; }
+      }
+      if (!worst || most <= 1) break;
+      list.splice(list.lastIndexOf(worst), 1);
+      count[worst]--;
+    }
+  }
+
   // Shuffle so the held-back half is not always the same archetypes.
   for (let i = list.length-1; i > 0; i--) {
     const j = Math.floor(Math.random()*(i+1));
