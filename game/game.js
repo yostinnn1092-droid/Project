@@ -1193,7 +1193,7 @@ const WAVES = [
   { walker:3, grabber:2, shield:2, tank:1 },
   { runner:4, leaper:2, disruptor:2, warper:1, armored:2 },
   { walker:4, grabber:2, shield:2, spawner:2, tank:1, exploder:3 },
-  { boss:1, walker:4, runner:3, shield:2 },
+  { maw:1, walker:4, runner:3, shield:2 },
 ];
 
 // The boss is a telekinesis problem, not a health bar: four plates must be
@@ -1204,7 +1204,166 @@ const BOSS = {
   speed:1.05, reach:3.2, atkEvery:3.6, score:5000,
 };
 
+// The wave-11 climax. The Warden is a big humanoid; this is a different
+// order of thing — a hulking quadruped that fills the arena's middle and has
+// to be fought by moving rather than by out-damaging.
+//
+// Its whole kit is built out of mechanics the player already knows, so
+// nothing about it needs explaining: armour plates like an Armored, a
+// telegraphed wind-up like everything else, debris throws like the Warden,
+// and a ground slam you beat with the jump button.
+const MAW = {
+  name:"THE MAW", plateHp:420, plates:6, coreHp:4200,
+  speed:1.35, reach:5.4, score:20000,
+  slamEvery:  5.0,   // seconds between ground slams
+  slamWind:   1.15,  // long tell — this is the attack you must read
+  slamR:      17,    // shockwave reach
+  hurlEvery:  4.2,
+  roarEvery:  11,
+  enrageAt:   0.35,  // fraction of core health
+};
+
+// Expanding ground shockwaves. A ring you jump over rather than out-run,
+// which is why the arena has a jump button at all.
+//
+// It has to be drawn as a ring lying ON the floor. The first version reused
+// shell(), the spherical flash explosions use — at a 17 metre radius that
+// sphere swallows the camera and whites out the screen, which is the exact
+// opposite of a readable telegraph.
+const shocks = [];
+const shockGeo = new T.RingGeometry(0.92, 1.0, 56);
+
+function makeShock(pos) {
+  const mesh = new T.Mesh(shockGeo, new T.MeshBasicMaterial({
+    color: 0xff6a20, transparent: true, opacity: 0.9,
+    side: T.DoubleSide, depthWrite: false, blending: T.AdditiveBlending }));
+  mesh.rotation.x = -Math.PI/2;
+  mesh.position.set(pos.x, 0.12, pos.z);
+  scene.add(mesh);
+  return { pos: pos.clone(), r: 2, max: MAW.slamR, hit: false, mesh };
+}
+
+function killShock(sw) {
+  scene.remove(sw.mesh);
+  sw.mesh.material.dispose();
+}
+
 const walkers = [];
+
+function spawnMaw(x, z) {
+  const g = new T.Group();
+  // It measured 4.5x the hero's height and still read as a small dark lump
+  // at fighting distance — the first hide colour was darker than the Sunken
+  // Ruin floor it stands on. Size was never the problem; contrast was.
+  const hideM = new T.MeshStandardMaterial({
+    color:0x6b5647, roughness:0.9, metalness:0.04,
+    normalMap:TEX.fleshN, normalScale:new T.Vector2(1.6,1.6), envMapIntensity:0.6 });
+  const plateM = new T.MeshStandardMaterial({
+    color:0x8a919c, roughness:0.35, metalness:0.8,
+    emissive:0x2a1408, emissiveIntensity:0.6,
+    normalMap:TEX.rockN, normalScale:new T.Vector2(0.9,0.9), envMapIntensity:1.3 });
+  const coreM = new T.MeshStandardMaterial({ color:0xff5a1a, emissive:0xff5a1a,
+                                             emissiveIntensity:1.8, roughness:0.3 });
+  const mawM = new T.MeshStandardMaterial({ color:0x8a2a20, roughness:0.65,
+                                            emissive:0x6a1408, emissiveIntensity:1.1 });
+
+  // Hunched barrel of a body, low and long rather than tall — it should read
+  // as an animal, not another man in armour.
+  const body = new T.Group();
+  body.position.y = 3.4;
+  g.add(body);
+  const trunk = part(new T.SphereGeometry(2.9, 18, 14), hideM, 0, 0, 0);
+  trunk.scale.set(1.0, 0.82, 1.32);
+  body.add(trunk);
+  const haunch = part(new T.SphereGeometry(2.3, 14, 12), hideM, 0, -0.35, -2.9);
+  haunch.scale.set(1.05, 0.9, 1.0);
+  body.add(haunch);
+
+  // Head slung forward on a thick neck, with a jaw that opens when it roars.
+  const neck = new T.Group();
+  neck.position.set(0, 0.15, 3.1);
+  body.add(neck);
+  const neckMesh = part(new T.CylinderGeometry(1.05, 1.35, 2.2, 10), hideM, 0, -0.15, 0.8);
+  neckMesh.rotation.x = Math.PI/2.35;
+  neck.add(neckMesh);
+  const head = new T.Group();
+  head.position.set(0, -0.55, 2.5);
+  neck.add(head);
+  const skull = part(new T.SphereGeometry(1.5, 14, 12), hideM, 0, 0, 0);
+  skull.scale.set(1.0, 0.86, 1.35);
+  head.add(skull);
+  const jaw = new T.Group();
+  jaw.position.set(0, -0.55, 0.5);
+  head.add(jaw);
+  const jawMesh = part(new T.ConeGeometry(1.15, 2.2, 8), mawM, 0, -0.2, 0.7);
+  jawMesh.rotation.x = -Math.PI/2.1;
+  jaw.add(jawMesh);
+  // Eyes, high and close together — the only part that reads at distance.
+  // Big, hot, and lit. On a dark arena the eyes are the only part of a
+  // silhouette that carries at range, so they do the work of announcing it.
+  const eyeM = new T.MeshBasicMaterial({ color:0xffd23c });
+  head.add(part(new T.SphereGeometry(0.44, 10, 8), eyeM, -0.58, 0.5, 1.0));
+  head.add(part(new T.SphereGeometry(0.44, 10, 8), eyeM,  0.58, 0.5, 1.0));
+  const eyeLight = new T.PointLight(0xffa030, 3.2, 18, 2);
+  eyeLight.position.set(0, 0.5, 1.4);
+  head.add(eyeLight);
+
+  // Throat core: the thing you are actually trying to hit, lit so it is
+  // obvious, and only reachable once the spine plates are gone.
+  const core = part(new T.OctahedronGeometry(1.15, 0), coreM, 0, -0.9, 1.4);
+  body.add(core);
+  const glow = new T.PointLight(0xff5a1a, 0, 26, 2);
+  glow.position.set(0, 2.6, 2.6);
+  g.add(glow);
+
+  // Spine plates in a row down the back. Each is its own body with its own
+  // health, exactly like the Warden's ring — same rule, new silhouette.
+  const plates = [];
+  for (let i = 0; i < MAW.plates; i++) {
+    const t = i / (MAW.plates - 1);
+    const pl = part(new T.BoxGeometry(1.8 - t*0.6, 1.9 - t*0.6, 0.55), plateM,
+                    0, 2.55 - t*0.45, 1.8 - t*4.6);
+    pl.rotation.x = -0.30 + t*0.16;
+    body.add(pl);
+    plates.push({ mesh: pl, hp: MAW.plateHp });
+  }
+
+  // Four thick legs. Reusing limb() means they inherit the jointed knee and
+  // therefore the same gait code as everything else on the field.
+  const fL = limb(g, 3.0, hideM, -2.1, 3.6,  1.9, 0.62);
+  const fR = limb(g, 3.0, hideM,  2.1, 3.6,  1.9, 0.62);
+  const bL = limb(g, 3.2, hideM, -2.2, 3.7, -2.1, 0.7);
+  const bR = limb(g, 3.2, hideM,  2.2, 3.7, -2.1, 0.7);
+
+  const tell = new T.Mesh(new T.RingGeometry(3.4, 4.6, 28),
+    new T.MeshBasicMaterial({ color:0xff3c2a, transparent:true, opacity:0,
+                              side:T.DoubleSide, depthWrite:false }));
+  tell.rotation.x = -Math.PI/2;
+  tell.position.y = 9.0;
+  tell.visible = false;
+  g.add(tell);
+
+  g.position.set(x, 0, z);
+  scene.add(g);
+  walkers.push({ g, body, torso: body, head, jaw,
+    aL: fL, aR: fR, lL: bL, lR: bR, pos: g.position,
+    type:"maw", boss:true, maw:true, core, glow, plates, platesLeft:MAW.plates,
+    E:{ name:"THE MAW", hp:MAW.coreHp, speed:MAW.speed, scale:3.6, skin:0x3a2f28,
+        score:MAW.score },
+    reach: MAW.reach,
+    r:4.2, walk:0, gait:0, spd:0, dead:false, cool:0,
+    atkT: MAW.hurlEvery, slamT: MAW.slamEvery, roarT: MAW.roarEvery,
+    slamWind: 0, enraged: false,
+    AI: AI.tank, arcDir: 1, windup: 0, tell,
+    hp:MAW.coreHp, maxHp:MAW.coreHp, flash:0, kb:new T.Vector3(),
+    // thrown/tvel are not optional. The movement guard reads `w.thrown <= 0`,
+    // and `undefined <= 0` is FALSE — so a boss record without these fields
+    // simply never moves. That is how the Warden ended up frozen in place
+    // from the moment the guard was added, and nobody noticed because every
+    // boss test damaged it directly instead of letting it walk.
+    thrown:0, tvel:new T.Vector3(),
+    leapT:99, vy:0, air:false });
+}
 
 function spawnBoss(x, z) {
   const g = new T.Group();
@@ -1263,11 +1422,18 @@ function spawnBoss(x, z) {
     r:2.0, walk:0, dead:false, cool:0, atkT:BOSS.atkEvery,
     AI: AI.tank, arcDir: 1, windup: 0, tell: bossTell,
     hp:BOSS.coreHp, maxHp:BOSS.coreHp, flash:0, kb:new T.Vector3(),
+    // thrown/tvel are not optional. The movement guard reads `w.thrown <= 0`,
+    // and `undefined <= 0` is FALSE — so a boss record without these fields
+    // simply never moves. That is how the Warden ended up frozen in place
+    // from the moment the guard was added, and nobody noticed because every
+    // boss test damaged it directly instead of letting it walk.
+    thrown:0, tvel:new T.Vector3(),
     leapT:99, vy:0, air:false });
 }
 
 function spawnWalker(type, x, z) {
   if (type === "boss") return spawnBoss(x, z);
+  if (type === "maw")  return spawnMaw(x, z);
   const E = ENEMIES[type] || ENEMIES.walker;
   const g = new T.Group(), body = new T.Group();
   g.add(body);
@@ -2321,6 +2487,21 @@ function damageWalker(w, amount, dir, knock, kind) {
   // fight; the core only opens once they are gone.
   if (w.boss && w.platesLeft > 0) {
     const pl = w.plates.find(p => p.hp > 0);
+    if (w.maw && pl) {
+      pl.hp -= amount;
+      w.flash = 1;
+      if (pl.hp <= 0) {
+        pl.mesh.visible = false;
+        w.platesLeft--;
+        sparks(w.pos, 0xaab4c4, 22, 26);
+        SFX.boom();
+        S.shake = Math.min(1.2, S.shake + 0.6);
+        S.freeze = Math.max(S.freeze, 0.16);
+        banner(w.platesLeft ? "PLATE SHATTERED · " + w.platesLeft + " LEFT"
+                            : "THROAT EXPOSED");
+      }
+      return;
+    }
     if (pl) {
       pl.hp -= amount;
       if (pl.hp <= 0) {
@@ -2497,7 +2678,7 @@ function burst(pos, color) {
 // ─────────────────────────────────────────────────────────── state
 const S = {
   phase:"menu", wave:1, kills:0, focus:1, shake:0, t:0,
-  combo:0, comboT:0, score:0, recycleT:0, waveT:0,
+  combo:0, comboT:0, score:0, recycleT:0, waveT:0, endless:false,
   inReach:0, reachT:0, dryWarned:false, inZone:false,
   strain:0, overload:0, idleT:0, grabbed:0,
   style:0, styleT:0, rank:"D", recent:[],   // see addStyle
@@ -2571,15 +2752,27 @@ function buildWave(n) {
       spawnObject(key, Math.cos(a)*d, Math.sin(a)*d);
     }
   }
-  const comp = WAVES[Math.min(n, WAVES.length) - 1];
+  // Past the table, take a late-block composition rather than repeating the
+  // boss wave forever, and bring a big one back every fifth wave.
+  let comp = WAVES[Math.min(n, WAVES.length) - 1];
+  if (n > WAVES.length) {
+    const late = [WAVES[6], WAVES[7], WAVES[8], WAVES[9]];
+    comp = Object.assign({}, late[(n - WAVES.length - 1) % late.length]);
+    const since = n - WAVES.length;
+    if (since % 5 === 0) comp[since % 10 === 0 ? "maw" : "boss"] = 1;
+  }
   // Past the table the wave scales up, but the count stops growing after a
   // point and the difficulty moves into the enemies themselves — see
   // LATE_RAMP. Eighty bodies is not harder than forty, it is just slower.
   const extra = Math.min(4, Math.max(0, n - WAVES.length));
   const list = [];
   for (const t in comp) {
-    let c = comp[t] + Math.round(comp[t] * extra * 0.35);
-    if (t !== "boss") c = Math.round(c * WMOD.count);
+    // A boss is a boss, singular. The late-wave ramp and the HORDE modifier
+    // both multiply counts, and left unguarded that produced TWO Wardens in
+    // one endless wave.
+    const isBig = t === "boss" || t === "maw";
+    let c = isBig ? comp[t] : comp[t] + Math.round(comp[t] * extra * 0.35);
+    if (!isBig) c = Math.round(c * WMOD.count);
     for (let i = 0; i < c; i++) list.push(t);
   }
   // Shuffle so the held-back half is not always the same archetypes.
@@ -2590,8 +2783,10 @@ function buildWave(n) {
   // The Warden is never a reinforcement. The shuffle above could put it in
   // the held-back half, which made it stroll in mid-wave as a "reinforcement"
   // — and left wave 11 with no boss at all in its opening group.
-  const bi = list.indexOf("boss");
-  if (bi > 0) { list.splice(bi, 1); list.unshift("boss"); }
+  for (const big of ["maw", "boss"]) {
+    const bi = list.indexOf(big);
+    if (bi > 0) { list.splice(bi, 1); list.unshift(big); }
+  }
 
   // The opening group arrives evenly all round — that is the wave's starting
   // shape. The rest is held back and arrives in pulses from chosen bearings,
@@ -2614,6 +2809,8 @@ function buildWave(n) {
   }
   S.waveT = 0;
   clearZones();
+  shocks.forEach(killShock);
+  shocks.length = 0;
   pendingEvent = null;
   scheduleEvent(n);
   hero.pos.set(0,0,0); hero.yaw = Math.PI;
@@ -2658,10 +2855,12 @@ function updateHUD() {
     bb.classList.toggle("show", !!bw);
     if (bw) {
       const plates = bw.plates.reduce((s,p) => s + Math.max(0,p.hp), 0);
-      const pMax = BOSS.plates * BOSS.plateHp;
+      const pMax = bw.maw ? MAW.plates * MAW.plateHp : BOSS.plates * BOSS.plateHp;
       el("bossPlate").style.width = (plates/pMax*100) + "%";
       el("bossCore").style.width  = (Math.max(0,bw.hp)/bw.maxHp*100) + "%";
-      el("bossName").textContent = bw.platesLeft ? "WARDEN · ARMOURED" : "WARDEN · CORE EXPOSED";
+      const bn = bw.maw ? "THE MAW" : "WARDEN";
+      el("bossName").textContent = bn +
+        (bw.platesLeft ? " · ARMOURED" : bw.enraged ? " · ENRAGED" : " · EXPOSED");
       el("bossBar").classList.toggle("open", !bw.platesLeft);
     }
   }
@@ -3612,7 +3811,88 @@ function step(dt) {
       }
     }
 
-    if (w.boss) {
+    // ---- THE MAW
+    if (w.maw) {
+      w.glow.intensity = w.platesLeft ? 0.5 : 6 + Math.sin(S.t*5)*3;
+      w.core.material.emissiveIntensity = w.platesLeft ? 0.35 : 2.4;
+
+      // Enrage once the core is worn down: everything gets faster, and it is
+      // announced so a sudden change in rhythm is never a surprise.
+      if (!w.enraged && !w.platesLeft && w.hp < w.maxHp * MAW.enrageAt) {
+        w.enraged = true;
+        banner("THE MAW IS ENRAGED");
+        toast("It stops pacing itself", 2600);
+        SFX.overload();
+        S.shake = Math.min(1.2, S.shake + 0.8);
+      }
+      const rate = w.enraged ? 0.62 : 1;
+
+      // GROUND SLAM. Long wind-up, rears up on its back legs, then drops —
+      // a ring races out across the floor and only touches you if you are
+      // standing on it. Jump the ring. That is the whole fight.
+      if (w.slamWind > 0) {
+        w.slamWind -= dt;
+        const t = 1 - w.slamWind / (MAW.slamWind*rate);
+        w.body.position.y = 3.4 + Math.sin(t*Math.PI)*2.6;
+        w.body.rotation.x = -Math.sin(t*Math.PI)*0.5;
+        w.tell.visible = true;
+        w.tell.material.opacity = 0.3 + 0.6*t;
+        w.tell.scale.setScalar(1 + t*0.7);
+        if (w.slamWind <= 0) {
+          w.slamWind = 0;
+          w.body.position.y = 3.4; w.body.rotation.x = 0;
+          w.tell.visible = false;
+          shocks.push(makeShock(w.pos));
+          S.shake = Math.min(1.4, S.shake + 1.0);
+          SFX.boom();
+          S.freeze = Math.max(S.freeze, 0.12);
+        }
+      } else {
+        w.slamT -= dt;
+        if (w.slamT <= 0 && dist < MAW.slamR) {
+          w.slamT = MAW.slamEvery * rate;
+          w.slamWind = MAW.slamWind * rate;
+          banner("SLAM — JUMP");
+          SFX.warn();
+        }
+      }
+
+      // HURL: picks up whatever is lying near it and throws it. Same hostile
+      // prop path the Warden uses, so it can be shot out of the air.
+      w.atkT -= dt;
+      if (w.atkT <= 0 && w.slamWind <= 0) {
+        w.atkT = MAW.hurlEvery * rate;
+        let pick = null, bd = 22;
+        for (const o of rocks) {
+          if (o.held || o.gone || o.hostile) continue;
+          const d2 = o.pos.distanceTo(w.pos);
+          if (d2 < bd && d2 > 2.5) { bd = d2; pick = o; }
+        }
+        if (pick) {
+          tmp2.set(hero.pos.x-pick.pos.x, 2.4, hero.pos.z-pick.pos.z).normalize();
+          pick.vel.copy(tmp2).multiplyScalar(38);
+          pick.hostile = 2.0;
+          pick.mesh.material = seekMat;
+          SFX.throw(2);
+          banner("INCOMING");
+        }
+      }
+
+      // ROAR: opens the jaw and calls in bodies from a chosen bearing, so the
+      // arena never empties out while you work on it.
+      w.roarT -= dt;
+      if (w.roarT <= 0 && w.slamWind <= 0) {
+        w.roarT = MAW.roarEvery * rate;
+        w.jawOpen = 0.55;
+        reinforce(w.enraged ? ["runner","runner","leaper","crawler"]
+                            : ["walker","runner","crawler"], "THE MAW CALLS");
+      }
+      w.jawOpen = Math.max(0, (w.jawOpen || 0) - dt*0.8);
+      w.jaw.rotation.x = w.jawOpen;
+      w.head.rotation.y = Math.sin(S.t*0.7)*0.12;
+    }
+
+    if (w.boss && !w.maw) {
       // Core only lights, and only becomes vulnerable, once stripped.
       w.glow.intensity = w.platesLeft ? 0 : 5 + Math.sin(S.t*6)*2.5;
       w.core.material.emissiveIntensity = w.platesLeft ? 0.15 : 1.8;
@@ -3750,7 +4030,7 @@ function step(dt) {
     // heart because something touched you. Now every attack is a rooted
     // wind-up with a visible tell, and stepping out of reach makes it whiff.
     // The window is per archetype: a Runner's is short and a Tank's is long.
-    const reach = w.boss ? BOSS.reach : CFG.zReach * (w.E.scale || 1);
+    const reach = w.reach || (w.boss ? BOSS.reach : CFG.zReach * (w.E.scale || 1));
     if (w.windup > 0) {
       w.windup -= dt;
       // Rears back, then lunges. Also flashes, because on a dark ground the
@@ -3779,7 +4059,8 @@ function step(dt) {
           SFX.whiff();
         }
       }
-    } else if (dist < reach && w.cool <= 0 && hero.pos.y < CFG.dodgeHeight) {
+    } else if (dist < reach && w.cool <= 0 && hero.pos.y < CFG.dodgeHeight &&
+               !(w.maw && w.slamWind > 0)) {
       w.windup = w.AI.telegraph;
       SFX.tell();
     }
@@ -3992,6 +4273,39 @@ function step(dt) {
     S.kinetic = Math.max(0, OD.t / CFG.odTime);
     if (OD.t <= 0) endOverdrive();
   }
+  // Ground shockwaves. A ring races outward; it catches you only if you are
+  // standing on the floor when it passes. Jumping over it is the counter, and
+  // it is the same jump button that already dodges an ordinary swipe.
+  for (let i = shocks.length-1; i >= 0; i--) {
+    const sw = shocks[i];
+    const prev = sw.r;
+    sw.r += 26*dt;
+    const d = Math.hypot(hero.pos.x-sw.pos.x, hero.pos.z-sw.pos.z);
+    if (!sw.hit && d >= prev && d < sw.r && hero.pos.y < CFG.dodgeHeight) {
+      sw.hit = true;
+      hurtHero();
+      SFX.hurt();
+      S.shake = Math.min(1.2, S.shake + 0.7);
+      el("dmg").classList.add("on");
+      setTimeout(() => el("dmg").classList.remove("on"), 220);
+      updateHUD();
+      if (hero.hp <= 0) { gameOver(); return; }
+    }
+    // It knocks the loose props about too, which is half the spectacle.
+    for (const o of rocks) {
+      if (o.gone || o.held) continue;
+      const od = Math.hypot(o.pos.x-sw.pos.x, o.pos.z-sw.pos.z);
+      if (od >= prev && od < sw.r) {
+        tmp.set(o.pos.x-sw.pos.x, 0.6, o.pos.z-sw.pos.z).normalize();
+        o.vel.addScaledVector(tmp, 16/Math.max(0.6, o.def.mass));
+      }
+    }
+    sw.mesh.scale.setScalar(sw.r);
+    // Fades as it widens, so the leading edge stays the readable part.
+    sw.mesh.material.opacity = 0.9 * (1 - sw.r/sw.max) + 0.12;
+    if (sw.r >= sw.max) { killShock(sw); shocks.splice(i,1); }
+  }
+
   // Kinetic zones: vent strain fast inside one, and pull the horde to it.
   for (let i = zones.length-1; i >= 0; i--) {
     const z = zones[i];
@@ -4075,11 +4389,22 @@ function step(dt) {
 }
 
 function nextWave() {
-  if (S.wave >= WAVES.length) {
+  // Killing the Maw ends the ARC. It does not have to end the run: the late
+  // scaling, the arena cycling and the elite ramp all exist and were
+  // previously unreachable, because the run stopped at wave 11 before any of
+  // it could happen.
+  if (S.wave >= WAVES.length && !S.endless) {
     S.phase = "done";
     show(`<h1>Survived</h1>${runSummary()}
-          <p class="rule">Nothing walked away from you.</p><button id="again">Again</button>`);
+          <p class="rule">The Maw is down. Nothing walked away from you.</p>
+          <button id="endless">Keep going</button>
+          <button id="again" class="ghost">Finish here</button>`);
     el("again").onclick = restart;
+    el("endless").onclick = () => {
+      S.endless = true;
+      banner("ENDLESS");
+      offerDraft();
+    };
     return;
   }
   offerDraft();
@@ -4141,7 +4466,7 @@ function restart() {
   SYNERGIES.forEach(sy => { sy.got = false; });
   taken.length = 0;
   S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0;
-  S.style = 0; S.styleT = 0; S.rank = "D"; S.recent.length = 0;
+  S.style = 0; S.styleT = 0; S.rank = "D"; S.recent.length = 0; S.endless = false;
   buildArena(ARENAS[0]);
   el("arena").textContent = ARENAS[0].name;
   S.kinetic = 0; endOverdrive();
