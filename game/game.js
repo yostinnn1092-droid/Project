@@ -5155,6 +5155,17 @@ function restart() {
 // LOW   surface maps stripped, no environment probe, small shadow map
 let quality = "high";
 let fxOn = true, fpsFrames = 0, fpsT0 = 0, stage = 0;
+// Rolling quality-ladder state. The old ladder judged exactly two three-second
+// windows and then stopped forever, and the FIRST of those windows covered
+// shader compilation, texture upload and the opening spawn — the slowest three
+// seconds a run will ever have. A machine that stuttered once at load was
+// condemned to LOW for the rest of the session, and a machine that only
+// struggled at wave 20, when forty bodies are on the field, was never helped
+// at all because the ladder had already retired.
+let qBadRuns = 0, qGoodRuns = 0, qStartedAt = 0;
+const Q_WARMUP = 5.0;      // seconds of grace before any judgement
+const Q_WINDOW = 2.5;      // length of each sample window
+const BASE_PIXEL_RATIO = Math.min(devicePixelRatio || 1, 1.75);
 
 // Every material carrying surface detail, so LOW can strip them in one pass.
 // Registered explicitly rather than discovered by traversing the scene,
@@ -5216,22 +5227,46 @@ function setQuality(q) {
 // is clamped to 1/30, so measuring against it caps the computed rate at 30
 // and would condemn every machine, fast or slow.
 function judgeFrame(now) {
-  if (stage > 1) return;
-  if (!fpsT0) { fpsT0 = now; return; }
+  if (!qStartedAt) { qStartedAt = now; fpsT0 = now; return; }
+  // Warm-up: ignore everything until the run has settled. Judging the opening
+  // seconds measures the loading, not the game.
+  if ((now - qStartedAt) / 1000 < Q_WARMUP) { fpsT0 = now; fpsFrames = 0; return; }
+
   fpsFrames++;
   const elapsed = (now - fpsT0) / 1000;
-  if (elapsed < 3) return;
+  if (elapsed < Q_WINDOW) return;
   const fps = fpsFrames / elapsed;
   fpsFrames = 0; fpsT0 = now;
-  if (stage === 0) {
-    if (fps < 40) { setQuality("med"); toast("Effects reduced to keep it smooth", 2600); }
-    stage = 1;
-  } else {
-    // A second window, so a machine that is merely loading is not condemned
-    // by the first three seconds of a run.
-    if (fps < 34) { setQuality("low"); toast("Detail reduced to keep it smooth", 2600); }
-    stage = 2;
+
+  // Two consecutive bad windows before stepping down, so a single hitch — a
+  // garbage collection, a backgrounded tab, a wave spawning — never costs the
+  // player their visuals for the rest of the run.
+  if (fps < 34)      { qBadRuns++;  qGoodRuns = 0; }
+  else if (fps > 52) { qGoodRuns++; qBadRuns  = 0; }
+  else               { qBadRuns = 0; qGoodRuns = 0; }
+
+  if (qBadRuns >= 2) {
+    qBadRuns = 0;
+    if (quality === "high")     { setQuality("med"); toast("Effects reduced to keep it smooth", 2600); }
+    else if (quality === "med") { setQuality("low"); toast("Detail reduced to keep it smooth", 2600); }
+  } else if (qGoodRuns >= 4 && quality === "med") {
+    // Recovery, but only MED -> HIGH. That step is a clean re-enable of two
+    // passes and the pixel ratio. LOW is deliberately one-way: it strips normal
+    // maps off live materials, and there is no honest way to put back data that
+    // was thrown away without rebuilding every body in the arena.
+    qGoodRuns = 0;
+    restoreHigh();
+    toast("Effects restored", 2200);
   }
+}
+
+function restoreHigh() {
+  if (quality !== "med") return;
+  quality = "high";
+  gtao.enabled = true;
+  bloom.enabled = true;
+  fxOn = true;
+  renderer.setPixelRatio(BASE_PIXEL_RATIO);
 }
 
 let last = performance.now();
