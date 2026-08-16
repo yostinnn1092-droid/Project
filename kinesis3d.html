@@ -6717,13 +6717,24 @@ const hero = { pos: new T.Vector3(0,0,0), yaw: 0, walk: 0, hp: CFG.maxHealth,
 // rank-3 ring sweeps a genuinely different volume from a rank-1 one and is not
 // merely a bigger number.
 const RING = {
+  // A rank adds a ring. Three concentric walls of fire at rank 3, each its own
+  // damage band, so a body walking in from outside has to cross all three —
+  // which is what makes the upgrade feel like more fire rather than a bigger
+  // number. Per-ring damage drops as ranks are added, because total output
+  // against anything closing on you roughly triples otherwise.
+  // Spaced so the gaps between rings are genuinely safe. At 3.3/5.5/7.7 with
+  // the old band width the damage zones overlapped, and standing BETWEEN two
+  // rings burned 58 where standing on one burned 29 — the pocket that should
+  // have been shelter was the worst place on the field. Only the very largest
+  // bodies now span two bands, which is fair: they are wide enough to touch both.
+  radii: [3.2, 5.8, 8.4],
   levels: [
     null,
-    { radius:3.6, height:1.55, dps:52,  glow:0.85, orbR:0.62 },
-    { radius:5.0, height:2.10, dps:88,  glow:1.00, orbR:0.74 },
-    { radius:6.6, height:2.75, dps:140, glow:1.20, orbR:0.88 },
+    { rings:1, dps:64, height:1.60, glow:0.90 },
+    { rings:2, dps:52, height:1.85, glow:1.05 },
+    { rings:3, dps:44, height:2.10, glow:1.20 },
   ],
-  tick: 0.22,          // seconds between damage applications per body
+  tick: 0.22,          // seconds between damage applications per body per ring
 };
 
 const ringState = { lv:0, ang:0, orbs:[], group:null, cool:new Map() };
@@ -6827,59 +6838,61 @@ function buildRingOrbs() {
   if (!ringState.lv) return;
   const L = RING.levels[ringState.lv];
 
-  // A continuous wall of flame rather than orbiting balls — which is also what
-  // the hitbox has always been, since damage applies to the whole annulus.
-  // Three concentric curtains at slightly different radii, heights and scroll
-  // rates: one alone reads as a printed cylinder, three churn.
-  const layers = [
-    { r:L.radius-0.30, h:L.height*0.78, mat:flameMatB, rep:3, spd:-0.55, op:0.44 },
-    { r:L.radius,      h:L.height,      mat:flameMatA, rep:4, spd: 0.85, op:0.82 },
-    { r:L.radius+0.30, h:L.height*0.62, mat:flameMatB, rep:5, spd:-1.25, op:0.36 },
-  ];
-  for (const cfg of layers) {
-    const mat = cfg.mat.clone();
-    mat.map = cfg.mat.map.clone();
-    mat.map.needsUpdate = true;
-    mat.map.wrapS = T.RepeatWrapping;
-    mat.map.repeat.set(cfg.rep, 1);
-    mat.opacity = cfg.op * L.glow;
-    mat._own = true;
-    const geo = new T.CylinderGeometry(cfg.r, cfg.r*0.94, cfg.h, 48, 1, true);
-    const m = new T.Mesh(geo, mat);
-    m.position.y = cfg.h/2;
-    g.add(m);
-    ringState.curtains.push({ mesh:m, mat, spd:cfg.spd });
+  // Two counter-scrolling layers per ring rather than three. At rank 3 that is
+  // six curtains already; a third layer each would be nine transparent
+  // additive cylinders stacked over the same pixels, which is exactly the kind
+  // of overdraw that costs frames for nothing anyone can see.
+  for (let i = 0; i < L.rings; i++) {
+    const R = RING.radii[i];
+    const h = L.height * (1 - i*0.10);        // outer rings sit slightly lower
+    const layers = [
+      { r:R,        mat:flameMatA, rep:4+i, spd: 0.85 - i*0.22, op:0.80 },
+      { r:R + 0.26, mat:flameMatB, rep:5+i, spd:-1.15 + i*0.20, op:0.40 },
+    ];
+    for (const cfg of layers) {
+      const mat = cfg.mat.clone();
+      mat.map = cfg.mat.map.clone();
+      mat.map.needsUpdate = true;
+      mat.map.wrapS = T.RepeatWrapping;
+      mat.map.repeat.set(cfg.rep, 1);
+      mat.opacity = cfg.op * L.glow;
+      mat._own = true;
+      const geo = new T.CylinderGeometry(cfg.r, cfg.r*0.94, h, 44, 1, true);
+      const m = new T.Mesh(geo, mat);
+      m.position.y = h/2;
+      g.add(m);
+      ringState.curtains.push({ mesh:m, mat, spd:cfg.spd });
+    }
   }
 
-  // Ground scorch, so the ring stays readable looking straight down where the
-  // vertical curtain is edge-on and nearly invisible.
+  // Ground scorch sized to the outermost ring, so the whole danger zone is
+  // legible from directly overhead where the curtains are edge-on.
+  const outer = RING.radii[L.rings-1];
   const gm = groundGlowMat.clone(); gm._own = true;
-  gm.opacity = 0.8 * L.glow;
-  const disc = new T.Mesh(new T.PlaneGeometry(L.radius*2.5, L.radius*2.5), gm);
+  // 0.7 additive across a 21-unit plane turned the entire arena floor into a
+  // yellow haze that swallowed the trees, the props and the bodies. The disc
+  // exists only to keep the ring readable from directly overhead; it should
+  // be a hint under the fire, not a light source.
+  gm.opacity = 0.26 * L.glow;
+  const disc = new T.Mesh(new T.PlaneGeometry(outer*2.6, outer*2.6), gm);
   disc.rotation.x = -Math.PI/2; disc.position.y = 0.06;
   g.add(disc);
   ringState.disc = disc;
 
-  // The light rides with the ring, so the fire actually falls on whatever is
-  // standing in it.
-  const lt = new T.PointLight(0xff7a26, 2.2*L.glow, L.radius*3.4, 1.7);
+  const lt = new T.PointLight(0xff6a1e, 1.5*L.glow, outer*2.2, 2.0);
   lt.position.y = L.height*0.6;
   g.add(lt);
   ringState.light = lt;
 }
 
 function ringUpgrade() {
-  if (ringState.lv >= 3) {
-    // Already capped: convert the pickup into something rather than nothing.
-    hero.hp = Math.min(CFG.maxHealth, hero.hp + 1);
-    toast("RING ALREADY AT ITS LIMIT — +1 HEALTH", 2200);
-    return;
-  }
+  if (ringState.lv >= 3) return;
   ringState.lv++;
   buildRingOrbs();
   const L = RING.levels[ringState.lv];
   banner("RING OF FIRE · " + ringState.lv);
-  toast("radius " + L.radius.toFixed(1) + " · " + Math.round(L.dps) + " dps", 2800);
+  toast(L.rings + (L.rings===1?" ring":" rings") + " · " +
+        Math.round(L.dps) + " dps each", 2800);
   SFX.overload();
   S.shake = Math.min(1.0, S.shake + 0.35);
 }
@@ -6898,78 +6911,31 @@ function stepRing(dt) {
     c.mesh.scale.y = 1 + Math.sin(S.t*3.1 + c.spd)*0.09;
   }
   if (ringState.disc)
-    ringState.disc.material.opacity = (0.66 + Math.sin(S.t*4.2)*0.14) * L.glow;
+    ringState.disc.material.opacity = (0.24 + Math.sin(S.t*4.2)*0.06) * L.glow;
   if (ringState.light)
-    ringState.light.intensity = (2.0 + Math.sin(S.t*6.5)*0.55) * L.glow;
+    ringState.light.intensity = (1.4 + Math.sin(S.t*6.5)*0.35) * L.glow;
 
-  // ── damage ────────────────────────────────────────────────────────────────
-  // The burning ANNULUS is the hitbox, not the three orbs. Testing the orbs
-  // individually looked right and was not: an orb sweeps past a body in 0.15s
-  // against a 0.22s damage cooldown, so each pass landed at most one tick and
-  // the real output was 48 dps against 140 advertised — 35% of the number on
-  // the card. The orbs are the fire you can see; the ring is the fire that
-  // burns, which is also what "ring of fire" ought to mean.
-  //
-  // Applied on a per-body cooldown rather than per frame, so the ring deals
-  // the same damage at 30fps as it does at 144.
-  const band = L.orbR + 0.75;
+  // ── damage ──────────────────────────────────────────────────────────────
+  // Each ring is its own annulus band, and a body crossing several is burned
+  // by each of them. Applied on a per-body-per-ring cooldown rather than per
+  // frame, so output is identical at 30fps and at 144.
+  const band = 0.70;
   for (const w of walkers) {
     if (w.dead) continue;
     const d = Math.hypot(w.pos.x - hero.pos.x, w.pos.z - hero.pos.z);
-    if (Math.abs(d - L.radius) > band + (w.E.bulk||1)*0.55) continue;
-    const until = ringState.cool.get(w) || 0;
-    if (S.t < until) continue;
-    ringState.cool.set(w, S.t + RING.tick);
-    damageWalker(w, L.dps * RING.tick, null, 0, "fire");
-    if (Math.random() < 0.45) sparks(tmp3.set(w.pos.x, 1.2, w.pos.z), 0xff8a2a, 3, 8);
+    const reach = band + (w.E.bulk||1)*0.42;
+    for (let i = 0; i < L.rings; i++) {
+      if (Math.abs(d - RING.radii[i]) > reach) continue;
+      let cd = ringState.cool.get(w);
+      if (!cd) { cd = [0,0,0]; ringState.cool.set(w, cd); }
+      if (S.t < cd[i]) continue;
+      cd[i] = S.t + RING.tick;
+      damageWalker(w, L.dps * RING.tick, null, 0, "fire");
+      if (Math.random() < 0.4) sparks(tmp3.set(w.pos.x, 1.1, w.pos.z), 0xff8a2a, 3, 8);
+    }
   }
-  // The map would otherwise hold every corpse this run.
   if (ringState.cool.size > 120)
     for (const k of ringState.cool.keys()) if (k.dead) ringState.cool.delete(k);
-}
-
-// ── the pickup ──────────────────────────────────────────────────────────────
-// Drops from bodies. Deliberately not guaranteed and not purchasable: the ring
-// is a run-shaping find, and knowing it might not come is what makes it matter
-// when it does.
-const emberPickups = [];
-const emberMat = new T.MeshBasicMaterial({ color:0xff7a26 });
-const emberGlowMat = new T.MeshBasicMaterial({ color:0xffb060, transparent:true,
-                                               opacity:0.35, depthWrite:false });
-function dropEmber(pos) {
-  const g = new T.Group();
-  const core = new T.Mesh(new T.TorusGeometry(0.52, 0.16, 8, 18), emberMat);
-  core.rotation.x = Math.PI/2;
-  const halo = new T.Mesh(new T.SphereGeometry(1.15, 10, 8), emberGlowMat);
-  const lt = new T.PointLight(0xff7a26, 2.2, 12, 1.7);
-  g.add(core, halo, lt);
-  g.position.set(pos.x, 1.2, pos.z);
-  scene.add(g);
-  emberPickups.push({ g, pos:g.position, life:26, t:0 });
-}
-function stepEmbers(dt) {
-  for (let i = emberPickups.length-1; i >= 0; i--) {
-    const e = emberPickups[i];
-    e.t += dt; e.life -= dt;
-    e.g.rotation.y += dt*2.2;
-    e.g.position.y = 1.2 + Math.sin(e.t*2.6)*0.22;
-    // Drifts toward the player once close, so a pickup is never lost to a
-    // pixel of positioning in a fight.
-    const d = Math.hypot(e.pos.x-hero.pos.x, e.pos.z-hero.pos.z);
-    if (d < 7) {
-      e.g.position.x += (hero.pos.x-e.pos.x) * Math.min(1, dt*3.2);
-      e.g.position.z += (hero.pos.z-e.pos.z) * Math.min(1, dt*3.2);
-    }
-    if (d < 1.9) {
-      ringUpgrade();
-      scene.remove(e.g); disposeGroup(e.g); emberPickups.splice(i,1); continue;
-    }
-    if (e.life <= 0) { scene.remove(e.g); disposeGroup(e.g); emberPickups.splice(i,1); }
-  }
-}
-function clearEmbers() {
-  for (const e of emberPickups) { scene.remove(e.g); disposeGroup(e.g); }
-  emberPickups.length = 0;
 }
 
 // Dash ghosts: a handful of reusable translucent bodies, faded along the
@@ -7897,6 +7863,21 @@ const UPGRADES = [
   { id:"ordnance", name:"Ordnance",        tag:"Explosive",
     desc:"Every explosion is 40% wider.",
     take(){ MOD.blastR *= 1.4; } },
+  // The only repeatable pick in the table. `more()` lets it stay in the pool
+  // after being taken, and the name and description read the current rank so a
+  // second offer says what it will actually do rather than repeating the
+  // first-rank pitch.
+  { id:"ringfire", tag:"Fire",
+    get name(){ return ringState.lv ? "Ring of Fire " + (ringState.lv+1) : "Ring of Fire"; },
+    get desc(){
+      const n = ringState.lv + 1, L = RING.levels[Math.min(3,n)];
+      return ringState.lv === 0
+        ? "A wall of fire orbits you, burning anything that walks through it."
+        : "A " + (n===2?"second":"third") + " ring, further out. " + n +
+          " bands of fire to cross, " + Math.round(L.dps) + " damage a second each.";
+    },
+    more(){ return ringState.lv < 3; },
+    take(){ ringUpgrade(); } },
   { id:"heft",     name:"Heft",            tag:"Power",
     desc:"All thrown objects deal 25% more damage.",
     take(){ MOD.allDmg *= 1.25; } },
@@ -7954,8 +7935,11 @@ function applySynergies(u) {
 function offerDraft() {
   S.phase = "draft";
   // Three distinct picks, drawn without replacement.
-  const pool = UPGRADES.filter(u => !taken.includes(u.id));
-  if (pool.length < 3) pool.push(...UPGRADES.filter(u => taken.includes(u.id)));
+  // A repeatable upgrade stays in the pool while more() says there is another
+  // rank to give; everything else drops out once taken.
+  const pool = UPGRADES.filter(u => u.more ? u.more() : !taken.includes(u.id));
+  if (pool.length < 3)
+    pool.push(...UPGRADES.filter(u => taken.includes(u.id) && !u.more));
   const picks = [];
   while (picks.length < 3 && pool.length) {
     picks.push(pool.splice(Math.floor(Math.random()*pool.length), 1)[0]);
@@ -7970,7 +7954,8 @@ function offerDraft() {
     b.className = "upg";
     b.innerHTML = '<span class="ut">' + u.tag + '</span><b>' + u.name + '</b><i>' + u.desc + '</i>'
                 + synergyHint(u);
-    b.onclick = () => { u.take(); applySynergies(u); taken.push(u.id);
+    b.onclick = () => { u.take(); applySynergies(u);
+                        if (!u.more) taken.push(u.id);
                         SFX.pick(); startNextWave(); };
     box.appendChild(b);
   });
@@ -8525,15 +8510,6 @@ function killWalker(w) {
   disposeGroup(w.g);
   w.disposed = true;
   burst(w.pos, w.E.skin);
-
-  // Ring of Fire embers. Bosses always leave one; ordinary bodies rarely do,
-  // and only while the ring can still take a rank — a drop the player cannot
-  // use is worse than no drop at all. Bumped slightly on the earliest waves so
-  // a run is not decided by whether the first rank ever showed up.
-  if (ringState.lv < 3) {
-    const base = w.boss ? 1 : (S.wave <= 3 ? 0.055 : 0.028);
-    if (Math.random() < base) dropEmber(w.pos);
-  }
 
   // An Exploder is a delivery mechanism: killing one near a crowd is the
   // point, and killing one next to a barrel is better.
@@ -9616,7 +9592,6 @@ function nearestInCone() {
 function step(dt) {
   S.t += dt;
   stepRing(dt);
-  stepEmbers(dt);
 
   // Strain bleeds off on its own, and faster once you have stopped acting
   // for a moment — so backing out of a fight is a real way to reset.
