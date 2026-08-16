@@ -7389,6 +7389,13 @@ function killShock(sw) {
   sw.mesh.material.dispose();
 }
 
+// Wound tint targets. Kept module-level so the per-frame path allocates
+// nothing: a colour object per walker per frame is exactly the kind of churn
+// that shows up as GC sawtooth in a wave of forty bodies.
+const WOUND_COL  = new T.Color(0x5a1410);
+const WOUND_GLOW = new T.Color(0xff2a10);
+const tmpCol     = new T.Color();
+
 const walkers = [];
 
 function spawnMaw(x, z) {
@@ -7806,6 +7813,7 @@ function spawnWalker(type, x, z) {
   // them passed against a game with no visible enemies.
   scene.add(g);
   walkers.push({ g, body, torso, aL, aR, lL, lR, pos:g.position, elite,
+                 skinM, woundT:0,
                  type, E:EE, r:0.75*EE.scale,
                  AI: AI[type] || AI_DEFAULT,
                  arcDir: Math.random() < 0.5 ? -1 : 1,
@@ -10248,6 +10256,35 @@ function step(dt) {
     if (w.flash > 0) {
       w.flash = Math.max(0, w.flash - dt*4);
       w.body.scale.setScalar(1 + w.flash*0.14);
+    }
+
+    // ---- wound state
+    // Doubling every archetype's health made the SECOND hit the one that
+    // kills, and nothing on screen said which bodies had already taken the
+    // first. Without that, a crowd is undifferentiated and the finisher —
+    // single-target execute, which only fires on the wounded — is invisible.
+    // Health now reads off the body itself: skin darkens and goes livid, and
+    // the eyes bank up as it gets closer to dropping.
+    if (w.skinM && !w.boss) {
+      const frac = clamp(w.hp / w.maxHp, 0, 1);
+      const hurt = 1 - frac;
+      if (Math.abs(hurt - w.woundT) > 0.02) {
+        w.woundT = hurt;
+        // toward a dark, bloodied cast rather than simply darker, so a
+        // wounded body separates from one merely standing in shadow
+        const c = tmpCol.setHex(w.E.skin);
+        // Measured at 0.72: a body at 12% health came out #645344 — browner,
+        // not visibly dying. In a crowd of forty that is no signal at all.
+        c.lerp(WOUND_COL, hurt * 0.95);
+        c.multiplyScalar(1 - hurt * 0.30);
+        w.skinM.color.copy(c);
+        // Emissive only appears in the last third — that is the execute
+        // window, and it should be the thing the eye catches in a crowd.
+        w.skinM.emissive.copy(WOUND_GLOW);
+        // Opens at 55% rather than 66% so the execute window is flagged for
+        // longer than the instant before it closes.
+        w.skinM.emissiveIntensity = Math.max(0, hurt - 0.55) * 3.2;
+      }
     }
     // ---- walker gait (skipped while winding up: the tell owns the pose)
     if (w.windup > 0) { w.body.position.y = 0; }
