@@ -1,0 +1,297 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Threshold</title>
+<style>
+/* ─────────────────────────────────────────────────────────────── tokens
+   The Threshold is an examination hall that forgot to stop. The palette is
+   institutional rather than heroic: cold stone, bone, and the amber of a
+   warning lamp that has been on for a very long time. Red is reserved
+   strictly for things that are about to hurt you. */
+:root{
+  --void:#08080a; --stone:#121215; --stone2:#1b1b20; --edge:#2c2c34; --edge2:#3d3d48;
+  --bone:#e8e4da; --dim:#9a958c; --faint:#5f5b55;
+  --amber:#e0a13c; --amber2:#ffc973; --ember:#c4571f;
+  --hp:#c9414a; --sp:#7fb84e; --mp:#4a8fd4;
+  --danger:#ff4d4d; --gold:#e8c559;
+  --r1:#8e8a82; --r2:#5fa8e8; --r3:#b072e0; --r4:#e0a13c;  /* rarity tiers */
+  --cond:ui-sans-serif,"Oswald","Arial Narrow",system-ui,sans-serif;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --serif:ui-serif,"Iowan Old Style",Palatino,Georgia,serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--void);color:var(--bone);font-family:var(--sans);overflow:hidden;
+  -webkit-font-smoothing:antialiased;user-select:none;cursor:default}
+canvas{display:block}
+#cv{position:fixed;inset:0;width:100%;height:100%;z-index:0}
+
+.hidden{display:none !important}
+
+/* ─────────────────────────────────────────────── objective banner (top) */
+#obj{position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:10;
+  padding:9px 30px 10px;background:linear-gradient(180deg,rgba(10,10,12,.95),rgba(10,10,12,.55));
+  border:1px solid var(--edge);border-top:0;text-align:center;min-width:330px}
+#obj .fl{font-family:var(--cond);font-size:10px;letter-spacing:.34em;text-transform:uppercase;
+  color:var(--faint)}
+#obj .ot{font-family:var(--cond);font-size:16px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--amber2);margin-top:3px;font-weight:600}
+#obj .op{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:3px;
+  font-variant-numeric:tabular-nums}
+#obj.done .ot{color:var(--sp)}
+
+/* ─────────────────────────────────────────────── vitals (bottom-left) */
+#vit{position:fixed;left:16px;bottom:16px;z-index:10;width:266px}
+.gauge{margin-bottom:5px;position:relative}
+.gauge .track{height:15px;background:#000a;border:1px solid var(--edge);position:relative;
+  overflow:hidden}
+.gauge .fill{height:100%;transition:width .12s linear}
+.gauge .ghost{position:absolute;inset:0;height:100%;background:#ffffff28;
+  transition:width .55s ease .18s}   /* delayed chip damage */
+.gauge .lbl{position:absolute;inset:0;display:flex;justify-content:space-between;
+  align-items:center;padding:0 7px;font-family:var(--mono);font-size:9.5px;
+  text-shadow:0 1px 2px #000;font-variant-numeric:tabular-nums;letter-spacing:.05em}
+.gauge .lbl b{font-weight:700;color:#fff9}
+.gauge.small .track{height:9px}
+#gHp .fill{background:linear-gradient(180deg,#e05560,var(--hp))}
+#gSp .fill{background:linear-gradient(180deg,#9bd469,var(--sp))}
+#gMp .fill{background:linear-gradient(180deg,#63a8e8,var(--mp))}
+
+#stats{display:flex;gap:11px;margin-top:8px;font-family:var(--mono);font-size:10px;
+  color:var(--dim);font-variant-numeric:tabular-nums}
+#stats b{color:var(--bone);font-weight:600}
+
+/* ─────────────────────────────────────────────── skills (bottom-centre) */
+#skills{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:10;
+  display:flex;gap:7px}
+.sk{width:56px;height:56px;background:var(--stone);border:1px solid var(--edge2);
+  position:relative;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;overflow:hidden}
+.sk .ic{font-size:20px;line-height:1}
+.sk .kb{position:absolute;top:2px;left:4px;font-family:var(--mono);font-size:9px;
+  color:var(--faint)}
+.sk .cd{position:absolute;inset:0;background:#000000c4;display:flex;align-items:center;
+  justify-content:center;font-family:var(--mono);font-size:15px;color:var(--bone)}
+.sk .cost{position:absolute;bottom:2px;right:4px;font-family:var(--mono);font-size:9px;
+  color:var(--mp)}
+.sk.ready{border-color:var(--amber);box-shadow:0 0 11px #e0a13c33}
+.sk.poor{opacity:.45}
+.sk .nm{position:absolute;bottom:-17px;left:50%;transform:translateX(-50%);
+  font-family:var(--cond);font-size:8px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--faint);white-space:nowrap}
+
+/* ─────────────────────────────────────────────── run info (top-right) */
+#run{position:fixed;top:12px;right:16px;z-index:10;text-align:right}
+#run .r{font-family:var(--mono);font-size:11px;color:var(--dim);margin-bottom:3px;
+  font-variant-numeric:tabular-nums}
+#run .r b{color:var(--amber2)}
+
+/* ─────────────────────────────────────────────── combat log / toasts */
+#toasts{position:fixed;left:50%;top:92px;transform:translateX(-50%);z-index:11;
+  display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:none}
+.toast{font-family:var(--cond);font-size:13px;letter-spacing:.12em;text-transform:uppercase;
+  padding:5px 15px;background:#0a0a0cdd;border:1px solid var(--edge2);color:var(--bone);
+  animation:tin .3s ease}
+.toast.good{border-color:#4a7a2c;color:#b6e089}
+.toast.bad{border-color:#7a2c2c;color:#ff9d9d}
+.toast.gold{border-color:var(--amber);color:var(--amber2)}
+@keyframes tin{from{opacity:0;transform:translateY(-9px)}to{opacity:1;transform:none}}
+
+/* ─────────────────────────────────────────────── crosshair */
+#xh{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9;
+  width:16px;height:16px;pointer-events:none;opacity:.6}
+#xh::before,#xh::after{content:"";position:absolute;background:var(--bone)}
+#xh::before{left:7px;top:0;width:1px;height:5px}
+#xh::after{left:7px;bottom:0;width:1px;height:5px}
+
+/* ─────────────────────────────────────────────── damage vignette */
+#hurt{position:fixed;inset:0;z-index:8;pointer-events:none;opacity:0;
+  background:radial-gradient(ellipse at center,transparent 42%,rgba(190,20,20,.55) 100%);
+  transition:opacity .16s}
+
+/* ─────────────────────────────────────────────── panels */
+.panel{position:fixed;z-index:20;background:linear-gradient(170deg,var(--stone2),var(--stone));
+  border:1px solid var(--edge2);box-shadow:0 20px 70px #000c}
+.ph{padding:11px 16px;border-bottom:1px solid var(--edge);font-family:var(--cond);
+  font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--amber);
+  display:flex;justify-content:space-between;align-items:center}
+.ph span{color:var(--faint);letter-spacing:.14em}
+
+/* reward choice */
+#reward{left:50%;top:50%;transform:translate(-50%,-50%);width:min(830px,94vw);display:none}
+#reward.on{display:block}
+#rCards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:16px}
+.card{background:#0f0f12;border:1px solid var(--edge);padding:15px 15px 17px;cursor:pointer;
+  transition:.14s;position:relative;display:flex;flex-direction:column}
+.card:hover{border-color:var(--amber);transform:translateY(-3px);background:#141419}
+.card .rar{font-family:var(--cond);font-size:9px;letter-spacing:.24em;text-transform:uppercase;
+  margin-bottom:6px}
+.card h3{margin:0 0 4px;font-family:var(--cond);font-size:17px;letter-spacing:.06em;
+  color:var(--bone);font-weight:600;text-transform:uppercase}
+.card .ty{font-family:var(--mono);font-size:9.5px;color:var(--faint);margin-bottom:9px}
+.card p{margin:0;font-size:12.5px;line-height:1.55;color:var(--dim);flex:1}
+.card .st{margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--sp);
+  border-top:1px solid var(--edge);padding-top:8px}
+.card .risk{margin-top:7px;font-family:var(--mono);font-size:11px;color:var(--danger)}
+.card.r1{border-left:2px solid var(--r1)} .card.r1 .rar{color:var(--r1)}
+.card.r2{border-left:2px solid var(--r2)} .card.r2 .rar{color:var(--r2)}
+.card.r3{border-left:2px solid var(--r3)} .card.r3 .rar{color:var(--r3)}
+.card.r4{border-left:2px solid var(--r4)} .card.r4 .rar{color:var(--r4);
+  text-shadow:0 0 12px #e0a13c88}
+
+/* inventory */
+#inv{right:16px;top:64px;width:308px;display:none}
+#inv.on{display:block}
+.slot{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;
+  border-bottom:1px solid var(--edge);font-size:12px}
+.slot .sn{font-family:var(--cond);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--faint)}
+.slot .si{font-weight:600}
+#invList{max-height:230px;overflow-y:auto}
+#invList::-webkit-scrollbar{width:5px}
+#invList::-webkit-scrollbar-thumb{background:var(--edge2)}
+
+/* overlays */
+.ov{position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;
+  background:rgba(5,5,7,.94);padding:24px}
+.ov.on{display:flex}
+.ovc{max-width:660px;width:100%;background:linear-gradient(170deg,var(--stone2),#0b0b0e);
+  border:1px solid var(--edge2);padding:38px 40px;max-height:90vh;overflow-y:auto}
+.ovc h1{font-family:var(--cond);font-size:40px;margin:0 0 4px;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--bone);font-weight:700}
+.ovc h2{font-family:var(--cond);font-size:27px;margin:0 0 4px;letter-spacing:.12em;
+  text-transform:uppercase;font-weight:700}
+.ovc .lede{font-family:var(--cond);font-size:10.5px;letter-spacing:.32em;text-transform:uppercase;
+  color:var(--faint);margin-bottom:22px}
+.ovc p{line-height:1.68;color:#bab5ac;margin:0 0 12px;font-size:13.5px;max-width:62ch}
+.ovc p.s{font-family:var(--serif);font-size:15px;color:var(--bone);line-height:1.7}
+.ovc ul{margin:0 0 14px;padding-left:18px;color:#bab5ac;line-height:1.75;font-size:13px}
+.ovc b.a{color:var(--amber2)} .ovc b.d{color:var(--danger)}
+.rule{height:1px;background:var(--edge2);margin:20px 0}
+.btn{padding:12px 32px;background:var(--amber);color:#150e02;border:0;font-family:var(--cond);
+  font-weight:700;font-size:13px;cursor:pointer;letter-spacing:.14em;text-transform:uppercase;
+  transition:.13s}
+.btn:hover{background:var(--amber2)}
+.btn.ghost{background:transparent;border:1px solid var(--edge2);color:var(--dim);margin-left:8px}
+.btn.ghost:hover{border-color:var(--amber);color:var(--amber2)}
+.kb{display:inline-block;padding:1px 6px;border:1px solid var(--edge2);font-family:var(--mono);
+  font-size:11px;color:var(--bone);margin:0 2px}
+.tag{display:inline-block;padding:3px 9px;font-size:10px;font-family:var(--mono);
+  border:1px solid var(--edge2);color:var(--dim);margin:0 5px 5px 0}
+
+/* meta upgrade grid */
+#metaGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(184px,1fr));gap:10px;
+  margin:14px 0 4px}
+.node{background:#0f0f12;border:1px solid var(--edge);padding:11px 12px;cursor:pointer;
+  transition:.13s}
+.node:hover:not(.max){border-color:var(--amber)}
+.node.max{opacity:.55;cursor:default;border-color:#3a4a2c}
+.node.poor{opacity:.42;cursor:not-allowed}
+.node b{display:block;font-family:var(--cond);font-size:12.5px;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--bone);margin-bottom:3px}
+.node span{font-size:11px;color:var(--dim);line-height:1.45;display:block}
+.node .lv{font-family:var(--mono);font-size:10px;color:var(--amber2);margin-top:6px;
+  display:flex;justify-content:space-between}
+
+#load{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;
+  flex-direction:column;gap:12px;background:var(--void)}
+#load b{font-family:var(--cond);font-size:26px;letter-spacing:.4em;color:var(--bone);
+  font-weight:700}
+#load span{font-family:var(--cond);font-size:10px;letter-spacing:.3em;text-transform:uppercase;
+  color:var(--faint)}
+
+#hint{position:fixed;left:16px;top:14px;z-index:10;font-family:var(--mono);font-size:10px;
+  color:var(--faint);line-height:1.7}
+</style>
+
+<canvas id="cv"></canvas>
+<div id="hurt"></div>
+<div id="xh"></div>
+
+<div id="hint">
+  <div>WASD move · SHIFT dodge · SPACE jump</div>
+  <div>LMB strike · RMB bolt · 1-4 skills · TAB gear</div>
+</div>
+
+<div id="obj">
+  <div class="fl" id="objFloor">Floor 1</div>
+  <div class="ot" id="objText">—</div>
+  <div class="op" id="objProg"></div>
+</div>
+
+<div id="run">
+  <div class="r">Marks <b id="rMarks">0</b></div>
+  <div class="r">Best floor <b id="rBest">—</b></div>
+  <div class="r">Run <b id="rTime">0:00</b></div>
+</div>
+
+<div id="toasts"></div>
+
+<div id="vit">
+  <div class="gauge" id="gHp"><div class="track">
+    <div class="ghost" id="hpGhost"></div><div class="fill" id="hpFill"></div>
+    <div class="lbl"><b>VIT</b><span id="hpTxt">0/0</span></div></div></div>
+  <div class="gauge small" id="gSp"><div class="track">
+    <div class="fill" id="spFill"></div>
+    <div class="lbl"><b>STA</b><span id="spTxt">0/0</span></div></div></div>
+  <div class="gauge small" id="gMp"><div class="track">
+    <div class="fill" id="mpFill"></div>
+    <div class="lbl"><b>FOC</b><span id="mpTxt">0/0</span></div></div></div>
+  <div id="stats">
+    <div>ATK <b id="sAtk">0</b></div><div>DEF <b id="sDef">0</b></div>
+    <div>CRT <b id="sCrt">0%</b></div><div>LV <b id="sLv">1</b></div>
+  </div>
+</div>
+
+<div id="skills"></div>
+
+<div class="panel" id="reward">
+  <div class="ph">Choose one <span id="rewardSub">the floor offers three</span></div>
+  <div id="rCards"></div>
+</div>
+
+<div class="panel" id="inv">
+  <div class="ph">Equipment <span>TAB</span></div>
+  <div id="invSlots"></div>
+  <div class="ph" style="border-top:1px solid var(--edge)">Carried</div>
+  <div id="invList"></div>
+</div>
+
+<div class="ov on" id="ovStart"><div class="ovc">
+  <h1>Threshold</h1>
+  <div class="lede">Candidate assessment · in progress</div>
+  <p class="s">You were told it was nine floors. You were told it was a formality — a short
+    assessment, and then the real thing would begin.</p>
+  <p class="s">You are on floor nine hundred and something. The Invigilator has not answered
+    a question in a long time. The floors keep arriving.</p>
+  <div class="rule"></div>
+  <p><b class="a">The Threshold kills you.</b> That is not a failure state, it is the format.
+    Every death returns you to the first floor with nothing you were carrying.</p>
+  <p><b class="a">What survives is the record.</b> You keep the <b class="a">Marks</b> the
+    Threshold awards for depth reached, and you spend them on things it cannot take back.</p>
+  <div class="rule"></div>
+  <p><b class="a">Controls</b></p>
+  <ul>
+    <li><span class="kb">W</span><span class="kb">A</span><span class="kb">S</span><span class="kb">D</span> move · mouse look · <span class="kb">SPACE</span> jump</li>
+    <li><span class="kb">SHIFT</span> dodge — costs stamina, grants brief invulnerability. This is the whole defence.</li>
+    <li><span class="kb">LMB</span> strike (stamina) · <span class="kb">RMB</span> bolt (focus, ranged)</li>
+    <li><span class="kb">1</span>–<span class="kb">4</span> skills · <span class="kb">TAB</span> equipment · <span class="kb">ESC</span> pause</li>
+  </ul>
+  <div class="rule"></div>
+  <p><b class="d">It is not fair on floor one and it does not get fairer.</b> Enemies telegraph;
+    read the wind-up and dodge through it. Standing still and trading hits will kill you before
+    floor four.</p>
+  <div style="margin-top:24px">
+    <button class="btn" id="btnBegin">Begin assessment</button>
+    <button class="btn ghost" id="btnMeta">The record</button>
+  </div>
+</div></div>
+
+<div class="ov" id="ovDeath"><div class="ovc" id="deathCard"></div></div>
+<div class="ov" id="ovMeta"><div class="ovc" id="metaCard"></div></div>
+<div class="ov" id="ovPause"><div class="ovc" id="pauseCard"></div></div>
+
+<div id="load"><b>THRESHOLD</b><span>assembling floor</span></div>
+
+<script>/*__THREE__*/</script>
+<script>/*__GAME__*/</script>
