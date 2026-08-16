@@ -6501,15 +6501,31 @@ scene.add(HERO);
 const skin   = new T.MeshStandardMaterial({
   color: 0xd8b49a, roughness: 0.74, metalness: 0,
   normalMap: TEX.fleshN, normalScale: new T.Vector2(0.5,0.5), envMapIntensity: 0.5 });
+// Elara's palette, off the reference: deep indigo outer robe, violet inner,
+// warm brown leather, and gold for every edge.
 const cloak  = new T.MeshStandardMaterial({
-  color: 0x232b33, roughness: 0.88, metalness: 0.02,
-  normalMap: TEX.clothN, normalScale: new T.Vector2(1.5,1.5), envMapIntensity: 0.4 });
+  color: 0x2b2a5e, roughness: 0.82, metalness: 0.03,
+  normalMap: TEX.clothN, normalScale: new T.Vector2(1.5,1.5), envMapIntensity: 0.5 });
 const under  = new T.MeshStandardMaterial({
-  color: 0x39424c, roughness: 0.86, metalness: 0.02,
-  normalMap: TEX.clothN, normalScale: new T.Vector2(1.2,1.2), envMapIntensity: 0.4 });
+  color: 0x5b3f8c, roughness: 0.8, metalness: 0.03,
+  normalMap: TEX.clothN, normalScale: new T.Vector2(1.2,1.2), envMapIntensity: 0.5 });
 const leather= new T.MeshStandardMaterial({
-  color: 0x4a3524, roughness: 0.68, metalness: 0.05,
-  normalMap: TEX.clothN, normalScale: new T.Vector2(1.1,1.1), envMapIntensity: 0.7 });
+  color: 0x5c4030, roughness: 0.62, metalness: 0.06,
+  normalMap: TEX.clothN, normalScale: new T.Vector2(1.1,1.1), envMapIntensity: 0.8 });
+// Gold filigree. Metal, not emissive — it should catch the key light and the
+// sky probe rather than glow on its own, which is what makes it read as
+// metal thread instead of neon piping.
+const gold   = new T.MeshStandardMaterial({
+  color: 0xd9a441, roughness: 0.28, metalness: 0.9, envMapIntensity: 1.4 });
+const hairM  = new T.MeshStandardMaterial({
+  color: 0x6f52c8, roughness: 0.5, metalness: 0.05,
+  normalMap: TEX.clothN, normalScale: new T.Vector2(0.8,0.8), envMapIntensity: 0.7 });
+const crystalM = new T.MeshStandardMaterial({
+  color: 0x7fe8ff, roughness: 0.12, metalness: 0.1,
+  emissive: 0x39c8f0, emissiveIntensity: 1.1, flatShading: true });
+const woodM  = new T.MeshStandardMaterial({
+  color: 0x6b4a30, roughness: 0.85, metalness: 0.02,
+  normalMap: TEX.barkN, normalScale: new T.Vector2(1.2,1.2), envMapIntensity: 0.4 });
 const trim   = new T.MeshStandardMaterial({ color: 0xe94fbf, roughness: 0.35,
                                             emissive: 0xe94fbf, emissiveIntensity: 0.5 });
 
@@ -6533,21 +6549,76 @@ HERO.add(cloakSkirt);
 // Shoulder mantle.
 HERO.add(part(new T.CylinderGeometry(0.50, 0.34, 0.34, 8), cloak, 0, 1.80, 0));
 
-// Head with a hood: sphere for the skull, a wider faceted shell over it,
-// leaving the face in shadow so the visor is the only feature that reads.
+// Head. The reference has a visible face under swept-up violet hair rather
+// than an anonymous hood, so the hood is pushed back onto the shoulders and
+// the face is left showing. The glowing bar stays as a narrow visor across
+// the eyes — at fighting distance a face reads as a smudge, and the game
+// needs something on the head that carries.
 HERO.add(part(new T.SphereGeometry(0.235, 16, 12), skin, 0, 2.06, 0));
-const hood = part(new T.SphereGeometry(0.31, 10, 8), cloak, 0, 2.10, -0.04);
-hood.scale.set(1, 1.05, 1.12);
+
+// Hair: a swept mass at the back and crown, with a raised sweep on top.
+const hair = new T.Group();
+hair.position.set(0, 2.10, 0);
+HERO.add(hair);
+// Pushed back and flattened at the front. At z -0.06 with a 1.12 depth scale
+// the hair reached z +0.23 and the skull's face is at +0.235 — it swallowed
+// the face entirely and the head rendered as a featureless violet dome.
+const hairBack = part(new T.SphereGeometry(0.25, 14, 10), hairM, 0, 0.02, -0.14);
+hairBack.scale.set(1.02, 1.06, 1.0);
+hair.add(hairBack);
+const hairTop = part(new T.SphereGeometry(0.175, 12, 9), hairM, 0, 0.17, -0.09);
+hairTop.scale.set(1.06, 0.8, 0.95);
+hair.add(hairTop);
+// A fringe sweeping across one side of the brow, which is what stops the
+// front reading as a bald forehead.
+const fringe = part(new T.SphereGeometry(0.13, 10, 8), hairM, -0.09, 0.10, 0.10);
+fringe.scale.set(1.1, 0.55, 0.75);
+fringe.rotation.z = 0.4;
+hair.add(fringe);
+// The tail, falling behind the shoulder.
+const tail = part(new T.CapsuleGeometry(0.085, 0.42, 5, 9), hairM, 0, -0.30, -0.20);
+tail.rotation.x = -0.30;
+hair.add(tail);
+
+// Hood, thrown back so it sits between the shoulder blades.
+const hood = part(new T.SphereGeometry(0.25, 12, 9), cloak, 0, 1.83, -0.24);
+hood.scale.set(1.0, 0.72, 0.85);
 HERO.add(hood);
-const visor = part(new T.BoxGeometry(0.34, 0.075, 0.06), trim, 0, 2.05, 0.235);
+
+const visor = part(new T.BoxGeometry(0.30, 0.055, 0.05), trim, 0, 2.06, 0.225);
 HERO.add(visor);
 
-// Belt + chest strap in leather, with a glowing focus stone at the sternum.
-HERO.add(part(new T.CylinderGeometry(0.41, 0.41, 0.11, 8), leather, 0, 1.02, 0));
+// Belt with a gold buckle, and the sternum focus stone.
+HERO.add(part(new T.CylinderGeometry(0.41, 0.41, 0.11, 10), leather, 0, 1.02, 0));
+HERO.add(part(new T.CylinderGeometry(0.415, 0.415, 0.035, 10), gold, 0, 1.08, 0));
+HERO.add(part(new T.BoxGeometry(0.14, 0.13, 0.06), gold, 0, 1.02, 0.40));
 const strap = part(new T.BoxGeometry(0.13, 0.66, 0.42), leather, -0.07, 1.45, 0);
 strap.rotation.z = 0.28;
 HERO.add(strap);
 HERO.add(part(new T.OctahedronGeometry(0.10, 0), trim, 0.02, 1.62, 0.30));
+
+// Gold edging: collar ring, cuff bands, and a vertical placket down the
+// chest. Thin rings and boxes, but they are what turn a coloured robe into
+// a made garment.
+// `HERO.add(x)` returns HERO, not x — chaining `.rotation.x` onto it lays the
+// whole character on its back. Same trap as the Maw's neck; keep the handle.
+const collar = part(new T.TorusGeometry(0.30, 0.022, 6, 18), gold, 0, 1.90, 0);
+collar.rotation.x = Math.PI/2;
+HERO.add(collar);
+HERO.add(part(new T.BoxGeometry(0.055, 0.72, 0.03), gold, 0, 1.44, 0.305));
+HERO.add(part(new T.BoxGeometry(0.20, 0.03, 0.03), gold, 0, 1.10, 0.31));
+
+// Split robe panels hanging from the belt, front and back, gold-edged. These
+// are what give the silhouette its length now that the skirt is short enough
+// to show the legs.
+const panelF = part(new T.BoxGeometry(0.30, 0.86, 0.035), cloak, 0, 0.70, 0.30);
+panelF.rotation.x = -0.06;
+HERO.add(panelF);
+HERO.add(part(new T.BoxGeometry(0.325, 0.05, 0.04), gold, 0, 0.30, 0.312));
+const panelB = part(new T.BoxGeometry(0.40, 0.98, 0.035), cloak, 0, 0.66, -0.30);
+panelB.rotation.x = 0.05;
+HERO.add(panelB);
+HERO.add(part(new T.BoxGeometry(0.425, 0.05, 0.04), gold, 0, 0.20, -0.312));
 
 // Two segments with a joint between them. A single straight capsule can be
 // swung but it cannot be BENT, and a leg that never bends cannot run — the
@@ -6584,6 +6655,48 @@ const armR = limb(HERO, 0.52, under,  0.53, 1.72, 0, 0.105, skin);
 // and the whole run read as levitating.
 const legL = limb(HERO, 0.70, under, -0.17, 1.00, 0, 0.125, leather);
 const legR = limb(HERO, 0.70, under,  0.17, 1.00, 0, 0.125, leather);
+
+// ── the staff
+// Parented to the LEFT FOREARM, so it inherits the gait and the channelling
+// pose for free rather than needing its own animation. Raising both arms to
+// channel now reads as raising the staff, which is exactly right.
+const staff = new T.Group();
+staff.position.set(0, -0.26, 0.04);
+staff.rotation.x = 0.12;
+armL.joint.add(staff);
+
+// Shaft, slightly tapered, with two binding rings.
+staff.add(part(new T.CylinderGeometry(0.032, 0.042, 1.95, 8), woodM, 0, 0.52, 0));
+const ring1 = part(new T.TorusGeometry(0.047, 0.012, 5, 12), gold, 0, 1.12, 0);
+ring1.rotation.x = Math.PI/2; staff.add(ring1);
+const ring2 = part(new T.TorusGeometry(0.049, 0.012, 5, 12), gold, 0, -0.26, 0);
+ring2.rotation.x = Math.PI/2; staff.add(ring2);
+
+// Crystal cluster at the head: three shards of different heights, splayed,
+// plus a light so it actually casts onto the ground near the player.
+const crystal = new T.Group();
+crystal.position.y = 1.34;
+staff.add(crystal);
+const shard = (h, r, tilt, spin, y) => {
+  const m = part(new T.ConeGeometry(r, h, 5), crystalM, 0, y + h/2, 0);
+  const g2 = new T.Group();
+  g2.rotation.set(tilt, spin, 0);
+  g2.add(m);
+  crystal.add(g2);
+  return m;
+};
+shard(0.52, 0.085, 0, 0, 0);
+shard(0.34, 0.06, 0.34, 0, 0.02);
+shard(0.30, 0.055, -0.30, 1.9, 0.02);
+shard(0.22, 0.05, 0.28, 3.6, 0.0);
+// The cradle the shards sit in.
+const cradle = part(new T.ConeGeometry(0.10, 0.22, 6), gold, 0, 0.02, 0);
+cradle.rotation.x = Math.PI;
+crystal.add(cradle);
+
+const staffLight = new T.PointLight(0x5fd8ff, 1.1, 6.5, 2);
+staffLight.position.y = 1.62;
+staff.add(staffLight);
 
 const aura = new T.Mesh(new T.SphereGeometry(1.55,22,16),
   new T.MeshBasicMaterial({ color:0xe94fbf, transparent:true, opacity:0, side:T.BackSide }));
@@ -6889,10 +7002,17 @@ const zSkin  = new T.MeshStandardMaterial({ color:0x7d8f66, roughness:0.93, meta
 const zRot   = new T.MeshStandardMaterial({
   color:0x76866a, roughness:0.92, metalness:0,
   normalMap:TEX.fleshN, normalScale:new T.Vector2(1.1,1.1), envMapIntensity:0.4 });
+// Bleached tan sackcloth, not the dark olive it was — the reference's clothes
+// read as filthy linen and that contrast against grey-green flesh is most of
+// what makes the figure legible.
 const zRag   = new T.MeshStandardMaterial({
-  color:0x55503f, roughness:0.95, metalness:0,
-  normalMap:TEX.clothN, normalScale:new T.Vector2(1.6,1.6), envMapIntensity:0.35,
+  color:0x8f8663, roughness:0.96, metalness:0,
+  normalMap:TEX.clothN, normalScale:new T.Vector2(2.0,2.0), envMapIntensity:0.35,
                                             side:T.DoubleSide });
+const zBone  = new T.MeshStandardMaterial({ color:0xd2c9ad, roughness:0.68,
+                                            metalness:0.02, envMapIntensity:0.5 });
+const zWound = new T.MeshStandardMaterial({ color:0x71302a, roughness:0.85,
+                                            metalness:0, envMapIntensity:0.25 });
 const zEye   = new T.MeshBasicMaterial({ color:0xff6a30 });
 const zJaw   = new T.MeshStandardMaterial({ color:0x8a3b32, roughness:0.9 });
 
@@ -6921,19 +7041,19 @@ function disposeGroup(g) {
 //   leap     closes distance in bursts instead of a steady walk
 const ENEMIES = {
   walker:  { name:"Walker",  code:"WK", hp:100, speed:2.05, scale:1.00, bulk:1.00,
-             skin:0x7d8f66, eye:0xff6a30, score:100 },
+             skin:0x8b9078, eye:0xff6a30, score:100 },
   runner:  { name:"Runner",  code:"RN", hp:55,  speed:4.70, scale:0.94, bulk:0.80,
-             skin:0x93a86a, eye:0xffd23c, score:130 },
+             skin:0x969b80, eye:0xffd23c, score:130 },
   crawler: { name:"Crawler", code:"CR", hp:45,  speed:3.10, scale:0.58, bulk:1.10,
-             skin:0x6b7d55, eye:0xff9a30, score:120 },
+             skin:0x7b8069, eye:0xff9a30, score:120 },
   tank:    { name:"Tank",    code:"TK", hp:430, speed:1.25, scale:1.42, bulk:1.45,
-             skin:0x5f6f4b, eye:0xff3c2a, armor:38, score:400 },
+             skin:0x6d7260, eye:0xff3c2a, armor:38, score:400 },
   armored: { name:"Armored", code:"AR", hp:170, speed:1.85, scale:1.10, bulk:1.20,
              skin:0x8d94a0, eye:0xff5a3c, armor:62, score:300 },
   exploder:{ name:"Exploder",code:"EX", hp:70,  speed:2.55, scale:1.05, bulk:1.25,
              skin:0xb06a3c, eye:0xffc23c, onDeath:"blast", score:180 },
   leaper:  { name:"Leaper",  code:"LP", hp:85,  speed:2.30, scale:0.98, bulk:0.88,
-             skin:0x6f8f7a, eye:0x6affc0, leap:true, score:200 },
+             skin:0x7d8c83, eye:0x6affc0, leap:true, score:200 },
   // A Shield holds a slab in front of it. Anything arriving from the front
   // is absorbed by the slab, so the answer is to go around it, blow it over,
   // or drop something on it from above.
@@ -7250,18 +7370,49 @@ function spawnWalker(type, x, z) {
   torso.add(part(new T.BoxGeometry(0.40*B, 0.045, 0.30), skinM, 0, 0.46, 0.06));
   torso.add(part(new T.BoxGeometry(0.36*B, 0.045, 0.28), skinM, 0, 0.36, 0.07));
 
+  // Torn hem: a ring of tapered spikes hanging off the bottom of the shirt.
+  // The reference's clothing is defined by its ragged edge more than by its
+  // colour, and a clean cylinder hem is what reads as "untextured cylinder".
+  const hemN = 9;
+  for (let i = 0; i < hemN; i++) {
+    const a2 = (i/hemN)*Math.PI*2;
+    const len = rand(0.10, 0.26);
+    const tag = part(new T.ConeGeometry(0.055*B, len, 4), zRag,
+                     Math.cos(a2)*0.42*B, -0.16 - len/2, Math.sin(a2)*0.42*B);
+    tag.rotation.set(rand(-0.2,0.2), a2, rand(-0.2,0.2));
+    torso.add(tag);
+  }
+  // A wound, placed at random so the crowd is not identical.
+  const wnd = part(new T.SphereGeometry(rand(0.05,0.085), 7, 5), zWound,
+                   rand(-0.18,0.18)*B, rand(0.18,0.52), 0.17*B);
+  wnd.scale.set(1.3, 1.0, 0.5);
+  torso.add(wnd);
+
   // Head lolls to one side.
   const neck = new T.Group();
   neck.position.set(0, 0.76, 0.04);
   neck.rotation.z = rand(-0.35, 0.35);
   neck.rotation.x = -0.2;
   torso.add(neck);
-  const skull = part(new T.SphereGeometry(0.225, 12, 9), skinM, 0, 0.1, 0);
-  skull.scale.set(0.92, 1.06, 1.05);
+  const skull = part(new T.SphereGeometry(0.225, 14, 10), skinM, 0, 0.1, 0);
+  skull.scale.set(0.9, 1.08, 1.02);
   neck.add(skull);
-  neck.add(part(new T.BoxGeometry(0.22, 0.11, 0.13), zJaw, 0, -0.01, 0.17));  // slack jaw
-  neck.add(part(new T.SphereGeometry(0.075, 8, 6), eyeM, -0.095, 0.14, 0.2));
-  neck.add(part(new T.SphereGeometry(0.075, 8, 6), eyeM,  0.095, 0.14, 0.2));
+  // Brow ridge and cheekbones in bare bone, which is what gives the head a
+  // skull underneath rather than a smooth ball with eyes stuck on.
+  const brow = part(new T.BoxGeometry(0.30, 0.055, 0.10), zBone, 0, 0.205, 0.14);
+  brow.rotation.x = -0.22; neck.add(brow);
+  neck.add(part(new T.SphereGeometry(0.055, 7, 5), zBone, -0.135, 0.09, 0.155));
+  neck.add(part(new T.SphereGeometry(0.055, 7, 5), zBone,  0.135, 0.09, 0.155));
+  // Sunken sockets: a dark recess behind each eye so the glow sits INSIDE a
+  // hole instead of bulging off the front of the face.
+  neck.add(part(new T.SphereGeometry(0.085, 8, 6), zWound, -0.095, 0.14, 0.16));
+  neck.add(part(new T.SphereGeometry(0.085, 8, 6), zWound,  0.095, 0.14, 0.16));
+  neck.add(part(new T.SphereGeometry(0.052, 8, 6), eyeM, -0.095, 0.14, 0.20));
+  neck.add(part(new T.SphereGeometry(0.052, 8, 6), eyeM,  0.095, 0.14, 0.20));
+  // Exposed upper teeth and a hanging jaw.
+  neck.add(part(new T.BoxGeometry(0.19, 0.05, 0.09), zBone, 0, 0.03, 0.175));
+  const jawL = part(new T.BoxGeometry(0.20, 0.10, 0.12), zJaw, 0, -0.045, 0.165);
+  jawL.rotation.x = 0.22; neck.add(jawL);
 
   // Long reaching arms with clawed hands.
   function zLimb(parent, len, px, py, rad) {
@@ -9319,9 +9470,11 @@ function step(dt) {
     armR.joint.rotation.x += (-0.55 - armR.joint.rotation.x)*k;
   } else if (moving && !airT) {
     // Counter-phase to the legs, and the elbows tighten as the run builds.
+    // The left arm carries the staff, so it swings at a third — a hand
+    // holding two kilos of wood does not pump like an empty one.
     const A = armPose(hero.walk + Math.PI, g), B = armPose(hero.walk, g);
-    armL.rotation.x = A.shoulder;  armL.joint.rotation.x = A.elbow;
-    armR.rotation.x = B.shoulder;  armR.joint.rotation.x = B.elbow;
+    armL.rotation.x = A.shoulder*0.35;  armL.joint.rotation.x = A.elbow*0.5 - 0.35;
+    armR.rotation.x = B.shoulder;       armR.joint.rotation.x = B.elbow;
     // Elbows tuck in against the ribs at speed instead of flapping wide.
     armL.rotation.z += (-0.06 - 0.12*g - armL.rotation.z)*k;
     armR.rotation.z += ( 0.06 + 0.12*g - armR.rotation.z)*k;
@@ -9344,6 +9497,11 @@ function step(dt) {
   psi.position.set(hero.pos.x, hero.pos.y + 2.2, hero.pos.z);
   psi.intensity += ((channel?13:0)-psi.intensity)*Math.min(1,8*dt);
   visor.material.emissiveIntensity = channel ? 1.5 : 0.35;
+  // The crystal answers what she is doing: bright while channelling, hotter
+  // still in Overdrive, and dimmed to a sullen ember while overloaded.
+  const want = OD.on ? 2.4 : overloaded() ? 0.35 : channel ? 1.8 : 1.0;
+  crystalM.emissiveIntensity += (want - crystalM.emissiveIntensity)*Math.min(1, 6*dt);
+  staffLight.intensity = crystalM.emissiveIntensity * 0.85 + Math.sin(S.t*3)*0.1;
 
   // ---- carry wheel, behind the character
   const back = new T.Vector3(-Math.sin(cam.yaw), 0, -Math.cos(cam.yaw));
