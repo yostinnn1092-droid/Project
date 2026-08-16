@@ -43,6 +43,23 @@ variety beyond four archetypes plus boss, more than one boss, random narrative
 events. The architecture takes them without restructuring: enemies are table
 entries in `EDEF`, skills in `SKILLS`, objectives in `makeObjective`.
 
+
+## Enemy roster
+
+Nine archetypes, each owning a mechanic no other one has:
+
+| | Behaviour |
+|---|---|
+| Husk | Slow melee, heavy telegraph. The baseline. |
+| Lash | Fast, fragile, short wind-up. Punishes standing still. |
+| Mote | Hovers at range, single bolt, strafes. |
+| Warden | Guard faces where it looks — flank it or break it with Sunder. |
+| Bellwether | Rings out to full reach, no safe spacing. Slows to 55%. |
+| Scribe | Three-bolt fan; strafing does not clear it, cover does. |
+| Proctor | Walks through walls, and so does its shot. Cover is no answer. |
+| Inkblot | Dormant and flat until you are 5m away, then erupts. |
+| Docent | Lays persistent wax where you stand. Takes ground, not health. |
+
 ## Mobile
 
 One build serves both. `IS_TOUCH` (coarse pointer) switches the input scheme,

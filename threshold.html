@@ -5665,6 +5665,11 @@ const MAT = {
   bell:   new T.MeshStandardMaterial({ color:0x8a6a2e, roughness:0.45, metalness:0.65 }),
   scribe: new T.MeshStandardMaterial({ color:0x9a8f74, roughness:0.8,
                                         emissive:0x2a2410, emissiveIntensity:0.5 }),
+  // Half-transparent, because a thing that ignores walls must not look solid.
+  proctor:new T.MeshStandardMaterial({ color:0xb8c8e0, roughness:0.3, transparent:true,
+                                        opacity:0.55, emissive:0x35507a, emissiveIntensity:1.1 }),
+  inkblot:new T.MeshStandardMaterial({ color:0x14121a, roughness:0.25, metalness:0.2 }),
+  docent: new T.MeshStandardMaterial({ color:0x7a3a3a, roughness:0.75 }),
   boss:   new T.MeshStandardMaterial({ color:0x2b2b34, roughness:0.6, metalness:0.35,
                                         emissive:0x401505, emissiveIntensity:0.7 }),
   shield: new T.MeshStandardMaterial({ color:0x88aadd, transparent:true, opacity:0.30,
@@ -5976,13 +5981,30 @@ function generateFloor(n) {
       if (Math.hypot(ex-P.pos.x, ez-P.pos.z) < 12) continue;
       let kind = "husk";
       const roll = rnd();
-      if (n >= CFG.eliteFrom && roll < 0.13) kind = "warden";
-      else if (n >= 2 && roll < 0.25) kind = "bell";
-      else if (n >= 2 && roll < 0.38) kind = "scribe";
-      else if (roll < 0.56) kind = "mote";
-      else if (roll < 0.76) kind = "lash";
+      if (n >= CFG.eliteFrom && roll < 0.11) kind = "warden";
+      else if (n >= 4 && roll < 0.21) kind = "proctor";
+      else if (n >= 2 && roll < 0.31) kind = "bell";
+      else if (n >= 2 && roll < 0.41) kind = "scribe";
+      else if (n >= 3 && roll < 0.51) kind = "docent";
+      else if (roll < 0.65) kind = "mote";
+      else if (roll < 0.82) kind = "lash";
       spawnEnemy(kind, ex, ez, n);
-      spent += kind === "warden" ? 3 : (kind === "bell" ? 2 : 1);
+      spent += kind === "warden" ? 3
+             : (kind === "bell" || kind === "proctor" || kind === "docent") ? 2 : 1;
+    }
+  }
+
+  // Inkblots are placed rather than budgeted: they never advance on you, so
+  // they are closer to a trap than to a combatant. Scattered through the rooms
+  // you have to cross, and never near the entry point, since waking one the
+  // instant a floor loads teaches nothing.
+  if (!isBoss && n >= 3) {
+    const nb = Math.min(5, 1 + Math.floor(n/3));
+    for (let i = 0; i < nb; i++) {
+      const r = pick(rooms);
+      const bx = r.x + (rnd()-0.5)*(r.w-6), bz = r.z + (rnd()-0.5)*(r.d-6);
+      if (Math.hypot(bx-P.pos.x, bz-P.pos.z) < 14) continue;
+      spawnEnemy("inkblot", bx, bz, n);
     }
   }
 
@@ -6082,6 +6104,21 @@ const EDEF = {
            mat:"bell",   name:"Bellwether", aoe:true, slow:2.0 },
   scribe:{ hp:34, dmg:9,  spd:2.0, reach:16,  wind:0.92, rec:1.15, xp:13, r:0.46, h:1.65,
            mat:"scribe", name:"Scribe", ranged:true, volley:3, spread:0.30 },
+
+  // The remaining three from the same draft. Each needed a mechanic the game
+  // did not already own, or it would have been a reskin of something above.
+  //   Proctor — walks through walls and its shot does too, so cover is not a
+  //             solution to it. The only answer is to close the distance.
+  //   Inkblot — dormant and flat on the ground until you are almost on top of
+  //             it, then erupts. Punishes moving through a room without looking.
+  //   Docent  — lays persistent wax on the ground where you are standing,
+  //             taking space away rather than dealing damage directly.
+  proctor:{ hp:46, dmg:15, spd:1.9, reach:19,  wind:1.25, rec:1.30, xp:21, r:0.50, h:2.0,
+            mat:"proctor", name:"Proctor", ranged:true, ghost:true, aggroR:26 },
+  inkblot:{ hp:30, dmg:21, spd:0,   reach:3.4, wind:0.50, rec:1.40, xp:14, r:0.62, h:0.7,
+            mat:"inkblot", name:"Inkblot", aoe:true, ambush:true, aggroR:5.2 },
+  docent: { hp:62, dmg:7,  spd:2.6, reach:13,  wind:1.00, rec:1.20, xp:18, r:0.54, h:1.8,
+            mat:"docent",  name:"Docent", ranged:true, wax:true },
 };
 
 function spawnEnemy(kind, x, z, floor) {
@@ -6247,21 +6284,24 @@ function playerMelee() {
   P.heavy = false;
 }
 
-function spawnBolt(from, dir, dmg, hostile, speed) {
+function spawnBolt(from, dir, dmg, hostile, speed, ghost) {
   const m = new T.Mesh(new T.SphereGeometry(hostile?0.26:0.18, 8, 6),
     hostile ? MAT.hazard : MAT.exit);
   m.position.copy(from); m.position.y = 1.1;
   G.root.add(m);
   G.projectiles.push({ mesh:m, pos:m.position, dir:dir.clone().normalize(),
-                       spd:speed||CFG.boltSpeed, dmg, hostile, life:3.2 });
+                       spd:speed||CFG.boltSpeed, dmg, hostile, ghost:!!ghost, life:3.2 });
 }
 
-function spawnHazard(x,z,r,life,dps,friendly) {
+function spawnHazard(x,z,r,life,dps,friendly,slow) {
   const m = new T.Mesh(new T.CircleGeometry(r,20), MAT.hazard.clone());
   m.material._own = true; m.material.transparent = true; m.material.opacity = 0.72;
+  // Wax is a different colour from fire so the player can tell at a glance
+  // whether a patch will burn them or merely bog them down.
+  if (slow) m.material.color.setHex(0x9a2f5a), m.material.emissive.setHex(0x5c1030);
   m.rotation.x = -Math.PI/2; m.position.set(x,0.05,z);
   G.root.add(m);
-  G.hazards.push({ mesh:m, x, z, r, life, dps, friendly, tick:0 });
+  G.hazards.push({ mesh:m, x, z, r, life, dps, friendly, slow:slow||0, tick:0 });
 }
 
 function spawnPickup(x,z,type) {
@@ -6644,7 +6684,7 @@ function updateEnemies(dt) {
     toP.normalize();
 
     // aggro on proximity, then never lets go — no stealth in an exam
-    if (!e.aggro && dist < 17) e.aggro = true;
+    if (!e.aggro && dist < (e.def.aggroR || 17)) e.aggro = true;
 
     // knockback decays
     if (e.knock.lengthSq() > 0.01) {
@@ -6686,8 +6726,12 @@ function updateEnemies(dt) {
               const dir = new T.Vector3(
                 toP.x*Math.cos(off) - toP.z*Math.sin(off), 0,
                 toP.x*Math.sin(off) + toP.z*Math.cos(off));
-              spawnBolt(e.pos, dir, e.dmg, true, 15);
+              spawnBolt(e.pos, dir, e.dmg, true, 15, e.def.ghost);
             }
+          } else if (e.def.wax) {
+            // Laid at the player's feet, so it does not chase you — it takes
+            // away the ground you are standing on and makes you give it up.
+            spawnHazard(P.pos.x, P.pos.z, 2.6, 7.5, e.dmg*0.8, false, 1.6);
           } else if (e.def.aoe) {
             // Rings out to its full reach — there is no safe melee spacing, you
             // either interrupt it or you leave.
@@ -6705,7 +6749,8 @@ function updateEnemies(dt) {
       }
     }
 
-    resolveWalls(e.pos, e.def.r);
+    // A Proctor drifts through masonry; everything else is solid.
+    if (!e.def.ghost) resolveWalls(e.pos, e.def.r);
     // separation so a pack does not collapse into one point
     for (const o of G.enemies) {
       if (o === e || !o.alive) continue;
@@ -6718,6 +6763,9 @@ function updateEnemies(dt) {
 
     e.g.position.copy(e.pos);
     e.g.rotation.y = e.facing;
+    // An Inkblot lies flat until it wakes, so it reads as a stain on the
+    // floor rather than a monster standing in the open.
+    if (e.def.ambush) e.body.scale.y = e.aggro ? 1 : 0.22;
     e.body.material = e.hitFlash > 0 ? MAT.exit : MAT[e.def.mat || "boss"];
     if (e.shield) e.shield.visible = e.guardBroken <= 0;
   }
@@ -6788,8 +6836,9 @@ function updateProjectiles(dt) {
     p.life -= dt;
     p.pos.addScaledVector(p.dir, p.spd*dt);
     let dead = p.life <= 0;
-    // walls
-    for (const w of G.walls) {
+    // walls — a Proctor's glyph is not stopped by them, which is the whole
+    // reason the archetype exists: cover cannot answer it.
+    if (!p.ghost) for (const w of G.walls) {
       if (Math.abs(p.pos.x-w.x) < w.hw+0.2 && Math.abs(p.pos.z-w.z) < w.hd+0.2) { dead = true; break; }
     }
     if (!dead) {
@@ -6821,6 +6870,9 @@ function updateHazards(dt) {
     h.life -= dt;
     h.tick -= dt;
     const inside = Math.hypot(P.pos.x-h.x, P.pos.z-h.z) < h.r;
+    // Standing in wax keeps re-applying the slow, so the patch has to be left
+    // rather than waited out.
+    if (h.slow && inside && !h.friendly) P.slow = Math.max(P.slow||0, h.slow);
     if (h.tick <= 0) {
       h.tick = 0.5;
       if (!h.friendly && inside) damagePlayer(h.dps*0.5, null);
