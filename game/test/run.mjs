@@ -235,6 +235,132 @@ test("boss: the Gorger closes, slams and throws", async (pg) => {
   ok(r.arms && r.legs, "the boss rig lost its limb slots, so the shared gait cannot drive it");
 });
 
+test("bosses: every tenth wave brings that tier's boss", async (pg) => {
+  const r = await pg.evaluate(() => {
+    const P = window.__probe, out = {}, misses = {};
+    for (const n of [10, 20, 30, 40, 50]) {
+      // Twelve passes, not one. The boss reaches the opening group only if
+      // buildWave lifts it out of a RANDOM shuffle; while that lift covered
+      // only two of the four boss types, wave 20 opened bossless about 40% of
+      // the time and a single-pass check waved it through.
+      for (let pass = 0; pass < 12; pass++) {
+        P.S.wave = n; P.buildWave(n);
+        const b = P.walkers.find(w => !w.dead && w.boss);
+        if (b) out[n] = b.type; else misses[n] = (misses[n] || 0) + 1;
+      }
+    }
+    return { out, misses };
+  }).then(x => (Object.assign(x.out, { __misses: x.misses })));
+  const misses = r.__misses; delete r.__misses;
+  for (const n of Object.keys(misses))
+    ok(false, `wave ${n} opened with no boss on ${misses[n]}/12 passes`);
+  for (const n of Object.keys(r)) ok(r[n] !== "NONE", `wave ${n} has no boss`);
+  ok(new Set([r[10], r[20], r[30]]).size === 3,
+     `waves 10/20/30 must be three DIFFERENT bosses, got ${r[10]}/${r[20]}/${r[30]}`);
+  eq(r[40], r[10], "the tier cycle should come back round at 40");
+});
+
+test("bosses: never more than one big body in a wave", async (pg) => {
+  const r = await pg.evaluate(() => {
+    const P = window.__probe, bad = [];
+    // Many passes, because the offending multiplier comes from a RANDOM wave
+    // modifier — a single build can pass while the bug is present.
+    for (let pass = 0; pass < 12; pass++) {
+      for (const n of [10, 15, 20, 25, 30, 40]) {
+        P.S.wave = n; P.buildWave(n);
+        const bosses = P.walkers.filter(w => !w.dead && w.boss).length;
+        if (bosses > 1) bad.push(n + " spawned " + bosses);
+      }
+    }
+    return bad;
+  });
+  ok(r.length === 0, "waves produced multiple bosses: " + r.slice(0, 5).join(", "));
+});
+
+test("choir: core is untouchable until the acolytes are gone", async (pg) => {
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.parkWalkers();
+    P.S.wave = 20;
+    P.spawnWalker("choir", P.hero.pos.x, P.hero.pos.z - 12);
+    const b = P.walkers[P.walkers.length - 1];
+    const hp0 = b.hp, n0 = b.acolytes.filter(a => a.alive).length;
+    // Swing FEWER times than there are acolytes. Twenty hits of 500 against
+    // 260hp acolytes kills all six and then legitimately opens the core — the
+    // first version of this case failed on its own arithmetic, not on the game.
+    for (let i = 0; i < 3; i++) P.damageWalker(b, 500, null, 0, "impact");
+    const stillOrbiting = b.acolytes.filter(a => a.alive).length;
+    const coreUntouched = b.hp === hp0 && stillOrbiting > 0;
+    const killedSome = b.acolytes.filter(a => a.alive).length < n0;
+    // finish the acolytes, then the core must take damage
+    for (let i = 0; i < 200 && b.acolytes.some(a => a.alive); i++)
+      P.damageWalker(b, 500, null, 0, "impact");
+    const before = b.hp;
+    P.damageWalker(b, 500, null, 0, "impact");
+    return { coreUntouched, killedSome, stillOrbiting,
+             coreOpenedAfter: b.hp < before, acolytes: n0 };
+  });
+  ok(r.acolytes > 0, "the choir spawned with no acolytes");
+  ok(r.coreUntouched, "the core took damage while acolytes were still orbiting");
+  ok(r.stillOrbiting > 0, "the case did not actually leave any acolyte alive to test with");
+  ok(r.killedSome, "hits aimed at the core were wasted entirely rather than routed to an acolyte");
+  ok(r.coreOpenedAfter, "the core never became vulnerable after the acolytes died");
+});
+
+test("choir: acolytes do not outlive the core", async (pg) => {
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.parkWalkers();
+    P.S.wave = 20;
+    P.spawnWalker("choir", P.hero.pos.x, P.hero.pos.z - 12);
+    const b = P.walkers[P.walkers.length - 1];
+    const groups = b.acolytes.map(a => a.g);
+    for (let i = 0; i < 400 && !b.dead; i++) P.damageWalker(b, 900, null, 0, "impact");
+    return { dead: b.dead, orphaned: groups.filter(g => g.parent).length };
+  });
+  ok(r.dead, "the choir never died");
+  eq(r.orphaned, 0, "acolyte meshes were left in the scene after the core died");
+});
+
+test("hollow: only returned ordnance lands", async (pg) => {
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.parkWalkers();
+    P.S.wave = 30;
+    P.spawnWalker("hollow", P.hero.pos.x, P.hero.pos.z - 12);
+    const b = P.walkers[P.walkers.length - 1];
+    const h0 = b.hp;
+    P.damageWalker(b, 1000, null, 0, "impact");
+    const normal = h0 - b.hp;
+    b.hp = h0;
+    P.damageWalker(b, 1000, null, 0, "returned");
+    const returned = h0 - b.hp;
+    return { normal, returned, ratio: returned / Math.max(1, normal) };
+  });
+  ok(r.normal > 0, "the hollow is literally unkillable by normal means, which is a wall not a puzzle");
+  ok(r.returned > r.normal * 20,
+     `a returned prop should dwarf a normal hit; got ${Math.round(r.returned)} vs ${Math.round(r.normal)}`);
+});
+
+test("hollow: hurls, which is what arms the player", async (pg) => {
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.parkWalkers();
+    P.S.wave = 30;
+    P.spawnWalker("hollow", P.hero.pos.x, P.hero.pos.z - 14);
+    const b = P.walkers[P.walkers.length - 1];
+    b.aggro = true;
+    let peak = 0;
+    for (let t = 0; t < 20; t += 1 / 30) {
+      P.hero.hp = 99; P.step(1 / 30);
+      peak = Math.max(peak, P.rocks.filter(o => o.hostile > 0).length);
+    }
+    return { peak };
+  });
+  ok(r.peak > 0,
+     "the hollow never threw anything, so the player is never handed the only thing that hurts it");
+});
+
 test("wounds: skin darkens as health drops, bosses excluded", async (pg) => {
   const r = await pg.evaluate(async () => {
     const P = window.__probe;
@@ -329,26 +455,48 @@ let passed = 0, failed = 0;
 const t0 = Date.now();
 console.log(`\nkinesis regression — ${selected.length} case${selected.length === 1 ? "" : "s"}\n`);
 
+// Loading the page is setup, not the thing under test. A 1.1MB bundle parsed
+// against software GL occasionally blows the navigation timeout mid-suite —
+// three consecutive cases went red that way and every one of them passed on
+// its own. Retry the SETUP only, and never the assertions: a suite that cries
+// red for its own reasons teaches you to stop reading red at all.
+const SETUP_TRIES = 3;
+async function openCase() {
+  let last;
+  for (let attempt = 1; attempt <= SETUP_TRIES; attempt++) {
+    const pg = await browser.newPage({ viewport: { width: 900, height: 620 } });
+    const errs = [];
+    pg.on("pageerror", e => errs.push("PAGEERROR: " + e.message));
+    pg.on("console", m => { if (m.type() === "error") errs.push("CONSOLE: " + m.text()); });
+    try {
+      await pg.goto("file://" + OUT, { timeout: 90000 });
+      await pg.waitForFunction(() => window.__probe, null, { timeout: 90000 });
+      await pg.evaluate(() => document.querySelector("#startBtn").click());
+      // Let the opening frames settle; every case drives the sim itself after this.
+      await pg.waitForTimeout(1200);
+      return { pg, errs, attempt };
+    } catch (e) {
+      last = e;
+      await pg.close();
+    }
+  }
+  throw last;
+}
+
 for (const c of selected) {
-  const pg = await browser.newPage({ viewport: { width: 900, height: 620 } });
-  const errs = [];
-  pg.on("pageerror", e => errs.push("PAGEERROR: " + e.message));
-  pg.on("console", m => { if (m.type() === "error") errs.push("CONSOLE: " + m.text()); });
+  let open = null;
   try {
-    await pg.goto("file://" + OUT);
-    await pg.waitForFunction(() => window.__probe, null, { timeout: 90000 });
-    await pg.evaluate(() => document.querySelector("#startBtn").click());
-    // Let the opening frames settle; every case drives the sim itself after this.
-    await pg.waitForTimeout(1200);
-    await c.fn(pg, errs);
-    console.log("  \x1b[32mPASS\x1b[0m  " + c.name);
+    open = await openCase();
+    await c.fn(open.pg, open.errs);
+    const retried = open.attempt > 1 ? `  (setup retried ${open.attempt - 1}×)` : "";
+    console.log("  \x1b[32mPASS\x1b[0m  " + c.name + retried);
     passed++;
   } catch (e) {
     const why = e instanceof Failed ? e.message : (e.stack || String(e));
     console.log("  \x1b[31mFAIL\x1b[0m  " + c.name + "\n      " + why);
     failed++;
   } finally {
-    await pg.close();
+    if (open) await open.pg.close();
   }
 }
 

@@ -1726,12 +1726,54 @@ const WAVES = [
   { walker:3, grabber:2, shield:2, tank:1, archer:2 },
   { runner:4, leaper:2, disruptor:2, warper:1, armored:2, archer:2 },
   { walker:4, grabber:2, shield:2, spawner:2, tank:1, exploder:3, archer:2 },
-  { maw:1, walker:4, runner:3, shield:2, archer:3 },
+  { walker:4, runner:3, shield:2, archer:3 },
 ];
 
 // The boss is a telekinesis problem, not a health bar: four plates must be
 // stripped before the core can be touched, and it fights by throwing the
 // same debris the player is using.
+// Boss tiers, one per ten waves. A new one is a table entry plus a spawner, not
+// a new branch in the wave code — and each has to be a different PROBLEM rather
+// than the same fight with a longer bar. Eighty thousand health is not a boss,
+// it is a wait.
+//
+//   10  THE GORGER   a giant that closes and throws. Break the chest plates.
+//   20  THE CHOIR    one thing wearing many bodies. The core cannot be touched
+//                    while its acolytes orbit, and they move, so there is no
+//                    safe side to stand on — unlike the Warden's fixed ring.
+//   30  THE HOLLOW   immune to anything you throw at it. It arms you by
+//                    hurling, and only its own returned ordnance hurts it.
+//
+// Past 30 the tiers cycle, each pass harder than the last.
+const BOSS_TIERS = ["maw", "choir", "hollow"];
+function bossForWave(n) {
+  const tier = Math.max(1, Math.round(n / 10));
+  return BOSS_TIERS[(tier - 1) % BOSS_TIERS.length];
+}
+// How many times the cycle has come round, so a second Gorger is not the same
+// Gorger. Applied to health and pace, never to the mechanic.
+function bossLap(n) { return Math.floor((Math.max(1, Math.round(n/10)) - 1) / BOSS_TIERS.length); }
+// Every archetype that must be treated as a singular, front-loaded boss rather
+// than as a body in the crowd. Derived once and used by all three places in
+// buildWave that care — the count multiplier, the overflow trim, and the
+// front-load. Each of those used to carry its own hand-written list, and each
+// time a boss was added one of them was missed: the count multiplier gave two
+// Wardens, and the front-load let the Choir be shuffled into a mid-wave pulse
+// so a milestone wave opened with no boss roughly half the time.
+const BIG_TYPES = ["boss", ...BOSS_TIERS];
+
+const CHOIR = {
+  name:"THE CHOIR", coreHp:2600, acolytes:6, acolyteHp:260,
+  speed:1.15, orbit:5.2, orbitSpin:0.55, lungeEvery:3.2, score:12000,
+};
+const HOLLOW = {
+  name:"THE HOLLOW", coreHp:1800, speed:1.6, hurlEvery:2.1,
+  returnMul:9,          // a returned prop hits for nine times its damage
+  chip:0.04,            // everything else does this fraction, so it is never
+                        // literally unkillable — only obviously the wrong idea
+  score:16000,
+};
+
 const BOSS = {
   name:"Warden", plateHp:230, plates:4, coreHp:1300,
   speed:1.05, reach:3.2, atkEvery:3.6, score:5000,
@@ -1999,6 +2041,122 @@ function spawnMaw(x, z) {
     leapT:99, vy:0, air:false });
 }
 
+// ── THE CHOIR ───────────────────────────────────────────────────────────────
+// One thing wearing several bodies. The core cannot be damaged while acolytes
+// orbit it, and because they ORBIT there is no safe side to stand on — that is
+// the whole difference from the Warden, whose plates sit still and can be
+// flanked. Kill acolytes and the survivors orbit faster, so the fight speeds up
+// as it shortens.
+function spawnChoir(x, z, lap) {
+  const scale = 1 + lap * 0.35;
+  const g = new T.Group();
+  const skinM = new T.MeshStandardMaterial({ color:0x5a4a6b, roughness:0.9,
+    normalMap:TEX.fleshN, normalScale:new T.Vector2(1.1,1.1), envMapIntensity:0.4 });
+  const coreM = new T.MeshStandardMaterial({ color:0xc06aff, emissive:0xc06aff,
+    emissiveIntensity:1.6, roughness:0.3 });
+
+  g.add(part(new T.CylinderGeometry(0.9, 1.35, 2.6, 8), skinM, 0, 1.7, 0));
+  g.add(part(new T.SphereGeometry(0.62, 12, 9), skinM, 0, 3.4, 0));
+  const core = part(new T.OctahedronGeometry(0.85, 0), coreM, 0, 2.3, 0);
+  g.add(core);
+  const glow = new T.PointLight(0xc06aff, 0.4, 20, 2);
+  glow.position.set(0, 2.3, 0); g.add(glow);
+
+  const tell = new T.Mesh(new T.RingGeometry(1.6, 2.3, 22),
+    new T.MeshBasicMaterial({ color:0xc06aff, transparent:true, opacity:0,
+                              side:T.DoubleSide, depthWrite:false }));
+  tell.rotation.x = -Math.PI/2; tell.position.y = 4.4; tell.visible = false;
+  g.add(tell);
+
+  g.position.set(x, 0, z);
+  g.scale.setScalar(scale);
+  scene.add(g);
+
+  // Acolytes are their own groups in world space, not children — they have to
+  // orbit independently and be hit on their own.
+  const acolytes = [];
+  const n = CHOIR.acolytes;
+  for (let i = 0; i < n; i++) {
+    const ag = new T.Group();
+    const am = new T.MeshStandardMaterial({ color:0x7a6a8c, roughness:0.92,
+      emissive:0x2a1040, emissiveIntensity:0.5 });
+    ag.add(part(new T.CylinderGeometry(0.34, 0.46, 1.5, 7), am, 0, 0.95, 0));
+    ag.add(part(new T.SphereGeometry(0.34, 10, 8), am, 0, 1.95, 0));
+    ag.add(part(new T.SphereGeometry(0.09, 6, 5),
+          new T.MeshBasicMaterial({ color:0xffb0ff }), 0, 2.0, 0.28));
+    ag.scale.setScalar(scale);
+    scene.add(ag);
+    acolytes.push({ g:ag, a:(i/n)*Math.PI*2, hp:Math.round(CHOIR.acolyteHp*(1+lap*0.5)),
+                    maxHp:Math.round(CHOIR.acolyteHp*(1+lap*0.5)), alive:true, lungeT:rand(1,3) });
+  }
+
+  const hp = Math.round(CHOIR.coreHp * (1 + lap*0.6));
+  walkers.push({ g, body:g, torso:g, pos:g.position,
+    type:"choir", boss:true, choir:true, core, glow, tell, acolytes,
+    plates:[], platesLeft:0,
+    E:{ name:CHOIR.name, hp, speed:CHOIR.speed, scale:2.4*scale, skin:0x5a4a6b,
+        score:CHOIR.score },
+    reach:3.4, r:2.0*scale, walk:0, gait:0, spd:0, dead:false, cool:0,
+    AI:AI.tank, arcDir:1, windup:0, orbit:0,
+    hp, maxHp:hp, flash:0, kb:new T.Vector3(),
+    thrown:0, tvel:new T.Vector3(), leapT:99, vy:0, air:false });
+}
+
+// ── THE HOLLOW ──────────────────────────────────────────────────────────────
+// Immune to anything you throw at it, so the usual answer simply stops working.
+// It arms you instead: it hurls constantly, and a prop you catch mid-flight and
+// send back is the only thing that lands. Everything else chips at four percent
+// — never literally unkillable, just obviously the wrong idea.
+function spawnHollow(x, z, lap) {
+  const scale = 1 + lap * 0.3;
+  const g = new T.Group();
+  const shellM = new T.MeshStandardMaterial({ color:0x2a2f3a, roughness:0.35,
+    metalness:0.85, envMapIntensity:1.4 });
+  const voidM = new T.MeshBasicMaterial({ color:0x0a0a12 });
+  const eyeM  = new T.MeshBasicMaterial({ color:0x8fd8ff });
+
+  // A hollow shell: an open ring where a torso should be, so the silhouette
+  // says "there is nothing here to hit" before the damage numbers do.
+  g.add(part(new T.TorusGeometry(1.25, 0.42, 8, 18), shellM, 0, 2.5, 0));
+  g.add(part(new T.SphereGeometry(0.95, 12, 9), voidM, 0, 2.5, 0));
+  g.add(part(new T.CylinderGeometry(0.5, 0.85, 1.9, 8), shellM, 0, 0.95, 0));
+  g.add(part(new T.SphereGeometry(0.55, 12, 9), shellM, 0, 3.9, 0));
+  g.add(part(new T.SphereGeometry(0.14, 8, 6), eyeM, -0.24, 3.95, 0.44));
+  g.add(part(new T.SphereGeometry(0.14, 8, 6), eyeM,  0.24, 3.95, 0.44));
+  const core = part(new T.OctahedronGeometry(0.5, 0),
+    new T.MeshStandardMaterial({ color:0x8fd8ff, emissive:0x8fd8ff,
+      emissiveIntensity:1.8, roughness:0.3 }), 0, 2.5, 0);
+  g.add(core);
+  const glow = new T.PointLight(0x8fd8ff, 1.2, 22, 2);
+  glow.position.set(0, 2.5, 0); g.add(glow);
+
+  const tell = new T.Mesh(new T.RingGeometry(1.4, 2.0, 22),
+    new T.MeshBasicMaterial({ color:0x8fd8ff, transparent:true, opacity:0,
+                              side:T.DoubleSide, depthWrite:false }));
+  tell.rotation.x = -Math.PI/2; tell.position.y = 4.8; tell.visible = false;
+  g.add(tell);
+
+  const aL = limb(g, 1.3, shellM, -1.5, 3.0, 0, 0.26);
+  const aR = limb(g, 1.3, shellM,  1.5, 3.0, 0, 0.26);
+  const lL = limb(g, 1.2, shellM, -0.5, 0.9, 0, 0.28);
+  const lR = limb(g, 1.2, shellM,  0.5, 0.9, 0, 0.28);
+
+  g.position.set(x, 0, z);
+  g.scale.setScalar(scale);
+  scene.add(g);
+
+  const hp = Math.round(HOLLOW.coreHp * (1 + lap*0.6));
+  walkers.push({ g, body:g, torso:g, aL, aR, lL, lR, pos:g.position,
+    type:"hollow", boss:true, hollow:true, core, glow, tell,
+    plates:[], platesLeft:0,
+    E:{ name:HOLLOW.name, hp, speed:HOLLOW.speed, scale:2.2*scale, skin:0x2a2f3a,
+        score:HOLLOW.score },
+    reach:3.0, r:1.7*scale, walk:0, gait:0, spd:0, dead:false, cool:0,
+    AI:AI.tank, arcDir:1, windup:0, atkT:HOLLOW.hurlEvery,
+    hp, maxHp:hp, flash:0, kb:new T.Vector3(),
+    thrown:0, tvel:new T.Vector3(), leapT:99, vy:0, air:false });
+}
+
 function spawnBoss(x, z) {
   const g = new T.Group();
   const skinM = new T.MeshStandardMaterial({
@@ -2066,8 +2224,10 @@ function spawnBoss(x, z) {
 }
 
 function spawnWalker(type, x, z) {
-  if (type === "boss") return spawnBoss(x, z);
-  if (type === "maw")  return spawnMaw(x, z);
+  if (type === "boss")   return spawnBoss(x, z);
+  if (type === "maw")    return spawnMaw(x, z);
+  if (type === "choir")  return spawnChoir(x, z, bossLap(S.wave));
+  if (type === "hollow") return spawnHollow(x, z, bossLap(S.wave));
   const E = ENEMIES[type] || ENEMIES.walker;
   const g = new T.Group(), body = new T.Group();
   g.add(body);
@@ -2992,6 +3152,11 @@ function banner(txt) {
 function killWalker(w) {
   if (w.dead) return;
   w.dead = true;
+  // The Choir's acolytes live in world space rather than as children, so
+  // nothing else would ever remove them.
+  if (w.acolytes) for (const a of w.acolytes) {
+    if (a.alive) { a.alive = false; scene.remove(a.g); disposeGroup(a.g); }
+  }
   scene.remove(w.g);
   // Free it here rather than at the end of the wave. The record stays in the
   // array (guided stones still hold references to their marks) but its
@@ -3167,6 +3332,47 @@ function damageWalker(w, amount, dir, knock, kind) {
   // A rock into a Tank is a chip; a boulder or a blast is a real hit.
   // A plated boss takes almost nothing on the body. The plates ARE the
   // fight; the core only opens once they are gone.
+  // THE CHOIR: untouchable while any acolyte still orbits. The acolytes are the
+  // fight; the core is the reward for finishing it.
+  if (w.choir) {
+    const live = w.acolytes.filter(a => a.alive);
+    if (live.length) {
+      // Route the hit into the nearest acolyte instead, so swinging at the
+      // middle is not simply wasted — it is aimed at the wrong target.
+      let best = null, bd = 1e9;
+      for (const a of live) {
+        const d = Math.hypot(a.g.position.x - hero.pos.x, a.g.position.z - hero.pos.z);
+        if (d < bd) { bd = d; best = a; }
+      }
+      if (best) {
+        best.hp -= amount;
+        w.flash = 1;
+        if (best.hp <= 0) {
+          best.alive = false;
+          scene.remove(best.g); disposeGroup(best.g);
+          const left = w.acolytes.filter(a => a.alive).length;
+          sparks(w.pos, 0xc06aff, 20, 24); SFX.boom();
+          S.shake = Math.min(1.2, S.shake + 0.55);
+          banner(left ? "ACOLYTE DOWN · " + left + " LEFT" : "THE CORE IS OPEN");
+        }
+      }
+      return;
+    }
+  }
+
+  // THE HOLLOW: only its own returned ordnance lands. Everything else chips,
+  // so the answer is discoverable by trying rather than by being told.
+  if (w.hollow) {
+    const returned = kind === "returned";
+    amount = returned ? amount * HOLLOW.returnMul : amount * HOLLOW.chip;
+    if (returned) {
+      banner("RETURNED");
+      SFX.crit();
+      S.freeze = Math.max(S.freeze, 0.12);
+      S.shake = Math.min(1.2, S.shake + 0.5);
+    }
+  }
+
   if (w.boss && w.platesLeft > 0) {
     const pl = w.plates.find(p => p.hp > 0);
     if (w.maw && pl) {
@@ -3379,6 +3585,9 @@ const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2, distWant: 11.2 };
 
 function clearAll() {
   clearArrows();
+  for (const w of walkers) if (w.acolytes) {
+    for (const a of w.acolytes) if (a.alive) { scene.remove(a.g); disposeGroup(a.g); }
+  }
   rocks.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); });
   rocks.length = 0;
   walkers.forEach(w => { scene.remove(w.g); if (!w.disposed) disposeGroup(w.g); });
@@ -3440,9 +3649,15 @@ function buildWave(n) {
   if (n > WAVES.length) {
     const late = [WAVES[6], WAVES[7], WAVES[8], WAVES[9]];
     comp = Object.assign({}, late[(n - WAVES.length - 1) % late.length]);
-    const since = n - WAVES.length;
-    if (since % 5 === 0) comp[since % 10 === 0 ? "maw" : "boss"] = 1;
+  } else {
+    comp = Object.assign({}, comp);
   }
+  // Every tenth wave is that tier's boss, and the tiers differ in KIND rather
+  // than in size — see BOSS_TIERS. The Warden still turns up on the odd fives
+  // as a lesser gate, so the rhythm is boss/Warden/boss rather than a long
+  // quiet stretch between milestones.
+  if (n % 10 === 0)     comp[bossForWave(n)] = 1;
+  else if (n % 5 === 0) comp.boss = 1;
   // Past the table the wave scales up, but the count stops growing after a
   // point and the difficulty moves into the enemies themselves — see
   // LATE_RAMP. Eighty bodies is not harder than forty, it is just slower.
@@ -3451,10 +3666,13 @@ function buildWave(n) {
   for (const t in comp) {
     // A boss is a boss, singular. The late-wave ramp and the HORDE modifier
     // both multiply counts, and left unguarded that produced TWO Wardens in
-    // one endless wave.
-    const isBig = t === "boss" || t === "maw";
+    // one endless wave. See BIG_TYPES.
+    const isBig = BIG_TYPES.includes(t);
     let c = isBig ? comp[t] : comp[t] + Math.round(comp[t] * extra * 0.35);
-    if (!isBig) c = Math.round(c * WMOD.count * CFG.enemyMul);
+    // Floored at one. Rounding a single-body archetype against a count-reducing
+    // modifier lands on zero and deletes it from the wave silently — which is
+    // how an archer listed in wave 4 was simply not there some runs.
+    if (!isBig) c = Math.max(1, Math.round(c * WMOD.count * CFG.enemyMul));
     for (let i = 0; i < c; i++) list.push(t);
   }
   // Trim to the ceiling, dropping the most numerous archetypes first so the
@@ -3465,7 +3683,7 @@ function buildWave(n) {
     while (list.length > CFG.maxWaveBodies) {
       let worst = null, most = 0;
       for (const t in count) {
-        if (t === "boss" || t === "maw") continue;
+        if (BIG_TYPES.includes(t)) continue;
         if (count[t] > most) { most = count[t]; worst = t; }
       }
       if (!worst || most <= 1) break;
@@ -3479,10 +3697,14 @@ function buildWave(n) {
     const j = Math.floor(Math.random()*(i+1));
     [list[i], list[j]] = [list[j], list[i]];
   }
-  // The Warden is never a reinforcement. The shuffle above could put it in
+  // A boss is never a reinforcement. The shuffle above could put it in
   // the held-back half, which made it stroll in mid-wave as a "reinforcement"
-  // — and left wave 11 with no boss at all in its opening group.
-  for (const big of ["maw", "boss"]) {
+  // — and left wave 11 with no boss at all in its opening group. This list has
+  // to stay in step with the tier table, hence BIG_TYPES: while it was the
+  // hand-written pair, wave 20 opened without its Choir about half the time,
+  // because 26 bodies against a 0.6 opening leaves a 40% chance of the shuffle
+  // parking it in a later pulse.
+  for (const big of BIG_TYPES) {
     const bi = list.indexOf(big);
     if (bi > 0) { list.splice(bi, 1); list.unshift(big); }
   }
@@ -3896,6 +4118,9 @@ function gather() {
   if (!near.length) { toast("NO OBJECTS IN RANGE — move"); SFX.dry(); return; }
   let heaviest = 0;
   near.forEach((o,i) => {
+    // Catching something that was thrown AT you is remembered. The Hollow is
+    // immune to everything else, so this flag is the whole answer to it.
+    if (o.hostile > 0) { o.returned = true; o.hostile = 0; }
     o.held = true; o.slot = i; o.mesh.material = heldMat;
     o.fireMode = null; o.volleyId = -1;
     // Snap it off the floor so the grab reads as a yank rather than a fade.
@@ -4549,6 +4774,65 @@ function step(dt) {
       }
     }
 
+    // ---- THE CHOIR
+    if (w.choir) {
+      const live = w.acolytes.filter(a => a.alive);
+      // Faster the fewer are left, so the fight accelerates as it shortens.
+      const speedUp = 1 + (w.acolytes.length - live.length) * 0.42;
+      w.orbit += dt * CHOIR.orbitSpin * speedUp;
+      const R = CHOIR.orbit * (w.g.scale.x || 1);
+
+      for (const a of live) {
+        const ang = w.orbit + a.a;
+        // Lunges break the orbit briefly: a body that only ever circles is a
+        // fixture, and a fixture is not a threat.
+        a.lungeT -= dt;
+        let rad = R;
+        if (a.lungeT < 0.55 && a.lungeT > 0) rad = R * (0.35 + a.lungeT);
+        else if (a.lungeT <= 0) a.lungeT = CHOIR.lungeEvery * rand(0.7, 1.4);
+        a.g.position.set(w.pos.x + Math.cos(ang)*rad, 0, w.pos.z + Math.sin(ang)*rad);
+        a.g.rotation.y = -ang + Math.PI/2;
+        // Contact hurts, so orbiting acolytes are a moving wall.
+        if (Math.hypot(a.g.position.x-hero.pos.x, a.g.position.z-hero.pos.z) < 1.6
+            && w.cool <= 0) {
+          w.cool = CFG.zCooldown; hurtHero(); SFX.hurt();
+        }
+      }
+      w.core.material.emissiveIntensity = live.length ? 0.5 : 2.6;
+      w.glow.intensity = live.length ? 0.4 : 5;
+      if (!live.length && !w.exposed) {
+        w.exposed = true;
+        banner("THE CHOIR IS ALONE");
+        SFX.overload(); S.shake = Math.min(1.2, S.shake + 0.8);
+      }
+    }
+
+    // ---- THE HOLLOW
+    // Hurls constantly, because hurling is how it arms the only thing that can
+    // hurt it. Standing still and holding your carry starves the fight.
+    if (w.hollow) {
+      w.atkT -= dt;
+      w.core.material.emissiveIntensity = 1.4 + Math.sin(S.t*4)*0.6;
+      if (w.atkT <= 0) {
+        w.atkT = HOLLOW.hurlEvery * rand(0.8, 1.25);
+        let pick = null, bd = 26;
+        for (const o of rocks) {
+          if (o.held || o.gone || o.hostile) continue;
+          const d2 = o.pos.distanceTo(w.pos);
+          if (d2 < bd && d2 > 2.0) { bd = d2; pick = o; }
+        }
+        if (pick) {
+          tmp2.set(hero.pos.x-pick.pos.x, 2.2, hero.pos.z-pick.pos.z).normalize();
+          pick.vel.copy(tmp2).multiplyScalar(32);
+          pick.hostile = 2.0;
+          pick.returned = false;
+          pick.mesh.material = seekMat;
+          sparks(tmp3.set(w.pos.x, 2.5, w.pos.z), 0x8fd8ff, 10, 14);
+          SFX.throw(0.9);
+        }
+      }
+    }
+
     // ---- THE MAW
     if (w.maw) {
       w.glow.intensity = w.platesLeft ? 0.5 : 6 + Math.sin(S.t*5)*3;
@@ -4899,8 +5183,12 @@ function step(dt) {
           } else {
             // Piercing props read as a different kill from a blunt impact,
             // and the style system pays for the distinction.
+            // A prop caught mid-flight and sent back is its own damage kind.
+            // The Hollow is immune to everything else, so this tag is the
+            // difference between the fight being possible and being a wall.
             damageWalker(w, dmg, tmp, 4.5*(o.def.knock||1),
-                         hitKind || ((o.def.pierce && o.pierced > 0) ? "pierce" : "impact"));
+                         o.returned ? "returned"
+                         : hitKind || ((o.def.pierce && o.pierced > 0) ? "pierce" : "impact"));
           }
           noteVolleyHit(o, o.pos);
           // A heavy prop at speed does not shove a body, it throws it.

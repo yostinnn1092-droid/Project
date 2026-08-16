@@ -36,6 +36,10 @@ remembering to look.
 | ring builds one more ring per rank | ranks silently not applying |
 | ring burns centre and bands, not gaps | the middle was a safe pocket for anything that closed |
 | boss closes, slams, throws | the rig was rebuilt quadruped → biped; limb slots feed the shared gait |
+| every tenth wave brings that tier's boss | the front-load that lifts a boss out of the shuffle listed two of the four boss types, so wave 20 opened bossless ~40% of the time |
+| never more than one big body | the late-wave ramp and HORDE both multiply counts — unguarded, that gave two Wardens |
+| choir core untouchable / acolytes die with it | the shield is the whole fight; a routing slip makes it either invincible or a plain sack of HP |
+| hollow only takes returned ordnance | same — the chip multiplier is the puzzle, and a missed gate collapses it to either wall or pushover |
 | wounds track health, bosses excluded | with 2-hit kills, nothing showed which bodies were finishable |
 | quality warm-up / hysteresis / recovery | the ladder judged the loading window and never re-checked |
 
@@ -47,6 +51,24 @@ regressions were introduced and each turned the right case red:
 - reverting the ring-centre fix → *"the middle of the ring is a safe pocket"*
 - removing archers from waves 3–4 → *"wave 3 contains no archer"*
 - a dangling reference in `clearAll` → wave-transition case threw
+- restoring the two-name front-load list → *"wave 20 opened with no boss on 7/12 passes"*
+
+## Randomised cases need passes, not a pass
+
+Anything downstream of the wave shuffle or a random modifier must be checked
+over many builds. The tier-boss case originally did one build per wave and sat
+green while a boss was missing from 40% of wave 20s. Twelve passes turned the
+same bug into a hard, reproducible failure. If a case touches `buildWave`,
+loop it.
+
+## Setup retries
+
+Loading the 1.1MB bundle under software GL occasionally blows the navigation
+timeout mid-suite, which once put three consecutive cases in the red that all
+passed on their own. `run.mjs` retries **setup only**, up to three times, and
+prints `(setup retried N×)` on the pass so the flake stays visible. Assertions
+are never retried — a suite that quietly re-rolls its own failures is worse
+than no suite.
 
 ## Adding a case
 
