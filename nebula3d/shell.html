@@ -1,0 +1,245 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Constellation</title>
+<style>
+/* ───────────────────────────────────────────────────────── tokens
+   Palette taken from the reference direction: everything is starlight on
+   cold void. The accent is not gold here but the pale cyan of a lit glass
+   panel, because the whole UI is meant to read as plates hanging in space
+   in front of a god, not as a game's chrome. */
+:root{
+  --void:#04060f; --deep:#070b1a;
+  --glass:rgba(30,86,150,0.20); --glass2:rgba(18,54,102,0.34);
+  --edge:rgba(120,205,255,0.42); --edge2:rgba(120,205,255,0.16);
+  --ice:#8fd9ff; --ice2:#d5f2ff; --iceDim:#4b7fa8;
+  --ink:#e6f4ff; --dim:#8fa8c4; --faint:#546a86;
+  --faith:#7fd8ff; --dev:#8ce8b4; --dep:#ff9d7a; --warn:#ffc978; --bad:#ff7a8f;
+  --r1:#c86adf; --r2:#5fa8e8; --r3:#e0764a;
+  --serif:ui-serif,"Iowan Old Style",Palatino,Georgia,serif;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--void);color:var(--ink);font-family:var(--sans);overflow:hidden;
+  -webkit-font-smoothing:antialiased;user-select:none}
+canvas{display:block}
+#cv{position:fixed;inset:0;width:100%;height:100%;cursor:grab;z-index:0}
+#cv.drag{cursor:grabbing}
+
+/* the shared "floating lit plate" treatment every panel inherits */
+.plate{
+  background:linear-gradient(158deg,var(--glass),var(--glass2));
+  border:1px solid var(--edge);
+  border-radius:3px;
+  backdrop-filter:blur(13px) saturate(1.25);
+  box-shadow:0 0 22px rgba(70,170,255,0.16),
+             inset 0 1px 0 rgba(190,235,255,0.20),
+             inset 0 0 34px rgba(40,120,200,0.13);
+  position:relative;
+}
+/* corner ticks — the plates in the reference are bracketed, not plain rects */
+.plate::before,.plate::after{
+  content:"";position:absolute;width:9px;height:9px;pointer-events:none;
+  border:1px solid var(--ice);opacity:.85;
+}
+.plate::before{left:-1px;top:-1px;border-right:0;border-bottom:0}
+.plate::after{right:-1px;bottom:-1px;border-left:0;border-top:0}
+
+/* ───────────────────────────────────────────────────────── top bar */
+#top{position:fixed;top:14px;left:14px;right:14px;z-index:10;display:flex;gap:10px;
+  align-items:stretch;pointer-events:none}
+#top>*{pointer-events:auto}
+#mark{padding:10px 20px 10px 18px;display:flex;flex-direction:column;justify-content:center}
+#mark b{font-family:var(--serif);font-size:17px;letter-spacing:.22em;color:var(--ice2);
+  font-weight:600;line-height:1;text-shadow:0 0 16px rgba(140,215,255,.55)}
+#mark span{font-size:8.5px;letter-spacing:.34em;color:var(--iceDim);text-transform:uppercase;
+  margin-top:5px}
+
+#stats{display:flex;flex:1;min-width:0;overflow:hidden}
+.st{padding:9px 15px;display:flex;flex-direction:column;justify-content:center;min-width:0;
+  border-right:1px solid var(--edge2)}
+.st:last-child{border-right:0}
+.st .k{font-size:8px;letter-spacing:.2em;text-transform:uppercase;color:var(--faint);
+  white-space:nowrap;margin-bottom:4px}
+.st .v{font-family:var(--mono);font-size:15px;font-weight:600;line-height:1;white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.st .s{font-size:9.5px;color:var(--dim);margin-top:3px;font-family:var(--mono);white-space:nowrap}
+.st.f .v{color:var(--faith)} .st.d .v{color:var(--dev)}
+.st.p .v{color:var(--dep)}   .st.a .v{color:var(--ice2)}
+.bar{height:2px;background:rgba(0,0,0,.45);margin-top:5px;min-width:70px;overflow:hidden}
+.bar i{display:block;height:100%;transition:width .3s}
+
+#clock{display:flex;align-items:center;gap:5px;padding:0 13px}
+.sp{width:31px;height:25px;border:1px solid var(--edge2);background:rgba(20,60,110,.3);
+  color:var(--dim);cursor:pointer;font-family:var(--mono);font-size:10px;font-weight:700;
+  transition:.13s;border-radius:2px}
+.sp:hover{border-color:var(--ice);color:var(--ice2)}
+.sp[data-on]{background:var(--ice);border-color:var(--ice);color:#02121e}
+
+/* ───────────────────────────────────────────────────────── prayer plates */
+#prayers{position:fixed;right:14px;top:88px;width:322px;z-index:10;
+  max-height:calc(100vh - 190px);overflow-y:auto;padding-right:2px}
+#prayers::-webkit-scrollbar{width:5px}
+#prayers::-webkit-scrollbar-thumb{background:rgba(120,205,255,.3)}
+.pr{padding:11px 12px;margin-bottom:9px;animation:fly .3s cubic-bezier(.2,1,.3,1)}
+@keyframes fly{from{opacity:0;transform:translateX(24px) scale(.97)}to{opacity:1;transform:none}}
+.pr .who{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.pr .who b{font-size:12.5px;color:var(--ice2);font-weight:600;letter-spacing:.02em}
+.pr .who i{font-style:normal;font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--faint)}
+.pr .trait{font-size:9px;letter-spacing:.13em;text-transform:uppercase;margin-bottom:7px;
+  color:var(--iceDim)}
+.pr .txt{font-family:var(--serif);font-size:13px;line-height:1.5;color:var(--ink);margin-bottom:10px}
+.pr .row{display:flex;gap:5px}
+.pr button{flex:1;padding:7px 4px;cursor:pointer;font-size:10.5px;font-weight:700;
+  border:1px solid var(--edge2);background:rgba(20,62,110,.42);color:var(--ink);
+  border-radius:2px;transition:.13s;font-family:var(--sans);letter-spacing:.04em}
+.pr button:hover:not(:disabled){background:rgba(60,140,220,.5);border-color:var(--ice)}
+.pr button.y{color:var(--ice2)}
+.pr button.n:hover{background:rgba(120,40,55,.5);border-color:#c05a70;color:#ffc0cc}
+.pr button:disabled{opacity:.3;cursor:not-allowed}
+.pr button .c{display:block;font-family:var(--mono);font-size:9px;opacity:.8;margin-top:1px;
+  font-variant-numeric:tabular-nums}
+.pr .fuse{position:absolute;left:0;bottom:0;height:2px;background:var(--ice);opacity:.6}
+.pr.urg{border-color:rgba(255,122,143,.5)}
+.pr.urg .fuse{background:var(--bad)}
+
+/* ───────────────────────────────────────────────────────── soul inspector */
+#soul{position:fixed;left:14px;bottom:14px;width:262px;padding:13px 15px;z-index:10;display:none}
+#soul h4{margin:0;font-family:var(--serif);font-size:16px;color:var(--ice2);font-weight:600}
+#soul .tr{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--iceDim);
+  margin:3px 0 10px}
+#soul .r{display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px;color:var(--dim)}
+#soul .r b{font-family:var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
+#soul .fb{height:3px;background:rgba(0,0,0,.45);margin:2px 0 9px}
+#soul .fb i{display:block;height:100%;background:var(--faith)}
+#soul .say{font-family:var(--serif);font-size:12px;font-style:italic;color:var(--dim);
+  line-height:1.5;border-top:1px solid var(--edge2);padding-top:9px;margin-top:4px}
+
+/* ───────────────────────────────────────────────────────── chronicle */
+#log{position:fixed;left:14px;top:88px;width:296px;max-height:210px;overflow-y:auto;z-index:10;
+  padding:9px 12px;font-size:11px;line-height:1.55}
+#log::-webkit-scrollbar{width:5px}
+#log::-webkit-scrollbar-thumb{background:rgba(120,205,255,.3)}
+#log div{margin-bottom:3px;color:var(--dim);display:flex;gap:7px}
+#log div span.y{color:var(--faint);font-family:var(--mono);font-size:9px;flex:none;padding-top:1px}
+#log .g{color:var(--dev)} #log .b{color:var(--bad)} #log .i{color:var(--ice2)}
+#log .v{color:var(--r1)}
+
+#hint{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:10;
+  font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);
+  pointer-events:none;text-align:center}
+#hint b{color:var(--iceDim);font-weight:600}
+
+/* ───────────────────────────────────────────────────────── overlays */
+.ov{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
+  background:rgba(3,5,12,.93);backdrop-filter:blur(9px);padding:22px}
+.ov.on{display:flex}
+.card{max-width:640px;width:100%;padding:36px 38px;max-height:88vh;overflow-y:auto}
+.card h1{font-family:var(--serif);font-size:34px;margin:0 0 6px;color:var(--ice2);font-weight:600;
+  letter-spacing:.04em;text-shadow:0 0 26px rgba(140,215,255,.42);text-wrap:balance}
+.card h2{font-family:var(--serif);font-size:25px;margin:0 0 6px;color:var(--ice2);font-weight:600}
+.card .lede{color:var(--iceDim);font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;
+  margin-bottom:22px}
+.card p{line-height:1.7;color:#bdd4e8;margin:0 0 13px;font-size:13.5px;max-width:62ch}
+.card p.s{font-family:var(--serif);font-size:15px;color:var(--ink)}
+.card ul{margin:0 0 15px;padding-left:18px;color:#bdd4e8;line-height:1.8;font-size:13px}
+.card b.i{color:var(--ice2)} .card b.f{color:var(--faith)}
+.card b.d{color:var(--dev)}  .card b.p{color:var(--dep)}
+.rule{height:1px;background:var(--edge2);margin:20px 0}
+.btn{padding:12px 30px;background:var(--ice);color:#02121e;border:0;border-radius:2px;
+  font-weight:700;font-size:12.5px;cursor:pointer;letter-spacing:.1em;text-transform:uppercase;
+  font-family:var(--sans);transition:.14s}
+.btn:hover{background:var(--ice2);box-shadow:0 0 24px rgba(140,215,255,.5)}
+.tag{display:inline-block;padding:3px 9px;font-size:9.5px;font-family:var(--mono);
+  border:1px solid var(--edge2);color:var(--dim);margin:0 5px 5px 0}
+.traits{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 16px}
+.tc{padding:9px 11px;border:1px solid var(--edge2);background:rgba(20,60,110,.22)}
+.tc b{display:block;font-size:11.5px;color:var(--ice2);margin-bottom:2px;letter-spacing:.06em}
+.tc span{font-size:11px;color:var(--dim);line-height:1.45}
+
+#load{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
+  background:var(--void);flex-direction:column;gap:14px}
+#load b{font-family:var(--serif);font-size:22px;letter-spacing:.3em;color:var(--ice2);font-weight:600}
+#load span{font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:var(--faint)}
+
+@media (max-width:900px){
+  #prayers{width:262px;top:82px}
+  #log{display:none}
+  #soul{width:214px}
+}
+</style>
+
+<canvas id="cv"></canvas>
+
+<div id="top">
+  <div id="mark" class="plate"><b>NEBULA</b><span>Constellation</span></div>
+  <div id="stats" class="plate">
+    <div class="st f"><div class="k">Faith</div><div class="v" id="vF">0</div>
+      <div class="s" id="vFi">+0 /day</div></div>
+    <div class="st d"><div class="k">Devotion</div><div class="v" id="vD">0%</div>
+      <div class="bar"><i id="bD" style="width:0%;background:var(--dev)"></i></div></div>
+    <div class="st p"><div class="k">Dependency</div><div class="v" id="vP">0%</div>
+      <div class="bar"><i id="bP" style="width:0%;background:var(--dep)"></i></div></div>
+    <div class="st"><div class="k">Souls</div><div class="v" id="vN">0</div>
+      <div class="s" id="vNs">0 settlements</div></div>
+    <div class="st"><div class="k">Age</div><div class="v" id="vE">Stone</div>
+      <div class="s" id="vY">Year 1</div></div>
+    <div class="st a"><div class="k">Ascension</div><div class="v" id="vA">0%</div>
+      <div class="bar"><i id="bA" style="width:0%;background:var(--ice)"></i></div></div>
+  </div>
+  <div id="clock" class="plate">
+    <button class="sp" id="s0">❚❚</button>
+    <button class="sp" id="s1" data-on>1×</button>
+    <button class="sp" id="s2">3×</button>
+    <button class="sp" id="sh" style="margin-left:5px">?</button>
+  </div>
+</div>
+
+<div id="log" class="plate"></div>
+<div id="prayers"></div>
+<div id="soul" class="plate"></div>
+<div id="hint">Drag to pan · Wheel to zoom · <b>Q</b>/<b>E</b> rotate · Click a person</div>
+
+<div class="ov on" id="ovI">
+  <div class="card plate">
+    <h1>You are a constellation</h1>
+    <div class="lede">A god of the fourth magnitude</div>
+    <p class="s">Below you is a world you cannot touch. There are people in it — actual
+      people, each one walking somewhere for a reason of their own. You did not tell them
+      to. You cannot tell them anything.</p>
+    <p class="s">What you can do is <b class="i">answer</b>.</p>
+    <div class="rule"></div>
+    <p><b class="i">Every person is real.</b> Each has a name, a trade, a home, and a
+      temperament. Each keeps their own private count of what you have done for them.
+      Your <b class="f">Faith</b> is the sum of what they individually believe — not a
+      number the world hands you.</p>
+    <p><b class="i">They decide for themselves.</b> A frightened farmer stops farming. A
+      hungry one goes looking for food instead of working. One who has stopped believing
+      in you walks off the edge of the world and does not come back.</p>
+    <div class="rule"></div>
+    <p><b class="i">Temperament decides how they take an answer — and a refusal.</b></p>
+    <div class="traits">
+      <div class="tc"><b>Devout</b><span>Believes easily, forgives quickly. Slow to lose.</span></div>
+      <div class="tc"><b>Skeptic</b><span>Hard to convince, quick to write you off.</span></div>
+      <div class="tc"><b>Zealot</b><span>Swings hard both ways. Loudest, least stable.</span></div>
+      <div class="tc"><b>Stoic</b><span>Barely moves. Neither miracle nor silence shifts them far.</span></div>
+      <div class="tc"><b>Pragmatist</b><span>Believes whatever the harvest says. Ignores wonders.</span></div>
+      <div class="tc"><b>Frightened</b><span>Faith tracks safety. Danger nearby erodes it fast.</span></div>
+    </div>
+    <div class="rule"></div>
+    <p><b class="p">The trap is unchanged.</b> Answer everything and Dependency climbs —
+      they stop solving anything themselves, they pray for everything, and your income
+      collapses under the weight of it. Refuse everything and they starve, or leave.</p>
+    <p class="s" style="color:var(--ice2)">Choose whose suffering is worth it.</p>
+    <div style="margin-top:24px"><button class="btn" id="go">Open your eyes</button></div>
+  </div>
+</div>
+
+<div class="ov" id="ovE"><div class="card plate" id="ec"></div></div>
+
+<div id="load"><b>NEBULA</b><span>shaping the world</span></div>
+
+<script>/*__THREE__*/</script>
+<script>/*__GAME__*/</script>
