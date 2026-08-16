@@ -1718,12 +1718,12 @@ const ENEMIES = {
 const WAVES = [
   { walker:5 },
   { walker:5, crawler:2 },
-  { walker:4, runner:3 },
-  { walker:3, runner:3, leaper:2 },
-  { walker:4, runner:2, shield:2, archer:1 },
-  { walker:3, leaper:3, exploder:2, armored:1 },
+  { walker:4, runner:3, archer:1 },
+  { walker:3, runner:3, leaper:2, archer:1 },
+  { walker:4, runner:2, shield:2, archer:2 },
+  { walker:3, leaper:3, exploder:2, armored:1, archer:2 },
   { walker:3, runner:3, disruptor:2, spawner:1, archer:2 },
-  { walker:3, grabber:2, shield:2, tank:1 },
+  { walker:3, grabber:2, shield:2, tank:1, archer:2 },
   { runner:4, leaper:2, disruptor:2, warper:1, armored:2, archer:2 },
   { walker:4, grabber:2, shield:2, spawner:2, tank:1, exploder:3, archer:2 },
   { maw:1, walker:4, runner:3, shield:2, archer:3 },
@@ -2226,6 +2226,32 @@ function spawnWalker(type, x, z) {
     slab.position.set(0, 1.15, 0.72);
     slab.castShadow = true;
     body.add(slab);
+  }
+  if (EE.arrow) {
+    // A bow, held out and lit. The Archer shipped with nothing but a slightly
+    // different skin tone, which at its 17-unit standoff in a dark arena is no
+    // silhouette at all — the player reported simply never seeing one. This
+    // file's own rule is that an archetype needs a shape before it needs a
+    // statline, and this one had the statline only.
+    const bowMat = new T.MeshStandardMaterial({ color:0x8a6a3c, roughness:0.6,
+      emissive:0xffd23c, emissiveIntensity:0.55 });
+    const limb1 = new T.Mesh(new T.TorusGeometry(0.62, 0.055, 5, 12, Math.PI*1.15), bowMat);
+    limb1.rotation.y = Math.PI/2;
+    limb1.position.set(0.34, 1.28, 0.34);
+    limb1.castShadow = true;
+    body.add(limb1);
+    // Drawn string, so the shape reads as a bow rather than a hoop.
+    const string = new T.Mesh(new T.CylinderGeometry(0.018, 0.018, 1.18, 4),
+      new T.MeshBasicMaterial({ color:0xffe9a0 }));
+    string.position.set(0.34, 1.28, 0.10);
+    body.add(string);
+    // A lit nock: the one part that carries at range, and it brightens on the
+    // draw so the telegraph is visible on the body as well as on the ground.
+    const nock = new T.Mesh(new T.SphereGeometry(0.13, 8, 6),
+      new T.MeshBasicMaterial({ color:0xffd23c }));
+    nock.position.set(0.34, 1.28, 0.10);
+    body.add(nock);
+    g.userData.nock = nock;
   }
   if (EE.spawns) {
     // A lit spine: the thing on it is what keeps producing crawlers.
@@ -3082,166 +3108,17 @@ for (let i = 0; i < 12; i++) {
 // Additive blending, so it adds light rather than tinting — and it feeds the
 // bloom pass on the high quality tier, which is what turns it from a
 // coloured shell into a glow.
-// ── the plume texture ───────────────────────────────────────────────────────
-// A rising column of energy rather than a shell around the prop. Tiles
-// VERTICALLY so scrolling the V offset makes the wisps climb forever without a
-// seam — same trick as the ring of fire's sheet, rotated ninety degrees.
-// Colour runs white-hot magenta at the base through violet to blue at the tips,
-// which is what separates a core from a haze.
-function plumeSheet(w, h, seed) {
-  const c = canvasOf(1); c.width = w; c.height = h;
-  const x = c.getContext("2d");
-  const img = x.createImageData(w, h);
-  let sd = seed >>> 0;
-  const rr = () => (sd = (sd*1664525 + 1013904223) >>> 0) / 4294967296;
-  const ph = []; for (let i = 0; i < 8; i++) ph.push(rr()*Math.PI*2);
+// Controlled objects carry no aura. There was a rising plume here; it was
+// removed on request. What an object is under the control of still reads from
+// the tethers running back to the hero and from the carry wheel overhead, so
+// nothing about the state is actually hidden — the arena is simply quieter,
+// which matters most with a full carry of seven.
+//
+// The pool, the procedural plume sheet and the three-quad rig are all gone
+// rather than left disabled: keeping twenty-four hidden groups and two 64x160
+// canvas textures alive to render nothing is a cost with no payer.
 
-  for (let j = 0; j < h; j++) {
-    // v: 0 at the TOP of the quad, 1 at its base.
-    //
-    // CanvasTexture flips Y by default, so canvas row 0 becomes UV v=1 — the
-    // TOP of the plane. Writing `1 - j/h` here therefore put the hot pink base
-    // colour and the wide end of the waist at the top of the column and the
-    // thin blue tip at the bottom: the whole plume rendered upside down, and
-    // three additive layers of near-white pink at the top blew out to white.
-    const v = j / h;
-    const av = v * Math.PI * 2;
-    for (let i = 0; i < w; i++) {
-      const u = i / w, au = u * Math.PI * 2;
-      const k = (j*w + i) * 4;
-
-      // Wisps over a body. The first version was filaments ALONE at a high
-      // frequency, which rendered as thin scratches rather than a column of
-      // energy — the reference is dense. So: a soft core column supplies the
-      // mass, and fewer, fatter filaments ride on top of it as detail.
-      const wander = 0.16*Math.sin(av*3 + ph[0]) + 0.09*Math.sin(av*7 + ph[1]);
-      const uu = u + wander;
-      const fil = Math.sin(uu * Math.PI * 5 + ph[2]) * Math.sin(uu * Math.PI * 2.5 + ph[3]);
-
-      // waist: 1 on the centre line, 0 at the edges
-      const waist = Math.max(0, 1 - Math.abs(u - 0.5) * 2);
-      // the body — a fat soft column that narrows as it rises
-      const body = Math.pow(waist, 0.9 + (1 - v) * 1.6);
-      let a = body * 0.72 + Math.max(0, fil) * body * 0.85;
-
-      a *= Math.pow(v, 0.40);                 // thins out toward the top
-      a *= 0.70 + 0.30*Math.sin(av*9 + au*2 + ph[4]);   // gentle churn
-      a = Math.max(0, a) * 1.15;
-
-      // magenta core -> violet -> blue
-      let R,G,B;
-      if (v > 0.82)      { R=255; G=140; B=225; }
-      else if (v > 0.52) { const f=(v-0.52)/0.30; R=200+f*55; G=70+f*120; B=225+f*20; }
-      else if (v > 0.24) { const f=(v-0.24)/0.28; R=120+f*80; G=60+f*10;  B=235-f*10; }
-      else               { const f=v/0.24;        R=60+f*60;  G=70-f*10;  B=210+f*25; }
-
-      img.data[k]   = R;
-      img.data[k+1] = G;
-      img.data[k+2] = B;
-      img.data[k+3] = Math.min(1, a) * 255;
-    }
-  }
-  x.putImageData(img, 0, 0);
-  const t = new T.CanvasTexture(c);
-  t.wrapS = T.ClampToEdgeWrapping;
-  t.wrapT = T.RepeatWrapping;
-  t.colorSpace = T.SRGBColorSpace;
-  return t;
-}
-
-const plumeTexA = plumeSheet(64, 160, 0x2b71);
-const plumeTexB = plumeSheet(64, 160, 0x9f04);
-
-// Three quads at sixty degrees around the vertical. From any camera angle at
-// least one is broadly facing you, which gives a billboard's readability
-// without a per-frame lookAt on twenty-four objects.
-const plumeGeo = new T.PlaneGeometry(1, 1);
-plumeGeo.translate(0, 0.5, 0);          // pivot at the foot, so it grows upward
-
-// Bright core at the base — the hot spot the plume rises out of.
-const coreGeo = new T.SphereGeometry(1, 10, 8);
-
-const auras = [];
-// Carry caps at 7, or 10 with Swarm. A full volley of 10 can be in flight
-// while the next 10 are already gathered, plus whatever a Warper has thrown
-// back — so 14 was not enough and the overflow would silently go unlit.
-for (let i = 0; i < 24; i++) {
-  const g = new T.Group();
-  const mat = new T.MeshBasicMaterial({
-    map: i % 2 ? plumeTexB : plumeTexA,
-    transparent: true, opacity: 0, blending: T.AdditiveBlending,
-    depthWrite: false, side: T.DoubleSide });
-  const blades = [];
-  for (let k = 0; k < 3; k++) {
-    const q = new T.Mesh(plumeGeo, mat);
-    q.rotation.y = (k / 3) * Math.PI;      // 0, 60, 120 degrees
-    g.add(q); blades.push(q);
-  }
-  const coreMat = new T.MeshBasicMaterial({
-    color: 0xffb0f0, transparent: true, opacity: 0,
-    blending: T.AdditiveBlending, depthWrite: false });
-  const core = new T.Mesh(coreGeo, coreMat);
-  g.add(core);
-  g.visible = false;
-  g.frustumCulled = false;
-  scene.add(g);
-  auras.push({ g, mat, coreMat, blades, core });
-}
-
-// Tints by what kind of control the object is under, so the aura still carries
-// information rather than only decoration. The plume's own ramp already runs
-// magenta at the core to blue at the tips, so HELD is left essentially
-// untinted — that IS the intended look — and the other two states pull it warm
-// or red so a returning prop still reads as danger at a glance.
-const AURA_HELD    = new T.Color(0xffffff);
-const AURA_SEEK    = new T.Color(0xffc890);
-const AURA_HOSTILE = new T.Color(0xff7060);
-
-function updateAuras(dt) {
-  // Scroll the two shared sheets rather than a clone per object: twenty-four
-  // cloned textures would be twenty-four GPU uploads to animate what is really
-  // one motion. Two different rates so alternating auras never march in step.
-  plumeTexA.offset.y = (plumeTexA.offset.y - 0.55*dt) % 1;
-  plumeTexB.offset.y = (plumeTexB.offset.y - 0.80*dt) % 1;
-
-  let i = 0;
-  const claim = (o, col, base, pulseHz) => {
-    if (i >= auras.length) return;
-    const A = auras[i++];
-    A.g.visible = true;
-
-    // Sized off the prop, so a boulder wears a taller column than a plank and
-    // the zoom-shrunk carry never becomes the thing filling the screen — the
-    // failure the old spherical shell had to be tuned down twice to avoid.
-    const r = o.r * o.mesh.scale.x;
-    const pulse = 1 + 0.09*Math.sin(S.t*pulseHz + o.slot*1.7);
-    for (const q of A.blades) q.scale.set(r*2.5, r*4.6*pulse, 1);
-
-    // Seated below the prop's centre so the column rises THROUGH the object
-    // rather than balancing on top of it.
-    A.g.position.set(o.pos.x, o.pos.y - r*0.85, o.pos.z);
-
-    A.mat.color.copy(col);
-    // A fresh grab flares, then settles.
-    A.mat.opacity = base + 0.34*Math.max(0, o.grabT||0)
-                  + 0.07*Math.sin(S.t*pulseHz*1.6 + o.slot);
-
-    // The hot core sits back at the prop itself — the bright spot the column
-    // is rising out of.
-    A.core.position.y = r*0.85;
-    A.core.scale.setScalar(r * (0.82 + 0.10*Math.sin(S.t*pulseHz*2.1 + o.slot)));
-    A.coreMat.color.copy(col);
-    A.coreMat.opacity = base*0.7 + 0.30*Math.max(0, o.grabT||0);
-  };
-
-  for (const o of S.held) claim(o, AURA_HELD, 0.55, 7);
-  for (const o of rocks) {
-    if (o.gone || o.held) continue;
-    if (o.hostile > 0)     claim(o, AURA_HOSTILE, 0.75, 13);
-    else if (o.seekT > 0)  claim(o, AURA_SEEK, 0.62, 11);
-  }
-  for (; i < auras.length; i++) auras[i].g.visible = false;
-}
+function updateAuras(dt) { /* auras removed — see the note above */ }
 
 function updateTethers() {
   const n = S.held.length;
@@ -3512,7 +3389,6 @@ function clearAll() {
   blastQ.length = 0;
   bolts.forEach(b2 => scene.remove(b2.mesh)); bolts.length = 0;
   tethers.forEach(t2 => { t2.visible = false; });
-  auras.forEach(a2 => { a2.visible = false; });
   S.held = []; S.lock = null; S.combo = 0; S.comboT = 0;
   resetObstacles();
 }
@@ -4627,8 +4503,15 @@ function step(dt) {
         const k = 1 - w.drawT / w.AI.telegraph;
         w.tell.material.opacity = 0.25 + k * 0.5;
         w.tell.scale.setScalar(0.6 + k * 1.5);
+        // The nock brightens and swells as the string comes back. A ring on the
+        // ground is easy to lose at a 17-unit standoff; a light on the body
+        // itself is what actually carries at that distance.
+        const nk = w.g.userData.nock;
+        if (nk) nk.scale.setScalar(1 + k * 1.9);
         if (w.drawT <= 0) {
           w.tell.visible = false;
+          const nk2 = w.g.userData.nock;
+          if (nk2) nk2.scale.setScalar(1);
           fireArrow(w.pos, w.E.arrow.speed);
           w.arrowT = w.E.arrow.every * rand(0.85, 1.2);
         }
