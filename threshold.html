@@ -5656,8 +5656,17 @@ const MAT = {
   floor2: new T.MeshStandardMaterial({ color:0x2f2f39, roughness:0.95 }),
   wall:   new T.MeshStandardMaterial({ color:0x4a4a56, roughness:0.9 }),
   pillar: new T.MeshStandardMaterial({ color:0x565663, roughness:0.85 }),
-  player: new T.MeshStandardMaterial({ color:0xd8d2c4, roughness:0.5, metalness:0.15 }),
+  player: new T.MeshStandardMaterial({ color:0xd8ccb4, roughness:0.62 }),
+  playerCloth: new T.MeshStandardMaterial({ color:0x3c4450, roughness:0.85 }),
+  blade:  new T.MeshStandardMaterial({ color:0xc9cdd4, roughness:0.28, metalness:0.85 }),
   cloak:  new T.MeshStandardMaterial({ color:0x8a2f24, roughness:0.75 }),
+  // Dead flesh, at four stages of gone. Cloth is what is left of what they
+  // were wearing when the tower got them — it is the only thing that tells one
+  // archetype from another at a glance, so each gets its own.
+  zFlesh:  new T.MeshStandardMaterial({ color:0x7d8a6e, roughness:0.95 }),
+  zFresh:  new T.MeshStandardMaterial({ color:0x93917c, roughness:0.92 }),
+  zRot:    new T.MeshStandardMaterial({ color:0x5f6b55, roughness:0.96 }),
+  zPale:   new T.MeshStandardMaterial({ color:0xa8b0a2, roughness:0.85 }),
   husk:   new T.MeshStandardMaterial({ color:0x6d5f4e, roughness:0.9 }),
   mote:   new T.MeshStandardMaterial({ color:0x4a6f9c, roughness:0.4, emissive:0x1a3a5c, emissiveIntensity:0.8 }),
   lash:   new T.MeshStandardMaterial({ color:0x8c3550, roughness:0.7 }),
@@ -5735,22 +5744,104 @@ function recomputeStats(keepRatio) {
   P.hp=Math.round(P.hpMax*hpR); P.sta=P.staMax*spR; P.foc=P.focMax*mpR;
 }
 
-function buildPlayerMesh() {
+// ═══════════════════════════════════════════════════════════════════ rigs
+// One humanoid builder serves the Candidate and every corpse in the tower.
+// Limbs hang from pivot groups placed at the shoulder and hip, so rotating the
+// pivot swings the whole limb from the correct joint instead of spinning a box
+// around its own middle. Everything is boxes and capsules — no external assets
+// exist inside a CSP-sealed page, so the silhouette has to do the work.
+function limb(mat, w, len, d) {
+  const pivot = new T.Group();
+  const m = new T.Mesh(new T.BoxGeometry(w, len, d), mat);
+  m.position.y = -len/2;                 // hang below the joint
+  m.castShadow = true;
+  pivot.add(m);
+  return pivot;
+}
+
+function buildHumanoid(o) {
   const g = new T.Group();
-  const body = new T.Mesh(new T.CapsuleGeometry(0.36,0.86,4,10), MAT.player);
-  body.position.y = 0.93; body.castShadow = true;
-  const head = new T.Mesh(new T.SphereGeometry(0.25,12,10), MAT.player);
-  head.position.y = 1.66; head.castShadow = true;
-  // A short cape gives the character a readable facing from behind, which a
-  // capsule alone does not.
-  const cape = new T.Mesh(new T.BoxGeometry(0.62,0.82,0.07), MAT.cloak);
-  cape.position.set(0,1.06,0.30); cape.castShadow = true;
-  const blade = new T.Mesh(new T.BoxGeometry(0.09,1.16,0.16), MAT.player);
-  blade.position.set(0.42,1.0,-0.12);
-  g.add(body,head,cape,blade);
-  g.userData.blade = blade;
+  const s = o.scale || 1;
+  const skin = o.skin, cloth = o.cloth || o.skin;
+  const hipY = 0.86*s, shoulderY = 1.44*s;
+
+  // Real hierarchy, not a pile of siblings. `upper` pivots at the hip and owns
+  // the torso, head and both arms, so leaning it forward carries the whole
+  // upper body — the flat version rotated a lone torso box and left the head
+  // and arms hanging in the air where the body used to be.
+  const upper = new T.Group();
+  upper.position.y = hipY;
+
+  const torso = new T.Mesh(new T.BoxGeometry(0.50*s, 0.62*s, 0.28*s), cloth);
+  torso.position.y = (shoulderY - hipY)/2; torso.castShadow = true;
+
+  const neck = new T.Group();
+  neck.position.y = shoulderY - hipY;
+  const head = new T.Mesh(new T.BoxGeometry(0.28*s, 0.30*s, 0.28*s), skin);
+  head.position.y = 0.19*s; head.castShadow = true;
+  neck.add(head);
+
+  const armL = limb(skin, 0.14*s, 0.58*s, 0.14*s);
+  const armR = limb(skin, 0.14*s, 0.58*s, 0.14*s);
+  armL.position.set(-0.32*s, shoulderY - hipY, 0);
+  armR.position.set( 0.32*s, shoulderY - hipY, 0);
+  upper.add(torso, neck, armL, armR);
+
+  const legL = limb(cloth, 0.17*s, 0.82*s, 0.17*s);
+  const legR = limb(cloth, 0.17*s, 0.82*s, 0.17*s);
+  legL.position.set(-0.14*s, hipY, 0);
+  legR.position.set( 0.14*s, hipY, 0);
+
+  g.add(upper, legL, legR);
+  g.userData = { upper, torso, neck, head, armL, armR, legL, legR, hipY, shoulderY, s };
+  g.userData.parts = [torso, head,
+                      armL.children[0], armR.children[0],
+                      legL.children[0], legR.children[0]];
+  return g;
+}
+
+// Shared gait. phase advances with distance travelled, so limbs keep step with
+// actual movement rather than drifting against it when speed changes.
+function animateRig(g, phase, amount, opts) {
+  const u = g.userData; if (!u) return;
+  const sw = Math.sin(phase) * amount;
+  const sw2 = Math.cos(phase) * amount;
+  const hunch = opts && opts.hunch || 0;
+  const reach = opts && opts.reach || 0;
+
+  u.legL.rotation.x =  sw;
+  u.legR.rotation.x = -sw;
+  // Arms counter-swing, unless the thing is reaching — then they stay out front
+  // and only tremble, which is what separates a walk from a lurch.
+  u.armL.rotation.x = reach ? -reach + sw2*0.16 : -sw;
+  u.armR.rotation.x = reach ? -reach - sw2*0.16 :  sw;
+  u.armL.rotation.z =  reach*0.18;
+  u.armR.rotation.z = -reach*0.18;
+  // Lean the whole upper body from the hip, then bring the head back toward
+  // level — a corpse still looks where it is going.
+  u.upper.rotation.x = hunch;
+  u.neck.rotation.x  = -hunch*0.72;
+  u.upper.position.y = u.hipY + Math.abs(sw)*0.035;
+}
+
+function buildPlayerMesh() {
+  const g = buildHumanoid({ skin:MAT.player, cloth:MAT.playerCloth, scale:1 });
+  const u = g.userData;
+  // A cape reads facing from behind, which is the camera's usual angle.
+  const cape = new T.Mesh(new T.BoxGeometry(0.54,0.78,0.06), MAT.cloak);
+  cape.position.set(0, 1.10, 0.19); cape.castShadow = true;
+  g.add(cape);
+  // The blade is parented to the right arm so it swings with the strike
+  // instead of floating beside a limb that is moving independently.
+  const blade = new T.Mesh(new T.BoxGeometry(0.07,1.05,0.14), MAT.blade);
+  blade.position.set(0, -0.95, -0.10);
+  blade.castShadow = true;
+  u.armR.add(blade);
+  u.blade = blade; u.cape = cape;
   scene.add(g);
-  P.g = g; P.mesh = body;
+  P.g = g; P.rig = u;
+  P.mesh = u.torso;                       // what the i-frame tint recolours
+  P.phase = 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════ skills
@@ -6086,39 +6177,34 @@ function completeObjective() {
 
 // ═══════════════════════════════════════════════════════════════════ enemies
 const EDEF = {
+  // Nine kinds of dead. Every stat, reach, wind-up and special below is
+  // unchanged from the pre-zombie roster — only the fiction and the bodies
+  // moved, so the balance work already verified still holds.
   husk:  { hp:38, dmg:13, spd:3.0, reach:2.1, wind:0.62, rec:0.72, xp:6,  r:0.48, h:1.7,
-           mat:"husk",   name:"Husk" },
+           skin:"zFlesh", cloth:"zRot",  name:"Shambler", scale:1.00, hunch:0.30, reach2:0.9 },
   lash:  { hp:24, dmg:16, spd:6.1, reach:2.0, wind:0.36, rec:0.50, xp:8,  r:0.40, h:1.5,
-           mat:"lash",   name:"Lash" },
+           skin:"zPale",  cloth:"zRot",  name:"Sprinter", scale:0.92, hunch:0.62, reach2:1.2 },
   mote:  { hp:26, dmg:11, spd:2.4, reach:15,  wind:0.80, rec:1.05, xp:8,  r:0.44, h:1.3,
-           mat:"mote",   name:"Mote", ranged:true },
+           skin:"zRot",   cloth:"zFlesh",name:"Spitter",  scale:0.95, hunch:0.45, reach2:0.5,
+           ranged:true },
   warden:{ hp:120,dmg:24, spd:2.4, reach:2.6, wind:0.95, rec:0.95, xp:26, r:0.70, h:2.1,
-           mat:"warden", name:"Warden", shielded:true },
-
-  // Two archetypes drafted through the local OmniRoute gateway and kept for the
-  // mechanics they add rather than the names. Neither duplicates an existing
-  // behaviour: the Bellwether punishes standing anywhere near it and leaves you
-  // slowed rather than damaged, and the Scribe covers ground a single Mote bolt
-  // cannot, so cover stops being optional.
+           skin:"zFresh", cloth:"warden",name:"Bulwark",  scale:1.22, hunch:0.14, reach2:0.7,
+           shielded:true },
   bell:  { hp:74, dmg:9,  spd:2.2, reach:6.8, wind:1.10, rec:1.25, xp:17, r:0.56, h:1.95,
-           mat:"bell",   name:"Bellwether", aoe:true, slow:2.0 },
+           skin:"zFlesh", cloth:"bell",  name:"Screamer", scale:1.08, hunch:0.20, reach2:0.3,
+           aoe:true, slow:2.0 },
   scribe:{ hp:34, dmg:9,  spd:2.0, reach:16,  wind:0.92, rec:1.15, xp:13, r:0.46, h:1.65,
-           mat:"scribe", name:"Scribe", ranged:true, volley:3, spread:0.30 },
-
-  // The remaining three from the same draft. Each needed a mechanic the game
-  // did not already own, or it would have been a reskin of something above.
-  //   Proctor — walks through walls and its shot does too, so cover is not a
-  //             solution to it. The only answer is to close the distance.
-  //   Inkblot — dormant and flat on the ground until you are almost on top of
-  //             it, then erupts. Punishes moving through a room without looking.
-  //   Docent  — lays persistent wax on the ground where you are standing,
-  //             taking space away rather than dealing damage directly.
+           skin:"zRot",   cloth:"scribe",name:"Spewer",   scale:1.00, hunch:0.40, reach2:0.6,
+           ranged:true, volley:3, spread:0.30 },
   proctor:{ hp:46, dmg:15, spd:1.9, reach:19,  wind:1.25, rec:1.30, xp:21, r:0.50, h:2.0,
-            mat:"proctor", name:"Proctor", ranged:true, ghost:true, aggroR:26 },
+           skin:"proctor",cloth:"proctor",name:"Revenant",scale:1.06, hunch:0.05, reach2:1.15,
+           ranged:true, ghost:true, aggroR:26 },
   inkblot:{ hp:30, dmg:21, spd:0,   reach:3.4, wind:0.50, rec:1.40, xp:14, r:0.62, h:0.7,
-            mat:"inkblot", name:"Inkblot", aoe:true, ambush:true, aggroR:5.2 },
+           skin:"zRot",   cloth:"inkblot",name:"Crawler", scale:0.90, hunch:1.05, reach2:1.15,
+           aoe:true, ambush:true, aggroR:5.2 },
   docent: { hp:62, dmg:7,  spd:2.6, reach:13,  wind:1.00, rec:1.20, xp:18, r:0.54, h:1.8,
-            mat:"docent",  name:"Docent", ranged:true, wax:true },
+           skin:"zFlesh", cloth:"docent",name:"Bloater",  scale:1.14, hunch:0.28, reach2:0.8,
+           ranged:true, wax:true },
 };
 
 function spawnEnemy(kind, x, z, floor) {
@@ -6126,9 +6212,9 @@ function spawnEnemy(kind, x, z, floor) {
   const hpS = Math.pow(1+CFG.floorHpScale, floor-1);
   const dmS = Math.pow(1+CFG.floorDmgScale, floor-1);
   const g = new T.Group();
-  const body = new T.Mesh(new T.CapsuleGeometry(d.r, d.h-d.r*2, 4, 9), MAT[d.mat]);
-  body.position.y = d.h/2; body.castShadow = true;
-  g.add(body);
+  const rig = buildHumanoid({ skin:MAT[d.skin], cloth:MAT[d.cloth], scale:d.scale||1 });
+  g.add(rig);
+  const body = rig.userData.torso;
   // Telegraph disc: sits at the feet, only visible during wind-up. This is the
   // single most important piece of readability in the game.
   const tell = new T.Mesh(new T.RingGeometry(0.1, 1, 24), MAT.tell.clone());
@@ -6145,7 +6231,8 @@ function spawnEnemy(kind, x, z, floor) {
   G.root.add(g);
 
   const e = {
-    kind, def:d, g, body, tell, shield, boss:false,
+    kind, def:d, g, body, rig, parts:rig.userData.parts, tell, shield, boss:false,
+    phase:rnd()*6.28,
     pos:new T.Vector3(x,0,z), vel:new T.Vector3(), knock:new T.Vector3(),
     hp: Math.round(d.hp*hpS), hpMax: Math.round(d.hp*hpS),
     dmg: d.dmg*dmS, alive:true,
@@ -6409,8 +6496,12 @@ function moveIntent() {
   if (G.keys.KeyD) v.add(r);
   // Virtual stick adds into the same vector, so every downstream system —
   // dodge direction, movement, animation — stays input-agnostic.
+  //
+  // Note the sign: forward is -f, which is why the keyboard does v.sub(f) for W.
+  // The stick originally added +f for "up" and therefore drove the character
+  // backwards on every phone.
   const t = G.touch;
-  if (t.vx || t.vy) { v.addScaledVector(f, t.vy); v.addScaledVector(r, t.vx); }
+  if (t.vx || t.vy) { v.addScaledVector(f, -t.vy); v.addScaledVector(r, t.vx); }
   return v;
 }
 
@@ -6661,12 +6752,38 @@ function updatePlayer(dt) {
   // ── mesh ────────────────────────────────────────────────────────────────
   P.g.position.copy(P.pos);
   P.g.rotation.y = P.yaw + Math.PI;
-  const bl = P.g.userData.blade;
-  if (bl) {
-    const swinging = P.atkPhase === "wind" || P.atkPhase === "active";
-    bl.rotation.x = swinging ? lerp(-1.5, 1.1, 1-P.atkT/0.41) : Math.sin(performance.now()*0.002)*0.06;
+
+  // ── the Candidate's animation ───────────────────────────────────────────
+  // Gait phase is driven by ground speed, so the legs match the distance
+  // actually covered and stop dead when the player does.
+  const spd2 = Math.hypot(P.vel.x, P.vel.z);
+  const running = spd2 > 0.6 && P.dodgeT <= 0;
+  P.phase += dt * (running ? 2.2 + spd2*1.25 : 3.0);
+  const u = P.rig;
+  const swinging = P.atkPhase === "wind" || P.atkPhase === "active";
+
+  if (P.dodgeT > 0) {
+    // Tuck: both legs forward, torso folded. Reads instantly as "that was a
+    // roll", which matters because the roll is the whole defence.
+    animateRig(P.g, 0, 0, { hunch:0.95, reach:1.5 });
+    u.legL.rotation.x = 1.5; u.legR.rotation.x = 1.5;
+  } else {
+    animateRig(P.g, P.phase, running ? 0.62 : 0.06, { hunch: running ? 0.13 : 0.03, reach:0 });
   }
-  P.mesh.material = P.iframe > 0 ? MAT.mote : MAT.player;
+
+  // The sword arm overrides the gait during a swing: raise on the wind-up,
+  // drive through on the active frames.
+  if (swinging) {
+    const k = 1 - P.atkT/0.41;
+    u.armR.rotation.x = lerp(-2.35, 0.85, clamp(k,0,1));
+    u.armR.rotation.z = -0.25;
+    u.upper.rotation.y = lerp(0.42, -0.32, clamp(k,0,1));
+  } else {
+    u.upper.rotation.y = 0;
+  }
+  if (u.cape) u.cape.rotation.x = -Math.min(0.42, spd2*0.05);
+
+  P.mesh.material = P.iframe > 0 ? MAT.mote : MAT.playerCloth;
 
   lamp.position.set(P.pos.x, 3.2, P.pos.z);
 }
@@ -6763,10 +6880,34 @@ function updateEnemies(dt) {
 
     e.g.position.copy(e.pos);
     e.g.rotation.y = e.facing;
-    // An Inkblot lies flat until it wakes, so it reads as a stain on the
-    // floor rather than a monster standing in the open.
-    if (e.def.ambush) e.body.scale.y = e.aggro ? 1 : 0.22;
-    e.body.material = e.hitFlash > 0 ? MAT.exit : MAT[e.def.mat || "boss"];
+
+    // ── shamble ────────────────────────────────────────────────────────────
+    // Gait phase advances with speed, so a Sprinter's legs actually go faster
+    // than a Shambler's rather than every corpse walking at one cadence. Arms
+    // stay out front (reach) instead of counter-swinging, which is most of what
+    // separates a dead walk from a living one.
+    const moving = e.stun <= 0 && e.aggro && e.state === "idle" && e.def.spd > 0;
+    e.phase += dt * (moving ? 2.4 + e.def.spd*1.15 : 1.1);
+    const swing = moving ? 0.52 : 0.10;
+    const winding = e.state === "wind";
+    animateRig(e.rig, e.phase, swing, {
+      hunch: e.def.hunch + (winding ? 0.22 : 0),
+      reach: e.def.reach2 * (winding ? 1.45 : 1),
+    });
+    // A Crawler lies flat until it wakes, so it reads as a body on the floor
+    // rather than a monster standing in the open.
+    if (e.def.ambush) {
+      const up = e.aggro ? 1 : 0.18;
+      e.rig.scale.y = up;
+      e.rig.rotation.x = e.aggro ? 0 : 1.15;
+    }
+
+    const flashed = e.hitFlash > 0;
+    if (flashed !== e._wasFlashed) {
+      e._wasFlashed = flashed;
+      for (const m of e.parts)
+        m.material = flashed ? MAT.exit : (m === e.body ? MAT[e.def.cloth] : MAT[e.def.skin]);
+    }
     if (e.shield) e.shield.visible = e.guardBroken <= 0;
   }
   // sweep the dead

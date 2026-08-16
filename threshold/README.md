@@ -50,15 +50,15 @@ Nine archetypes, each owning a mechanic no other one has:
 
 | | Behaviour |
 |---|---|
-| Husk | Slow melee, heavy telegraph. The baseline. |
-| Lash | Fast, fragile, short wind-up. Punishes standing still. |
-| Mote | Hovers at range, single bolt, strafes. |
-| Warden | Guard faces where it looks — flank it or break it with Sunder. |
-| Bellwether | Rings out to full reach, no safe spacing. Slows to 55%. |
-| Scribe | Three-bolt fan; strafing does not clear it, cover does. |
-| Proctor | Walks through walls, and so does its shot. Cover is no answer. |
-| Inkblot | Dormant and flat until you are 5m away, then erupts. |
-| Docent | Lays persistent wax where you stand. Takes ground, not health. |
+| Shambler | Slow melee, heavy telegraph. The baseline dead. |
+| Sprinter | Fast, fragile, short wind-up. Punishes standing still. |
+| Spitter | Hangs back and spits, strafes, retreats when closed on. |
+| Bulwark | Guard faces where it looks — flank it or break it with Sunder. |
+| Screamer | Rings out to full reach, no safe spacing. Slows to 55%. |
+| Spewer | Three-way spray; strafing does not clear it, cover does. |
+| Revenant | Walks through walls, and so does its shot. Cover is no answer. |
+| Crawler | Lies flat on the floor until you are 5m away, then erupts. |
+| Bloater | Leaves persistent bile where you stand. Takes ground, not health. |
 
 ## Mobile
 
