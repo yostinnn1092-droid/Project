@@ -1289,7 +1289,16 @@ function stepRing(dt) {
     const d = Math.hypot(w.pos.x - hero.pos.x, w.pos.z - hero.pos.z);
     const reach = band + (w.E.bulk||1)*0.42;
     for (let i = 0; i < L.rings; i++) {
-      if (Math.abs(d - RING.radii[i]) > reach) continue;
+      // The innermost ring burns everything from the player outwards, not just
+      // a band at its radius. As an annulus it left a safe hole in the middle:
+      // measured at max rank, a runner that closed all the way to 1.2 units sat
+      // inside the smallest ring taking nothing while it hit the player. A ring
+      // of fire you are standing in the centre of should not be a shelter for
+      // whatever reaches you. Outer rings stay bands, so the gaps between them
+      // remain real cover.
+      const inside = i === 0 ? (d > RING.radii[0] + reach)
+                             : (Math.abs(d - RING.radii[i]) > reach);
+      if (inside) continue;
       let cd = ringState.cool.get(w);
       if (!cd) { cd = [0,0,0]; ringState.cool.set(w, cd); }
       if (S.t < cd[i]) continue;
