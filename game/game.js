@@ -1071,6 +1071,166 @@ const hero = { pos: new T.Vector3(0,0,0), yaw: 0, walk: 0, hp: CFG.maxHealth,
   speed: 0, gait: 0, lastX: 0, lastZ: 0,
                vy: 0, grounded: true };
 
+// ═══════════════════════════════════════════════════════════════ ring of fire
+// An orbiting hazard rather than another thing to aim. It rewards standing in
+// the crowd, which is the opposite of everything else in the kit — telekinesis
+// wants distance, the ring wants you close — so the two pull against each
+// other instead of stacking into one dominant style.
+//
+// Three ranks. Each adds an orb, widens the orbit and raises the damage, so a
+// rank-3 ring sweeps a genuinely different volume from a rank-1 one and is not
+// merely a bigger number.
+const RING = {
+  levels: [
+    null,
+    { orbs:1, radius:3.6, dps:52,  orbR:0.62, spin:2.5 },
+    { orbs:2, radius:5.0, dps:88,  orbR:0.74, spin:2.9 },
+    { orbs:3, radius:6.6, dps:140, orbR:0.88, spin:3.3 },
+  ],
+  tick: 0.22,          // seconds between damage applications per body
+};
+
+const ringState = { lv:0, ang:0, orbs:[], group:null, cool:new Map() };
+
+const ringCoreMat = new T.MeshBasicMaterial({ color:0xffd08a });
+const ringGlowMat = new T.MeshBasicMaterial({ color:0xff6a1a, transparent:true,
+                                              opacity:0.42, depthWrite:false });
+const ringTrailMat= new T.MeshBasicMaterial({ color:0xff8a2a, transparent:true,
+                                              opacity:0.16, depthWrite:false,
+                                              side:T.DoubleSide });
+
+function buildRingOrbs() {
+  if (!ringState.group) { ringState.group = new T.Group(); scene.add(ringState.group); }
+  const g = ringState.group;
+  while (g.children.length) { const c = g.children.pop(); disposeGroup(c); }
+  ringState.orbs.length = 0;
+  if (!ringState.lv) return;
+  const L = RING.levels[ringState.lv];
+
+  // The orbit path, drawn once as a faint annulus so the danger zone is
+  // legible even between orbs. Without it the player cannot see how wide the
+  // ring actually reaches, which matters the moment they upgrade.
+  const path = new T.Mesh(
+    new T.RingGeometry(L.radius - 0.13, L.radius + 0.13, 48), ringTrailMat);
+  path.rotation.x = -Math.PI/2; path.position.y = 0.9;
+  g.add(path);
+
+  for (let i = 0; i < L.orbs; i++) {
+    const o = new T.Group();
+    const core = new T.Mesh(new T.SphereGeometry(L.orbR*0.55, 10, 8), ringCoreMat);
+    const halo = new T.Mesh(new T.SphereGeometry(L.orbR*1.5, 10, 8), ringGlowMat);
+    const lt = new T.PointLight(0xff7a26, 1.5, 9, 1.8);
+    o.add(core, halo, lt);
+    g.add(o);
+    ringState.orbs.push({ g:o });
+  }
+}
+
+function ringUpgrade() {
+  if (ringState.lv >= 3) {
+    // Already capped: convert the pickup into something rather than nothing.
+    hero.hp = Math.min(CFG.maxHealth, hero.hp + 1);
+    toast("RING ALREADY AT ITS LIMIT — +1 HEALTH", 2200);
+    return;
+  }
+  ringState.lv++;
+  buildRingOrbs();
+  const L = RING.levels[ringState.lv];
+  banner("RING OF FIRE · " + ringState.lv);
+  toast(L.orbs + (L.orbs===1?" flame":" flames") + " · " + Math.round(L.dps) +
+        " dps · radius " + L.radius.toFixed(1), 2800);
+  SFX.overload();
+  S.shake = Math.min(1.0, S.shake + 0.35);
+}
+
+function stepRing(dt) {
+  const g = ringState.group;
+  if (!ringState.lv || !g) return;
+  const L = RING.levels[ringState.lv];
+  ringState.ang += dt * L.spin;
+  g.position.set(hero.pos.x, 0, hero.pos.z);
+
+  for (let i = 0; i < ringState.orbs.length; i++) {
+    const orb = ringState.orbs[i];
+    const a = ringState.ang + (i / L.orbs) * Math.PI * 2;
+    const ox = Math.cos(a) * L.radius, oz = Math.sin(a) * L.radius;
+    // Bob so it reads as fire rather than a rigid solid.
+    orb.g.position.set(ox, 1.05 + Math.sin(S.t*6 + i*2.1)*0.14, oz);
+    const pulse = 1 + Math.sin(S.t*9 + i)*0.10;
+    orb.g.scale.setScalar(pulse);
+
+  }
+
+  // ── damage ────────────────────────────────────────────────────────────────
+  // The burning ANNULUS is the hitbox, not the three orbs. Testing the orbs
+  // individually looked right and was not: an orb sweeps past a body in 0.15s
+  // against a 0.22s damage cooldown, so each pass landed at most one tick and
+  // the real output was 48 dps against 140 advertised — 35% of the number on
+  // the card. The orbs are the fire you can see; the ring is the fire that
+  // burns, which is also what "ring of fire" ought to mean.
+  //
+  // Applied on a per-body cooldown rather than per frame, so the ring deals
+  // the same damage at 30fps as it does at 144.
+  const band = L.orbR + 0.75;
+  for (const w of walkers) {
+    if (w.dead) continue;
+    const d = Math.hypot(w.pos.x - hero.pos.x, w.pos.z - hero.pos.z);
+    if (Math.abs(d - L.radius) > band + (w.E.bulk||1)*0.55) continue;
+    const until = ringState.cool.get(w) || 0;
+    if (S.t < until) continue;
+    ringState.cool.set(w, S.t + RING.tick);
+    damageWalker(w, L.dps * RING.tick, null, 0, "fire");
+    if (Math.random() < 0.45) sparks(tmp3.set(w.pos.x, 1.2, w.pos.z), 0xff8a2a, 3, 8);
+  }
+  // The map would otherwise hold every corpse this run.
+  if (ringState.cool.size > 120)
+    for (const k of ringState.cool.keys()) if (k.dead) ringState.cool.delete(k);
+}
+
+// ── the pickup ──────────────────────────────────────────────────────────────
+// Drops from bodies. Deliberately not guaranteed and not purchasable: the ring
+// is a run-shaping find, and knowing it might not come is what makes it matter
+// when it does.
+const emberPickups = [];
+const emberMat = new T.MeshBasicMaterial({ color:0xff7a26 });
+const emberGlowMat = new T.MeshBasicMaterial({ color:0xffb060, transparent:true,
+                                               opacity:0.35, depthWrite:false });
+function dropEmber(pos) {
+  const g = new T.Group();
+  const core = new T.Mesh(new T.TorusGeometry(0.52, 0.16, 8, 18), emberMat);
+  core.rotation.x = Math.PI/2;
+  const halo = new T.Mesh(new T.SphereGeometry(1.15, 10, 8), emberGlowMat);
+  const lt = new T.PointLight(0xff7a26, 2.2, 12, 1.7);
+  g.add(core, halo, lt);
+  g.position.set(pos.x, 1.2, pos.z);
+  scene.add(g);
+  emberPickups.push({ g, pos:g.position, life:26, t:0 });
+}
+function stepEmbers(dt) {
+  for (let i = emberPickups.length-1; i >= 0; i--) {
+    const e = emberPickups[i];
+    e.t += dt; e.life -= dt;
+    e.g.rotation.y += dt*2.2;
+    e.g.position.y = 1.2 + Math.sin(e.t*2.6)*0.22;
+    // Drifts toward the player once close, so a pickup is never lost to a
+    // pixel of positioning in a fight.
+    const d = Math.hypot(e.pos.x-hero.pos.x, e.pos.z-hero.pos.z);
+    if (d < 7) {
+      e.g.position.x += (hero.pos.x-e.pos.x) * Math.min(1, dt*3.2);
+      e.g.position.z += (hero.pos.z-e.pos.z) * Math.min(1, dt*3.2);
+    }
+    if (d < 1.9) {
+      ringUpgrade();
+      scene.remove(e.g); disposeGroup(e.g); emberPickups.splice(i,1); continue;
+    }
+    if (e.life <= 0) { scene.remove(e.g); disposeGroup(e.g); emberPickups.splice(i,1); }
+  }
+}
+function clearEmbers() {
+  for (const e of emberPickups) { scene.remove(e.g); disposeGroup(e.g); }
+  emberPickups.length = 0;
+}
+
 // Dash ghosts: a handful of reusable translucent bodies, faded along the
 // dash path. Cloning the whole rig per frame would be far more expensive.
 const ghostMat = new T.MeshBasicMaterial({ color: 0xe94fbf, transparent: true,
@@ -1404,43 +1564,43 @@ function disposeGroup(g) {
 //   onDeath  "blast" detonates when killed
 //   leap     closes distance in bursts instead of a steady walk
 const ENEMIES = {
-  walker:  { name:"Walker",  code:"WK", hp:100, speed:2.05, scale:1.00, bulk:1.00,
+  walker:  { name:"Walker",  code:"WK", hp:185, speed:2.05, scale:1.00, bulk:1.00,
              skin:0x8b9078, eye:0xff6a30, score:100 },
-  runner:  { name:"Runner",  code:"RN", hp:55,  speed:4.70, scale:0.94, bulk:0.80,
+  runner:  { name:"Runner",  code:"RN", hp:110,  speed:4.70, scale:0.94, bulk:0.80,
              skin:0x969b80, eye:0xffd23c, score:130 },
-  crawler: { name:"Crawler", code:"CR", hp:45,  speed:3.10, scale:0.58, bulk:1.10,
+  crawler: { name:"Crawler", code:"CR", hp:118,  speed:3.10, scale:0.58, bulk:1.10,
              skin:0x7b8069, eye:0xff9a30, score:120 },
-  tank:    { name:"Tank",    code:"TK", hp:430, speed:1.25, scale:1.42, bulk:1.45,
+  tank:    { name:"Tank",    code:"TK", hp:620, speed:1.25, scale:1.42, bulk:1.45,
              skin:0x6d7260, eye:0xff3c2a, armor:38, score:400 },
-  armored: { name:"Armored", code:"AR", hp:170, speed:1.85, scale:1.10, bulk:1.20,
+  armored: { name:"Armored", code:"AR", hp:300, speed:1.85, scale:1.10, bulk:1.20,
              skin:0x8d94a0, eye:0xff5a3c, armor:62, score:300 },
-  exploder:{ name:"Exploder",code:"EX", hp:70,  speed:2.55, scale:1.05, bulk:1.25,
+  exploder:{ name:"Exploder",code:"EX", hp:130,  speed:2.55, scale:1.05, bulk:1.25,
              skin:0xb06a3c, eye:0xffc23c, onDeath:"blast", score:180 },
-  leaper:  { name:"Leaper",  code:"LP", hp:85,  speed:2.30, scale:0.98, bulk:0.88,
+  leaper:  { name:"Leaper",  code:"LP", hp:155,  speed:2.30, scale:0.98, bulk:0.88,
              skin:0x7d8c83, eye:0x6affc0, leap:true, score:200 },
   // A Shield holds a slab in front of it. Anything arriving from the front
   // is absorbed by the slab, so the answer is to go around it, blow it over,
   // or drop something on it from above.
-  shield:  { name:"Shield",  code:"SH", hp:150, speed:1.55, scale:1.14, bulk:1.30,
+  shield:  { name:"Shield",  code:"SH", hp:260, speed:1.55, scale:1.14, bulk:1.30,
              skin:0x6d7a86, eye:0xffb03c, shield:{ arc:0.55, hp:320 }, score:340 },
   // A Spawner is a timer: leave it alone and the arena fills with crawlers.
-  spawner: { name:"Spawner", code:"SP", hp:230, speed:1.10, scale:1.25, bulk:1.50,
+  spawner: { name:"Spawner", code:"SP", hp:380, speed:1.10, scale:1.25, bulk:1.50,
              skin:0x7a5f8a, eye:0xc06aff, spawns:{ every:5.2, type:"crawler", cap:6 },
              score:450 },
   // A Warper does what you do. It picks up loose props and throws them back,
   // which turns your own ammunition supply into a hazard.
-  warper:  { name:"Warper",  code:"WP", hp:120, speed:1.70, scale:1.06, bulk:0.95,
+  warper:  { name:"Warper",  code:"WP", hp:215, speed:1.70, scale:1.06, bulk:0.95,
              skin:0x8a6a9c, eye:0xe94fbf, psy:{ every:4.4, range:22 }, score:380 },
   // Punishes careless positioning: closes and spikes your strain. It does
   // NOT switch telekinesis off — an ability that simply stops working is
   // frustration, not difficulty. It pushes you toward overload, which is
   // visible on the bar and can be backed away from.
-  disruptor:{ name:"Disruptor", code:"DS", hp:95, speed:2.35, scale:1.00, bulk:0.9,
+  disruptor:{ name:"Disruptor", code:"DS", hp:175, speed:2.35, scale:1.00, bulk:0.9,
              skin:0x4a6a8a, eye:0x4FD6E9,
              disrupt:{ every:3.6, range:11, strain:0.28 }, score:420 },
   // Punishes letting anything reach you: roots the player for a moment.
   // Telegraphed, short, and broken by Dash.
-  grabber: { name:"Grabber",  code:"GR", hp:130, speed:2.60, scale:1.08, bulk:1.15,
+  grabber: { name:"Grabber",  code:"GR", hp:235, speed:2.60, scale:1.08, bulk:1.15,
              skin:0x7a5a4a, eye:0xffb03c,
              grab:{ every:5.5, range:3.2, hold:1.1 }, score:400 },
 };
@@ -1487,7 +1647,7 @@ const BOSS = {
 // telegraphed wind-up like everything else, debris throws like the Warden,
 // and a ground slam you beat with the jump button.
 const MAW = {
-  name:"THE MAW", plateHp:420, plates:6, coreHp:4200,
+  name:"THE GORGER", plateHp:420, plates:6, coreHp:4200,
   speed:1.35, reach:5.4, score:20000,
   slamEvery:  5.0,   // seconds between ground slams
   slamWind:   1.15,  // long tell — this is the attack you must read
@@ -1541,88 +1701,117 @@ function spawnMaw(x, z) {
   const mawM = new T.MeshStandardMaterial({ color:0x8a2a20, roughness:0.65,
                                             emissive:0x6a1408, emissiveIntensity:1.1 });
 
-  // Hunched barrel of a body, low and long rather than tall — it should read
-  // as an animal, not another man in armour.
-  const body = new T.Group();
-  body.position.y = 3.4;
-  g.add(body);
-  const trunk = part(new T.SphereGeometry(2.9, 18, 14), hideM, 0, 0, 0);
-  trunk.scale.set(1.0, 0.82, 1.32);
-  body.add(trunk);
-  const haunch = part(new T.SphereGeometry(2.3, 14, 12), hideM, 0, -0.35, -2.9);
-  haunch.scale.set(1.05, 0.9, 1.0);
-  body.add(haunch);
+  // A giant upright corpse rather than a beast on four legs. Everything else
+  // on the field is a zombie, and a quadruped read as a different game's boss
+  // wandering in. Upright also earns the hurl: a thing with hands is obviously
+  // capable of picking a car up, where a four-legged animal was not.
+  //
+  // The limb slots below are deliberately arms-into-aL/aR and legs-into-lL/lR,
+  // because that is what the shared gait code animates — a biped therefore
+  // walks and swings for free with no boss-specific animation path.
+  const HIP = 4.9, SHOULDER = 7.9;
 
-  // Head slung forward on a thick neck, with a jaw that opens when it roars.
+  // Legs: heavy, slightly bowed, carrying the whole mass.
+  const lL = limb(g, HIP, hideM, -1.35, HIP, 0.1, 0.90);
+  const lR = limb(g, HIP, hideM,  1.35, HIP, -0.1, 0.90);
+
+  // Torso hung from the hip so the whole upper body leans as one piece.
+  const body = new T.Group();
+  body.position.y = HIP;
+  g.add(body);
+
+  const pelvis = part(new T.SphereGeometry(1.85, 14, 12), hideM, 0, 0.1, 0);
+  pelvis.scale.set(1.0, 0.78, 0.86);
+  body.add(pelvis);
+
+  const trunk = part(new T.SphereGeometry(2.35, 18, 14), hideM, 0, 1.62, 0);
+  trunk.scale.set(1.06, 1.02, 0.80);
+  body.add(trunk);
+
+  // A ribcage that has opened. Reads at distance as "this one is long dead"
+  // and gives the chest core somewhere to sit that looks like a wound.
+  for (let i = 0; i < 4; i++) {
+    const rib = part(new T.TorusGeometry(1.5 - i*0.13, 0.14, 6, 14), plateM,
+                     0, 1.0 + i*0.42, 0.15);
+    rib.rotation.x = Math.PI/2;
+    rib.scale.set(1, 0.62, 1);
+    body.add(rib);
+  }
+
+  // Shoulders sit high and forward — the classic dead stoop.
+  const shrug = part(new T.SphereGeometry(1.25, 12, 10), hideM, 0, SHOULDER-HIP-0.2, -0.15);
+  shrug.scale.set(1.9, 0.72, 0.95);
+  body.add(shrug);
+
+  // Head low between the shoulders on almost no neck.
   const neck = new T.Group();
-  neck.position.set(0, 0.15, 3.1);
+  neck.position.set(0, SHOULDER-HIP-0.05, 0.35);
   body.add(neck);
-  const neckMesh = part(new T.CylinderGeometry(1.05, 1.35, 2.2, 10), hideM, 0, -0.15, 0.8);
-  neckMesh.rotation.x = Math.PI/2.35;
-  neck.add(neckMesh);
   const head = new T.Group();
-  head.position.set(0, -0.55, 2.5);
+  head.position.set(0, 0.62, 0.25);
   neck.add(head);
-  const skull = part(new T.SphereGeometry(1.5, 14, 12), hideM, 0, 0, 0);
-  skull.scale.set(1.0, 0.86, 1.35);
+  const skull = part(new T.SphereGeometry(1.12, 14, 12), hideM, 0, 0, 0);
+  skull.scale.set(0.92, 1.05, 1.0);
   head.add(skull);
+
+  // Hanging jaw — it never closes, and it opens further on the roar.
   const jaw = new T.Group();
-  jaw.position.set(0, -0.55, 0.5);
+  jaw.position.set(0, -0.62, 0.28);
   head.add(jaw);
-  const jawMesh = part(new T.ConeGeometry(1.15, 2.2, 8), mawM, 0, -0.2, 0.7);
-  jawMesh.rotation.x = -Math.PI/2.1;
+  const jawMesh = part(new T.BoxGeometry(1.15, 0.85, 1.05), mawM, 0, -0.35, 0.28);
   jaw.add(jawMesh);
-  // Eyes, high and close together — the only part that reads at distance.
-  // Big, hot, and lit. On a dark arena the eyes are the only part of a
-  // silhouette that carries at range, so they do the work of announcing it.
+
+  // Eyes: big, hot and lit. On a dark arena the eyes are the only part of a
+  // silhouette that carries at range, so they announce it before anything else.
   const eyeM = new T.MeshBasicMaterial({ color:0xffd23c });
-  head.add(part(new T.SphereGeometry(0.44, 10, 8), eyeM, -0.58, 0.5, 1.0));
-  head.add(part(new T.SphereGeometry(0.44, 10, 8), eyeM,  0.58, 0.5, 1.0));
+  head.add(part(new T.SphereGeometry(0.30, 10, 8), eyeM, -0.44, 0.22, 0.86));
+  head.add(part(new T.SphereGeometry(0.30, 10, 8), eyeM,  0.44, 0.22, 0.86));
   const eyeLight = new T.PointLight(0xffa030, 3.2, 18, 2);
-  eyeLight.position.set(0, 0.5, 1.4);
+  eyeLight.position.set(0, 0.25, 1.2);
   head.add(eyeLight);
 
-  // Throat core: the thing you are actually trying to hit, lit so it is
-  // obvious, and only reachable once the spine plates are gone.
-  const core = part(new T.OctahedronGeometry(1.15, 0), coreM, 0, -0.9, 1.4);
+  // Arms: long enough to reach the floor, which is where the things it throws
+  // are. Hung from the shoulder so the gait swings them.
+  const aL = limb(g, 4.2, hideM, -2.55, SHOULDER, 0.15, 0.74);
+  const aR = limb(g, 4.2, hideM,  2.55, SHOULDER, 0.15, 0.74);
+
+  // Chest core — what you are actually trying to hit, lit so it is obvious,
+  // and only reachable once the plates covering it are gone.
+  const core = part(new T.OctahedronGeometry(1.10, 0), coreM, 0, 1.55, 0.75);
   body.add(core);
   const glow = new T.PointLight(0xff5a1a, 0, 26, 2);
-  glow.position.set(0, 2.6, 2.6);
+  glow.position.set(0, HIP + 1.6, 1.2);
   g.add(glow);
 
-  // Spine plates in a row down the back. Each is its own body with its own
-  // health, exactly like the Warden's ring — same rule, new silhouette.
+  // Plates now armour the chest and shoulders rather than a spine. Same rule
+  // as the Warden's ring — each is its own body with its own health — but the
+  // silhouette says "break this open" instead of "flank it".
   const plates = [];
   for (let i = 0; i < MAW.plates; i++) {
-    const t = i / (MAW.plates - 1);
-    const pl = part(new T.BoxGeometry(1.8 - t*0.6, 1.9 - t*0.6, 0.55), plateM,
-                    0, 2.55 - t*0.45, 1.8 - t*4.6);
-    pl.rotation.x = -0.30 + t*0.16;
+    const a = (i / MAW.plates) * Math.PI * 2;
+    const wide = 1.55 - Math.abs(Math.sin(a)) * 0.35;
+    const pl = part(new T.BoxGeometry(wide, 1.5, 0.5), plateM,
+                    Math.sin(a) * 1.55, 1.55 + Math.cos(a) * 1.05, 0.95);
+    pl.rotation.z = -Math.sin(a) * 0.5;
+    pl.rotation.x = -0.12;
     body.add(pl);
     plates.push({ mesh: pl, hp: MAW.plateHp });
   }
-
-  // Four thick legs. Reusing limb() means they inherit the jointed knee and
-  // therefore the same gait code as everything else on the field.
-  const fL = limb(g, 3.0, hideM, -2.1, 3.6,  1.9, 0.62);
-  const fR = limb(g, 3.0, hideM,  2.1, 3.6,  1.9, 0.62);
-  const bL = limb(g, 3.2, hideM, -2.2, 3.7, -2.1, 0.7);
-  const bR = limb(g, 3.2, hideM,  2.2, 3.7, -2.1, 0.7);
 
   const tell = new T.Mesh(new T.RingGeometry(3.4, 4.6, 28),
     new T.MeshBasicMaterial({ color:0xff3c2a, transparent:true, opacity:0,
                               side:T.DoubleSide, depthWrite:false }));
   tell.rotation.x = -Math.PI/2;
-  tell.position.y = 9.0;
+  tell.position.y = 10.4;
   tell.visible = false;
   g.add(tell);
 
   g.position.set(x, 0, z);
   scene.add(g);
   walkers.push({ g, body, torso: body, head, jaw,
-    aL: fL, aR: fR, lL: bL, lR: bR, pos: g.position,
+    aL, aR, lL, lR, pos: g.position,
     type:"maw", boss:true, maw:true, core, glow, plates, platesLeft:MAW.plates,
-    E:{ name:"THE MAW", hp:MAW.coreHp, speed:MAW.speed, scale:3.6, skin:0x3a2f28,
+    E:{ name:"THE GORGER", hp:MAW.coreHp, speed:MAW.speed, scale:3.6, skin:0x3a2f28,
         score:MAW.score },
     reach: MAW.reach,
     r:4.2, walk:0, gait:0, spd:0, dead:false, cool:0,
@@ -2595,6 +2784,16 @@ function killWalker(w) {
   disposeGroup(w.g);
   w.disposed = true;
   burst(w.pos, w.E.skin);
+
+  // Ring of Fire embers. Bosses always leave one; ordinary bodies rarely do,
+  // and only while the ring can still take a rank — a drop the player cannot
+  // use is worse than no drop at all. Bumped slightly on the earliest waves so
+  // a run is not decided by whether the first rank ever showed up.
+  if (ringState.lv < 3) {
+    const base = w.boss ? 1 : (S.wave <= 3 ? 0.055 : 0.028);
+    if (Math.random() < base) dropEmber(w.pos);
+  }
+
   // An Exploder is a delivery mechanism: killing one near a crowd is the
   // point, and killing one next to a barrel is better.
   if (w.E.onDeath === "blast") queueBlast(w.pos, { r:6.5, dmg:150 }, null);
@@ -3191,7 +3390,7 @@ function updateHUD() {
       const pMax = bw.maw ? MAW.plates * MAW.plateHp : BOSS.plates * BOSS.plateHp;
       el("bossPlate").style.width = (plates/pMax*100) + "%";
       el("bossCore").style.width  = (Math.max(0,bw.hp)/bw.maxHp*100) + "%";
-      const bn = bw.maw ? "THE MAW" : "WARDEN";
+      const bn = bw.maw ? "THE GORGER" : "WARDEN";
       el("bossName").textContent = bn +
         (bw.platesLeft ? " · ARMOURED" : bw.enraged ? " · ENRAGED" : " · EXPOSED");
       el("bossBar").classList.toggle("open", !bw.platesLeft);
@@ -3675,6 +3874,8 @@ function nearestInCone() {
 // ─────────────────────────────────────────────────────────── sim
 function step(dt) {
   S.t += dt;
+  stepRing(dt);
+  stepEmbers(dt);
 
   // Strain bleeds off on its own, and faster once you have stopped acting
   // for a moment — so backing out of a fight is a real way to reset.
@@ -4160,7 +4361,7 @@ function step(dt) {
       // announced so a sudden change in rhythm is never a surprise.
       if (!w.enraged && !w.platesLeft && w.hp < w.maxHp * MAW.enrageAt) {
         w.enraged = true;
-        banner("THE MAW IS ENRAGED");
+        banner("THE GORGER IS ENRAGED");
         toast("It stops pacing itself", 2600);
         SFX.overload();
         S.shake = Math.min(1.2, S.shake + 0.8);
