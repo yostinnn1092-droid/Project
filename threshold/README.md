@@ -43,6 +43,30 @@ variety beyond four archetypes plus boss, more than one boss, random narrative
 events. The architecture takes them without restructuring: enemies are table
 entries in `EDEF`, skills in `SKILLS`, objectives in `makeObjective`.
 
+## Mobile
+
+One build serves both. `IS_TOUCH` (coarse pointer) switches the input scheme,
+the HUD and the performance budget at load.
+
+- Floating twin-stick: the left thumb spawns a movement stick wherever it lands,
+  the right half of the screen drags the camera. Nothing is a fixed pad you have
+  to hunt for while something is winding up at you.
+- Thumb cluster bottom-right: strike, dodge, bolt, plus four skill buttons up
+  the edge. The middle third of the screen is kept clear — that is where the
+  fight is.
+- Aim assist on touch only: committing to a strike eases you toward the nearest
+  enemy inside a forward cone. It never turns you around, so it assists intent
+  rather than replacing it, and it is off on desktop where the mouse is precise.
+- Attack latch: a tap can start and end inside one frame, so the intent is held
+  for ~0.16s and always lands exactly one strike. Holding auto-repeats.
+- Performance: pixel ratio capped at 1.5, antialiasing off, shadow map 768
+  instead of 1536, PCF instead of PCFSoft. Phone GPUs are fill-rate bound long
+  before they are triangle bound, so resolution goes before geometry.
+- Portrait shows a rotate prompt and pauses the run — a twin-stick layout plus a
+  readable HUD does not fit.
+- Browser gestures disabled: pull-to-refresh, double-tap zoom, text selection,
+  iOS callout.
+
 ## Build
 
     node build.mjs ../threshold.html

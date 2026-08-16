@@ -22,9 +22,15 @@
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:var(--void);color:var(--bone);font-family:var(--sans);overflow:hidden;
-  -webkit-font-smoothing:antialiased;user-select:none;cursor:default}
+  -webkit-font-smoothing:antialiased;cursor:default;
+  /* Mobile: kill every browser gesture that would otherwise fight the game —
+     pull-to-refresh, double-tap zoom, text selection, and the iOS callout. */
+  user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+  touch-action:none;overscroll-behavior:none;
+  position:fixed;width:100%;
+}
 canvas{display:block}
-#cv{position:fixed;inset:0;width:100%;height:100%;z-index:0}
+#cv{position:fixed;inset:0;width:100%;height:100%;z-index:0;touch-action:none}
 
 .hidden{display:none !important}
 
@@ -202,6 +208,125 @@ canvas{display:block}
 
 #hint{position:fixed;left:16px;top:14px;z-index:10;font-family:var(--mono);font-size:10px;
   color:var(--faint);line-height:1.7}
+
+/* ═══════════════════════════════════════════════════ touch controls
+   Only mounted when the device reports a coarse pointer. Everything sits in
+   the bottom corners where thumbs already are, and nothing lives in the
+   middle third of the screen — that is where the fight is. */
+#touch{position:fixed;inset:0;z-index:12;display:none;pointer-events:none}
+body.touch #touch{display:block}
+/* Hide the desktop-only chrome by INPUT MODE, not by width. A landscape phone
+   is 844px across — wider than any sensible mobile breakpoint — so keying this
+   off a media query left the keyboard skill bar on screen under the thumb
+   cluster. Touch is a property of the device, not of the viewport. */
+body.touch #hint,body.touch #xh,body.touch #skills{display:none}
+
+/* left thumb: movement stick. The base only appears where the thumb lands,
+   so the player is never reaching for a fixed spot in the dark. */
+#stick{position:absolute;width:132px;height:132px;border-radius:50%;
+  border:1px solid var(--edge2);background:rgba(20,20,24,.34);
+  opacity:0;transition:opacity .14s;pointer-events:none}
+#stick.on{opacity:1}
+#knob{position:absolute;width:56px;height:56px;border-radius:50%;
+  background:rgba(224,161,60,.30);border:1px solid var(--amber);
+  left:38px;top:38px}
+
+/* right thumb: action cluster */
+#acts{position:absolute;right:16px;bottom:18px;width:216px;height:200px;
+  pointer-events:none}
+.tb{position:absolute;border-radius:50%;background:rgba(18,18,21,.72);
+  border:1px solid var(--edge2);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;pointer-events:auto;
+  font-family:var(--cond);text-transform:uppercase;letter-spacing:.08em;
+  -webkit-tap-highlight-color:transparent;transition:transform .07s,background .07s}
+.tb:active,.tb.held{transform:scale(.92);background:rgba(224,161,60,.34)}
+.tb .g{font-size:22px;line-height:1}
+.tb .t{font-size:8px;color:var(--faint);margin-top:2px}
+.tb .cd{position:absolute;inset:0;border-radius:50%;background:rgba(0,0,0,.72);
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);
+  font-size:15px;color:var(--bone)}
+.tb.poor{opacity:.42}
+
+#tAtk{right:6px;bottom:6px;width:94px;height:94px;border-color:var(--amber)}
+#tAtk .g{font-size:30px}
+#tDodge{right:104px;bottom:30px;width:70px;height:70px}
+#tBolt{right:26px;bottom:106px;width:70px;height:70px}
+
+/* skills run up the right edge above the cluster */
+#tSkills{position:absolute;right:20px;bottom:212px;display:flex;flex-direction:column;
+  gap:9px;pointer-events:none}
+.tsk{width:58px;height:58px;border-radius:50%;background:rgba(18,18,21,.72);
+  border:1px solid var(--edge2);position:relative;pointer-events:auto;
+  display:flex;align-items:center;justify-content:center;font-size:20px;
+  -webkit-tap-highlight-color:transparent}
+.tsk:active{transform:scale(.92)}
+.tsk.ready{border-color:var(--amber);box-shadow:0 0 10px #e0a13c40}
+.tsk.empty{opacity:.25}
+.tsk .cd{position:absolute;inset:0;border-radius:50%;background:rgba(0,0,0,.74);
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);
+  font-size:14px}
+
+/* a pause affordance, since there is no ESC key on a phone */
+#tPause{position:absolute;left:14px;top:12px;width:38px;height:38px;border-radius:6px;
+  background:rgba(18,18,21,.72);border:1px solid var(--edge2);pointer-events:auto;
+  display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--dim);
+  -webkit-tap-highlight-color:transparent}
+#tGear{left:60px}
+
+/* portrait is unplayable for a twin-stick layout — ask for landscape */
+#rotate{position:fixed;inset:0;z-index:95;display:none;align-items:center;
+  justify-content:center;flex-direction:column;gap:14px;background:var(--void);
+  text-align:center;padding:30px}
+#rotate b{font-family:var(--cond);font-size:20px;letter-spacing:.28em;color:var(--bone)}
+#rotate span{font-family:var(--cond);font-size:11px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--faint);line-height:1.9}
+#rotate .ph{width:52px;height:86px;border:2px solid var(--amber);border-radius:7px;
+  animation:tip 1.9s ease-in-out infinite}
+@keyframes tip{0%,42%{transform:rotate(0)}58%,100%{transform:rotate(-90deg)}}
+body.touch.portrait #rotate{display:flex}
+
+/* ═══════════════════════════════════════════════════ small screens */
+@media (max-width:820px){
+  #obj{min-width:0;padding:6px 16px 7px}
+  #obj .fl{font-size:8px;letter-spacing:.22em}
+  #obj .ot{font-size:12px;letter-spacing:.08em}
+  #obj .op{font-size:9.5px}
+  #run{top:8px;right:12px}
+  #run .r{font-size:9.5px;margin-bottom:1px}
+  #vit{left:12px;bottom:12px;width:190px}
+  .gauge .track{height:13px}
+  .gauge.small .track{height:8px}
+  .gauge .lbl{font-size:8.5px;padding:0 5px}
+  #stats{font-size:9px;gap:8px}
+  #skills{display:none}                 /* replaced by the touch cluster */
+  #rCards{grid-template-columns:1fr;gap:8px;padding:11px;
+          max-height:62vh;overflow-y:auto}
+  .card{padding:11px 12px}
+  .card h3{font-size:14px}
+  .card p{font-size:11.5px;line-height:1.45}
+  .card .st,.card .risk{font-size:10px}
+  #reward{width:96vw}
+  #inv{right:10px;top:52px;width:250px}
+  .ovc{padding:22px 20px}
+  .ovc h1{font-size:27px}
+  .ovc h2{font-size:20px}
+  .ovc p{font-size:12.5px}
+  .ovc ul{font-size:12px}
+  .ovc .lede{font-size:9px;margin-bottom:15px}
+  .btn{padding:11px 20px;font-size:12px}
+  #metaGrid{grid-template-columns:1fr 1fr;gap:7px}
+  .node{padding:9px 10px}
+  .node b{font-size:11px}
+  .node span{font-size:10px}
+  .toast{font-size:11px;padding:4px 11px}
+}
+@media (max-height:460px){
+  .ovc{padding:16px 20px;max-height:94vh}
+  .ovc h1{font-size:22px}
+  .ovc .lede{margin-bottom:11px}
+  .ovc p{margin-bottom:8px}
+  .rule{margin:12px 0}
+}
 </style>
 
 <canvas id="cv"></canvas>
@@ -255,6 +380,29 @@ canvas{display:block}
   <div id="invSlots"></div>
   <div class="ph" style="border-top:1px solid var(--edge)">Carried</div>
   <div id="invList"></div>
+</div>
+
+<div id="touch">
+  <div id="stick"><div id="knob"></div></div>
+  <div id="tPause" class="tb" style="border-radius:6px">❚❚</div>
+  <div id="tGear" class="tb" style="border-radius:6px;left:60px;top:12px;position:absolute;
+       width:38px;height:38px;background:rgba(18,18,21,.72);border:1px solid var(--edge2);
+       display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--dim);
+       pointer-events:auto">▤</div>
+  <div id="tSkills"></div>
+  <div id="acts">
+    <div class="tb" id="tBolt"><span class="g">✧</span><span class="t">bolt</span>
+      <div class="cd" style="display:none"></div></div>
+    <div class="tb" id="tDodge"><span class="g">↯</span><span class="t">dodge</span>
+      <div class="cd" style="display:none"></div></div>
+    <div class="tb" id="tAtk"><span class="g">⚔</span></div>
+  </div>
+</div>
+
+<div id="rotate">
+  <div class="ph"></div>
+  <b>TURN THE DEVICE</b>
+  <span>The Threshold needs both thumbs<br>and the full width of the screen</span>
 </div>
 
 <div class="ov on" id="ovStart"><div class="ovc">

@@ -5,6 +5,14 @@ const T = globalThis.THREE;
 // ═══════════════════════════════════════════════════════════════════ helpers
 const clamp=(v,a,b)=>v<a?a:v>b?b:v, lerp=(a,b,t)=>a+(b-a)*t, $=id=>document.getElementById(id);
 const TAU=Math.PI*2;
+
+// A coarse pointer means thumbs, which changes the input scheme, the HUD and
+// the performance budget. Resolved once here, at the very top, because the
+// renderer is constructed further down and reads it — declaring it lower left
+// it in the temporal dead zone and threw on every device, not just phones.
+// Desktop keeps every keyboard and mouse path, so one build serves both.
+const IS_TOUCH = (typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches) ||
+                 ("ontouchstart" in window && (navigator.maxTouchPoints|0) > 0);
 let _s=(Date.now()^0x9e3779b9)>>>0;
 function rnd(){_s^=_s<<13;_s>>>=0;_s^=_s>>17;_s^=_s<<5;_s>>>=0;return _s/4294967296;}
 const rint=(a,b)=>a+Math.floor(rnd()*(b-a+1));
@@ -70,10 +78,14 @@ const metaLv = id => REC.meta[id] | 0;
 
 // ═══════════════════════════════════════════════════════════════════ three
 const cv = $("cv");
-const renderer = new T.WebGLRenderer({ canvas:cv, antialias:true, powerPreference:"high-performance" });
-renderer.setPixelRatio(Math.min(devicePixelRatio||1, 2));
+const renderer = new T.WebGLRenderer({ canvas:cv, antialias:!IS_TOUCH,
+                                       powerPreference:"high-performance" });
+// Phone GPUs are fill-rate bound long before they are triangle bound, so the
+// first things to go are the pixel count and the shadow resolution, not the
+// geometry. Antialiasing off as well — at phone DPI it buys almost nothing.
+renderer.setPixelRatio(Math.min(devicePixelRatio||1, IS_TOUCH ? 1.5 : 2));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = T.PCFSoftShadowMap;
+renderer.shadowMap.type = IS_TOUCH ? T.PCFShadowMap : T.PCFSoftShadowMap;
 renderer.toneMapping = T.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
 
@@ -85,7 +97,7 @@ scene.add(new T.HemisphereLight(0x6b7488, 0x241c14, 1.15));  // was 0.55
 const key = new T.DirectionalLight(0xffd7a0, 1.75);
 key.position.set(14, 26, 10);
 key.castShadow = true;
-key.shadow.mapSize.set(1536,1536);
+key.shadow.mapSize.set(IS_TOUCH?768:1536, IS_TOUCH?768:1536);
 key.shadow.camera.near=1; key.shadow.camera.far=120;
 key.shadow.camera.left=-46; key.shadow.camera.right=46;
 key.shadow.camera.top=46; key.shadow.camera.bottom=-46;
@@ -129,6 +141,8 @@ const G = {
   exit:null, objective:null,
   keys:{}, mouse:{l:false,r:false},
   locked:false,
+  touch:{ moveId:null, lookId:null, mx:0, my:0, vx:0, vy:0,
+          ox:0, oy:0, lookX:0, lookY:0, atk:false },
 };
 
 // ═══════════════════════════════════════════════════════════════════ player
@@ -768,7 +782,9 @@ addEventListener("mouseup", e => {
   if (e.button === 2) G.mouse.r = false;
 });
 cv.addEventListener("contextmenu", e => e.preventDefault());
-cv.addEventListener("click", () => { if (G.phase === "playing" && !G.locked) cv.requestPointerLock(); });
+cv.addEventListener("click", () => {
+  if (!IS_TOUCH && G.phase === "playing" && !G.locked) cv.requestPointerLock();
+});
 document.addEventListener("pointerlockchange", () => { G.locked = document.pointerLockElement === cv; });
 document.addEventListener("mousemove", e => {
   if (!G.locked) return;
@@ -793,8 +809,176 @@ function moveIntent() {
   if (G.keys.KeyS) v.add(f);
   if (G.keys.KeyA) v.sub(r);
   if (G.keys.KeyD) v.add(r);
+  // Virtual stick adds into the same vector, so every downstream system —
+  // dodge direction, movement, animation — stays input-agnostic.
+  const t = G.touch;
+  if (t.vx || t.vy) { v.addScaledVector(f, t.vy); v.addScaledVector(r, t.vx); }
   return v;
 }
+
+// ── aim assist ────────────────────────────────────────────────────────────
+// A thumb cannot aim a melee arc the way a mouse can. On touch, committing to
+// a strike snaps the character toward the nearest enemy inside a generous
+// cone. It never turns you around, so it assists intent rather than replacing
+// it, and it is off entirely on desktop where the mouse is already precise.
+function assistAim() {
+  if (!IS_TOUCH) return;
+  let best = null, bestScore = -1;
+  for (const e of G.enemies) {
+    if (!e.alive) continue;
+    const to = e.pos.clone().sub(P.pos).setY(0);
+    const d = to.length();
+    if (d > CFG.lightRange + 3.2) continue;
+    to.normalize();
+    const dot = to.dot(P.facing);
+    if (dot < 0.25) continue;                 // behind you stays behind you
+    const score = dot * 2 - d * 0.12;
+    if (score > bestScore) { bestScore = score; best = to; }
+  }
+  if (best) {
+    const want = Math.atan2(-best.x, -best.z);
+    // ease rather than snap so the camera does not jerk
+    let diff = ((want - P.yaw + Math.PI*3) % TAU) - Math.PI;
+    P.yaw += diff * 0.65;
+    P.facing.set(-Math.sin(P.yaw),0,-Math.cos(P.yaw)).normalize();
+  }
+}
+// ═══════════════════════════════════════════════════════════════════ touch
+function initTouch() {
+  if (!IS_TOUCH) return;
+  document.body.classList.add("touch");
+
+  const stick = $("stick"), knob = $("knob"), t = G.touch;
+  const RAD = 52;                      // travel of the knob before it clamps
+
+  // The left half is the movement stick, the right half is the camera. Both
+  // are floating: the control appears where the thumb lands. Fixed pads mean
+  // hunting for a spot you cannot see while something is winding up at you.
+  const isLeft = x => x < innerWidth * 0.45;
+
+  function onStart(e) {
+    for (const p of e.changedTouches) {
+      const overButton = p.target.closest && p.target.closest(".tb,.tsk,#tPause,#tGear");
+      if (overButton) continue;
+      if (isLeft(p.clientX) && t.moveId === null) {
+        t.moveId = p.identifier; t.ox = p.clientX; t.oy = p.clientY;
+        stick.style.left = (p.clientX - 66) + "px";
+        stick.style.top  = (p.clientY - 66) + "px";
+        stick.classList.add("on");
+      } else if (!isLeft(p.clientX) && t.lookId === null) {
+        t.lookId = p.identifier; t.lookX = p.clientX; t.lookY = p.clientY;
+      }
+    }
+  }
+  function onMove(e) {
+    for (const p of e.changedTouches) {
+      if (p.identifier === t.moveId) {
+        let dx = p.clientX - t.ox, dy = p.clientY - t.oy;
+        const len = Math.hypot(dx,dy);
+        if (len > RAD) { dx *= RAD/len; dy *= RAD/len; }
+        knob.style.left = (38 + dx*0.85) + "px";
+        knob.style.top  = (38 + dy*0.85) + "px";
+        // dead zone stops a resting thumb from drifting the character
+        const mag = Math.min(1, len/RAD);
+        const dead = mag < 0.18 ? 0 : (mag-0.18)/0.82;
+        const nx = len ? dx/Math.max(len,1) : 0, ny = len ? dy/Math.max(len,1) : 0;
+        t.vx =  nx * dead;
+        t.vy = -ny * dead;   // screen-up is forward
+      } else if (p.identifier === t.lookId) {
+        P.yaw   -= (p.clientX - t.lookX) * 0.0060;
+        P.pitch  = clamp(P.pitch + (p.clientY - t.lookY) * 0.0045, -0.22, 1.15);
+        t.lookX = p.clientX; t.lookY = p.clientY;
+      }
+    }
+  }
+  function onEnd(e) {
+    for (const p of e.changedTouches) {
+      if (p.identifier === t.moveId) {
+        t.moveId = null; t.vx = 0; t.vy = 0;
+        stick.classList.remove("on");
+        knob.style.left = "38px"; knob.style.top = "38px";
+      } else if (p.identifier === t.lookId) t.lookId = null;
+    }
+  }
+  addEventListener("touchstart", onStart, { passive:true });
+  addEventListener("touchmove",  onMove,  { passive:true });
+  addEventListener("touchend",   onEnd,   { passive:true });
+  addEventListener("touchcancel",onEnd,   { passive:true });
+
+  // action buttons — held rather than tapped, so attack can be sustained
+  const hold = (el, down, up) => {
+    el.addEventListener("touchstart", e => { e.preventDefault(); el.classList.add("held"); down(); },
+                        { passive:false });
+    const off = e => { e.preventDefault(); el.classList.remove("held"); if (up) up(); };
+    el.addEventListener("touchend", off, { passive:false });
+    el.addEventListener("touchcancel", off, { passive:false });
+  };
+  // A tap can begin and end inside a single frame, in which case a flag that
+  // is only true "while held" is never observed and the swing never happens.
+  // The latch keeps the intent alive for a few frames so a quick tap always
+  // lands exactly one strike, while holding still auto-repeats.
+  hold($("tAtk"), ()=>{ t.atk = true; t.latch = 0.16; }, ()=>{ t.atk = false; });
+  hold($("tDodge"), ()=>{ tryDodge(); });
+  hold($("tBolt"),  ()=>{
+    if (P.boltCd <= 0 && P.foc >= CFG.boltCost) {
+      assistAim();
+      P.foc -= CFG.boltCost; P.boltCd = CFG.boltCd;
+      spawnBolt(P.pos, P.facing, P.atk*CFG.boltDmg, false);
+    }
+  });
+  $("tPause").addEventListener("touchstart", e => { e.preventDefault(); togglePause(); },
+                               { passive:false });
+  $("tGear").addEventListener("touchstart", e => { e.preventDefault();
+                               $("inv").classList.toggle("on"); renderInv(); }, { passive:false });
+
+  buildTouchSkills();
+  checkOrientation();
+  addEventListener("resize", checkOrientation);
+  addEventListener("orientationchange", () => setTimeout(checkOrientation, 260));
+}
+
+function buildTouchSkills() {
+  const box = $("tSkills"); if (!box) return;
+  box.innerHTML = "";
+  for (let i = 0; i < 4; i++) {
+    const d = document.createElement("div");
+    d.className = "tsk empty";
+    d.innerHTML = '<span class="ic">·</span><div class="cd" style="display:none"></div>';
+    d.addEventListener("touchstart", e => { e.preventDefault(); useSkill(i); }, { passive:false });
+    box.appendChild(d);
+  }
+}
+function syncTouchSkills() {
+  const box = $("tSkills"); if (!box) return;
+  for (let i = 0; i < 4; i++) {
+    const el = box.children[i], s = P.skills[i]; if (!el) continue;
+    const icon = el.querySelector(".ic"), cd = el.querySelector(".cd");
+    if (!s) { el.className = "tsk empty"; icon.textContent = "·"; cd.style.display="none"; continue; }
+    const def = SKILLS[s.id];
+    icon.textContent = def.ic;
+    const poor = (def.cost.sta && P.sta < def.cost.sta) || (def.cost.foc && P.foc < def.cost.foc);
+    el.className = "tsk" + (s.cd<=0 && !poor ? " ready" : "");
+    if (s.cd > 0) { cd.style.display="flex"; cd.textContent = s.cd.toFixed(0); }
+    else cd.style.display = "none";
+  }
+  const bcd = $("tBolt") && $("tBolt").querySelector(".cd");
+  if (bcd) {
+    if (P.boltCd > 0) { bcd.style.display="flex"; bcd.textContent = P.boltCd.toFixed(1); }
+    else bcd.style.display="none";
+  }
+  const dg = $("tDodge");
+  if (dg) dg.classList.toggle("poor", P.sta < CFG.dodgeCost);
+}
+
+function checkOrientation() {
+  // Portrait cannot fit a stick, an action cluster and a readable HUD at once.
+  const portrait = innerHeight > innerWidth;
+  document.body.classList.toggle("portrait", portrait);
+  if (portrait && G.phase === "playing") { G.phase = "paused"; }
+  else if (!portrait && G.phase === "paused" && !$("ovPause").classList.contains("on"))
+    G.phase = "playing";
+}
+
 function useSkill(i) {
   const s = P.skills[i]; if (!s) return;
   const def = SKILLS[s.id];
@@ -812,6 +996,7 @@ function updatePlayer(dt) {
   P.buffs = P.buffs || {};
   for (const k in P.buffs) { P.buffs[k] -= dt; if (P.buffs[k] <= 0) delete P.buffs[k]; }
 
+  if (G.touch.latch > 0) G.touch.latch -= dt;
   P.dodgeCd = Math.max(0,P.dodgeCd-dt);
   P.iframe  = Math.max(0,P.iframe-dt);
   P.boltCd  = Math.max(0,P.boltCd-dt);
@@ -859,7 +1044,9 @@ function updatePlayer(dt) {
       P.atkPhase = "recover";
     }
     if (P.atkT <= 0) P.atkPhase = "";
-  } else if (G.mouse.l && P.sta >= CFG.lightCost) {
+  } else if ((G.mouse.l || G.touch.atk || G.touch.latch > 0) && P.sta >= CFG.lightCost) {
+    G.touch.latch = 0;
+    assistAim();
     P.sta -= CFG.lightCost; P.staIdle = CFG.staDelay;
     P.atkT = CFG.lightWind+CFG.lightActive+CFG.lightRecover;
     P.atkPhase = "wind";
@@ -1162,8 +1349,10 @@ function showRewards(opts) {
       '<div class="ty">'+o.type+'</div><p>'+o.desc+'</p>'+
       (o.stat?'<div class="st">'+o.stat+'</div>':'')+
       (o.risk?'<div class="risk">'+o.risk+'</div>':'');
+    // A touch device fires click after touchend, so binding click keeps one
+    // handler working for both. relock() is a no-op on touch.
     d.onclick = () => { applyReward(o); $("reward").classList.remove("on");
-                        G.phase="playing"; cv.requestPointerLock(); };
+                        G.phase="playing"; relock(); };
     box.appendChild(d);
   }
   $("reward").classList.add("on");
@@ -1207,7 +1396,7 @@ function startRun() {
   $("ovStart").classList.remove("on");
   $("ovDeath").classList.remove("on");
   $("obj").classList.remove("done");
-  cv.requestPointerLock();
+  relock();
 }
 
 function nextFloor() {
@@ -1258,11 +1447,11 @@ function togglePause() {
       '<div><button class="btn" id="btnResume">Continue</button>'+
       '<button class="btn ghost" id="btnQuit">Abandon run</button></div>';
     $("btnResume").onclick = () => { $("ovPause").classList.remove("on");
-                                     G.phase="playing"; cv.requestPointerLock(); };
+                                     G.phase="playing"; relock(); };
     $("btnQuit").onclick = () => { $("ovPause").classList.remove("on"); die(); };
     $("ovPause").classList.add("on");
   } else if (G.phase === "paused") {
-    $("ovPause").classList.remove("on"); G.phase = "playing"; cv.requestPointerLock();
+    $("ovPause").classList.remove("on"); G.phase = "playing"; relock();
   }
 }
 
@@ -1307,6 +1496,8 @@ function showMeta(fromDeath) {
 }
 
 // ═══════════════════════════════════════════════════════════════════ HUD
+function relock(){ if (!IS_TOUCH) cv.requestPointerLock(); }
+
 function toast(msg, cls) {
   const el = document.createElement("div");
   el.className = "toast"+(cls?" "+cls:"");
@@ -1317,6 +1508,7 @@ function toast(msg, cls) {
   while ($("toasts").children.length > 5) $("toasts").firstChild.remove();
 }
 function renderSkills() {
+  syncTouchSkills();
   const box = $("skills"); box.innerHTML = "";
   for (let i = 0; i < 4; i++) {
     const s = P.skills[i];
@@ -1347,6 +1539,7 @@ function updateSkillsUI() {
     el.classList.toggle("ready", s.cd<=0 && !poor);
     el.classList.toggle("poor", !!poor);
   }
+  syncTouchSkills();
 }
 function renderInv() {
   const slots = ["weapon","armour","charm"];
@@ -1469,6 +1662,7 @@ function resize() {
 addEventListener("resize", resize);
 
 loadRecord();
+initTouch();
 buildPlayerMesh();
 recomputeStats(false);
 resize();
