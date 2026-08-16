@@ -5646,7 +5646,11 @@ const CFG = {
   grabRadius:   13,
   // Wave scaling knobs, kept together so they are easy to find and re-tune.
   enemyMul:     2.0,     // every wave composition is doubled
-  waveStrength: 0.01,    // compounding survivability per wave: 1% = 1.01^(n-1)
+  // Doubled from 0.01. Contact damage is a flat one heart, so damage cannot be
+  // scaled without jumping from survivable to lethal — survivability is the
+  // only lever that compounds smoothly. At 2% a wave-20 body carries ~1.46x
+  // its base health against ~1.21x before, and wave 30 ~1.78x against ~1.34x.
+  waveStrength: 0.02,    // compounding survivability per wave: 2% = 1.02^(n-1)
   // Hard ceiling on bodies per wave, applied AFTER every multiplier. The
   // doubling compounds with the late-wave ramp and the HORDE modifier, and
   // unchecked that reached 68 in a single wave — the walker separation pass
@@ -5732,7 +5736,11 @@ const CFG = {
   runSpeed:     7.6,     // at or above this it is a full run (dash overshoots)
   zSpeed:       2.05,
   zReach:       1.7,
-  zCooldown:    1.15,
+  // 1.15 -> 0.95: melee bodies swing ~21% more often. This is threat that does
+  // not touch the damage cliff and does not bloat health — a crowd that keeps
+  // committing is harder to stand in the middle of, which is exactly the
+  // pressure the ring of fire otherwise removes.
+  zCooldown:    0.95,
   maxHealth:    5,
   aimCone:      0.972,
   singleMul:    1.4,     // precision bonus: one deliberate, heavy shot
@@ -6992,6 +7000,10 @@ const AI = {
   spawner:  { ring: 12,  lateral: 0.55, spacing: 3.2, telegraph: 0.55 },
   warper:   { ring: 15,  lateral: 0.60, spacing: 3.0, telegraph: 0.50 },
   disruptor:{ ring: 9,   lateral: 0.75, spacing: 2.4, telegraph: 0.40 },
+  // An Archer holds further out than anything else that can actually hurt you,
+  // and its lateral drift is high so it keeps sliding for a clean line rather
+  // than standing still to be picked off.
+  archer:   { ring: 17,  lateral: 0.85, spacing: 3.0, telegraph: 0.85 },
   grabber:  { ring: 1.2, lateral: 0.35, spacing: 1.8, telegraph: 0.45 },
 };
 const AI_DEFAULT = AI.walker;
@@ -7305,6 +7317,13 @@ const ENEMIES = {
              score:450 },
   // A Warper does what you do. It picks up loose props and throws them back,
   // which turns your own ammunition supply into a hazard.
+  // Archer. The first enemy in the game that reaches out and hits you from
+  // across the arena on its own initiative — a Warper needs a loose prop and a
+  // Disruptor only spikes strain. Low health, because the answer is to kill it,
+  // and a long draw so the shot is always readable before it is in the air.
+  archer:  { name:"Archer",  code:"AR", hp:105, speed:1.95, scale:0.98, bulk:0.85,
+             skin:0x6f7a5e, eye:0xffd23c, arrow:{ every:3.4, range:26, speed:26 },
+             score:300 },
   warper:  { name:"Warper",  code:"WP", hp:215, speed:1.70, scale:1.06, bulk:0.95,
              skin:0x8a6a9c, eye:0xe94fbf, psy:{ every:4.4, range:22 }, score:380 },
   // Punishes careless positioning: closes and spikes your strain. It does
@@ -7337,13 +7356,13 @@ const WAVES = [
   { walker:5, crawler:2 },
   { walker:4, runner:3 },
   { walker:3, runner:3, leaper:2 },
-  { walker:4, runner:2, shield:2 },
+  { walker:4, runner:2, shield:2, archer:1 },
   { walker:3, leaper:3, exploder:2, armored:1 },
-  { walker:3, runner:3, disruptor:2, spawner:1 },
+  { walker:3, runner:3, disruptor:2, spawner:1, archer:2 },
   { walker:3, grabber:2, shield:2, tank:1 },
-  { runner:4, leaper:2, disruptor:2, warper:1, armored:2 },
-  { walker:4, grabber:2, shield:2, spawner:2, tank:1, exploder:3 },
-  { maw:1, walker:4, runner:3, shield:2 },
+  { runner:4, leaper:2, disruptor:2, warper:1, armored:2, archer:2 },
+  { walker:4, grabber:2, shield:2, spawner:2, tank:1, exploder:3, archer:2 },
+  { maw:1, walker:4, runner:3, shield:2, archer:3 },
 ];
 
 // The boss is a telekinesis problem, not a health bar: four plates must be
@@ -7404,6 +7423,71 @@ function killShock(sw) {
 const WOUND_COL  = new T.Color(0x5a1410);
 const WOUND_GLOW = new T.Color(0xff2a10);
 const tmpCol     = new T.Color();
+
+// ═══════════════════════════════════════════════════════════════════ arrows
+// The Archer's shot. A real projectile rather than a hitscan: it takes time to
+// cross the gap, which is the only reason a telegraph means anything. It can be
+// out-walked, dashed through, or blocked by putting a pillar between you and
+// the shooter — all three are things the player already knows how to do.
+const arrows = [];
+const arrowShaftGeo = new T.CylinderGeometry(0.035, 0.035, 1.25, 5);
+arrowShaftGeo.rotateX(Math.PI / 2);                 // lie along -Z, its travel axis
+const arrowHeadGeo = new T.ConeGeometry(0.10, 0.30, 5);
+arrowHeadGeo.rotateX(-Math.PI / 2);
+arrowHeadGeo.translate(0, 0, -0.72);
+const arrowMat = new T.MeshStandardMaterial({ color:0x9a8b6a, roughness:0.8 });
+const arrowTipMat = new T.MeshStandardMaterial({ color:0xffd23c, emissive:0xffb020,
+                                                  emissiveIntensity:1.4, roughness:0.4 });
+
+function fireArrow(from, speed) {
+  const g = new T.Group();
+  g.add(new T.Mesh(arrowShaftGeo, arrowMat));
+  g.add(new T.Mesh(arrowHeadGeo, arrowTipMat));
+  // Aimed at the chest, from the bow rather than from the feet.
+  g.position.set(from.x, 1.9, from.z);
+  const dir = tmp2.set(hero.pos.x - from.x, 1.15 - 1.9, hero.pos.z - from.z).normalize();
+  g.lookAt(g.position.x + dir.x, g.position.y + dir.y, g.position.z + dir.z);
+  scene.add(g);
+  arrows.push({ g, pos:g.position, dir:dir.clone(), spd:speed, life:3.2 });
+  SFX.throw(1.25);
+}
+
+function stepArrows(dt) {
+  for (let i = arrows.length - 1; i >= 0; i--) {
+    const a = arrows[i];
+    a.life -= dt;
+    // Substepped. At 26 units a second against a hero capsule under a metre
+    // wide, a single-step test at 30fps skips straight past the player on some
+    // frames — the arrow passes through and nothing happens. This is the same
+    // tunnelling that made thrown props miss, and it is fixed the same way.
+    const steps = Math.max(1, Math.ceil(a.spd * dt / 0.35));
+    const h = dt / steps;
+    let done = a.life <= 0;
+    for (let k = 0; k < steps && !done; k++) {
+      a.pos.addScaledVector(a.dir, a.spd * h);
+      if (a.pos.y < 0.1) { done = true; break; }
+      const dx = a.pos.x - hero.pos.x, dz = a.pos.z - hero.pos.z;
+      const dy = a.pos.y - 1.15;
+      if (dx*dx + dz*dz < 0.42 && Math.abs(dy) < 1.05) {
+        // Dashing is invulnerability everywhere else in this game; an arrow
+        // must not be the one thing a dash cannot beat.
+        if (S.dashT === undefined || S.dashT <= 0) {
+          hurtHero();
+          S.shake = Math.min(1.0, S.shake + 0.45);
+          sparks(tmp3.set(a.pos.x, a.pos.y, a.pos.z), 0xffd23c, 10, 16);
+          SFX.impact(0.6, 1);
+        }
+        done = true;
+      }
+    }
+    if (done) { scene.remove(a.g); arrows.splice(i, 1); }
+  }
+}
+
+function clearArrows() {
+  for (const a of arrows) scene.remove(a.g);
+  arrows.length = 0;
+}
 
 const walkers = [];
 
@@ -8945,6 +9029,7 @@ const S = {
 const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2, distWant: 11.2 };
 
 function clearAll() {
+  clearArrows();
   rocks.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); });
   rocks.length = 0;
   walkers.forEach(w => { scene.remove(w.g); if (!w.disposed) disposeGroup(w.g); });
@@ -9609,6 +9694,7 @@ function nearestInCone() {
 function step(dt) {
   S.t += dt;
   stepRing(dt);
+  stepArrows(dt);
 
   // Strain bleeds off on its own, and faster once you have stopped acting
   // for a moment — so backing out of a fight is a real way to reset.
@@ -10054,6 +10140,29 @@ function step(dt) {
           sparks(tmp3.set(w.pos.x, 2.3, w.pos.z), 0xe94fbf, 8, 12);
           SFX.throw(0.8);
         }
+      }
+    }
+
+    // An Archer draws, holds, and looses. The draw is a full telegraph — the
+    // tell ring flares at its feet for the whole 0.85s — so the shot is always
+    // announced before it is in the air, and stepping behind anything solid
+    // during the draw beats it outright.
+    if (w.E.arrow && !w.thrown && dist < w.E.arrow.range) {
+      w.arrowT = (w.arrowT === undefined ? rand(1.2, w.E.arrow.every) : w.arrowT) - dt;
+      if (w.drawT > 0) {
+        w.drawT -= dt;
+        w.tell.visible = true;
+        const k = 1 - w.drawT / w.AI.telegraph;
+        w.tell.material.opacity = 0.25 + k * 0.5;
+        w.tell.scale.setScalar(0.6 + k * 1.5);
+        if (w.drawT <= 0) {
+          w.tell.visible = false;
+          fireArrow(w.pos, w.E.arrow.speed);
+          w.arrowT = w.E.arrow.every * rand(0.85, 1.2);
+        }
+      } else if (w.arrowT <= 0) {
+        w.drawT = w.AI.telegraph;
+        SFX.warn();
       }
     }
 
