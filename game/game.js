@@ -3082,48 +3082,156 @@ for (let i = 0; i < 12; i++) {
 // Additive blending, so it adds light rather than tinting — and it feeds the
 // bloom pass on the high quality tier, which is what turns it from a
 // coloured shell into a glow.
-const auraGeo = new T.SphereGeometry(1, 14, 10);
+// ── the plume texture ───────────────────────────────────────────────────────
+// A rising column of energy rather than a shell around the prop. Tiles
+// VERTICALLY so scrolling the V offset makes the wisps climb forever without a
+// seam — same trick as the ring of fire's sheet, rotated ninety degrees.
+// Colour runs white-hot magenta at the base through violet to blue at the tips,
+// which is what separates a core from a haze.
+function plumeSheet(w, h, seed) {
+  const c = canvasOf(1); c.width = w; c.height = h;
+  const x = c.getContext("2d");
+  const img = x.createImageData(w, h);
+  let sd = seed >>> 0;
+  const rr = () => (sd = (sd*1664525 + 1013904223) >>> 0) / 4294967296;
+  const ph = []; for (let i = 0; i < 8; i++) ph.push(rr()*Math.PI*2);
+
+  for (let j = 0; j < h; j++) {
+    // v: 0 at the TOP of the quad, 1 at its base.
+    //
+    // CanvasTexture flips Y by default, so canvas row 0 becomes UV v=1 — the
+    // TOP of the plane. Writing `1 - j/h` here therefore put the hot pink base
+    // colour and the wide end of the waist at the top of the column and the
+    // thin blue tip at the bottom: the whole plume rendered upside down, and
+    // three additive layers of near-white pink at the top blew out to white.
+    const v = j / h;
+    const av = v * Math.PI * 2;
+    for (let i = 0; i < w; i++) {
+      const u = i / w, au = u * Math.PI * 2;
+      const k = (j*w + i) * 4;
+
+      // Wisps over a body. The first version was filaments ALONE at a high
+      // frequency, which rendered as thin scratches rather than a column of
+      // energy — the reference is dense. So: a soft core column supplies the
+      // mass, and fewer, fatter filaments ride on top of it as detail.
+      const wander = 0.16*Math.sin(av*3 + ph[0]) + 0.09*Math.sin(av*7 + ph[1]);
+      const uu = u + wander;
+      const fil = Math.sin(uu * Math.PI * 5 + ph[2]) * Math.sin(uu * Math.PI * 2.5 + ph[3]);
+
+      // waist: 1 on the centre line, 0 at the edges
+      const waist = Math.max(0, 1 - Math.abs(u - 0.5) * 2);
+      // the body — a fat soft column that narrows as it rises
+      const body = Math.pow(waist, 0.9 + (1 - v) * 1.6);
+      let a = body * 0.72 + Math.max(0, fil) * body * 0.85;
+
+      a *= Math.pow(v, 0.40);                 // thins out toward the top
+      a *= 0.70 + 0.30*Math.sin(av*9 + au*2 + ph[4]);   // gentle churn
+      a = Math.max(0, a) * 1.15;
+
+      // magenta core -> violet -> blue
+      let R,G,B;
+      if (v > 0.82)      { R=255; G=140; B=225; }
+      else if (v > 0.52) { const f=(v-0.52)/0.30; R=200+f*55; G=70+f*120; B=225+f*20; }
+      else if (v > 0.24) { const f=(v-0.24)/0.28; R=120+f*80; G=60+f*10;  B=235-f*10; }
+      else               { const f=v/0.24;        R=60+f*60;  G=70-f*10;  B=210+f*25; }
+
+      img.data[k]   = R;
+      img.data[k+1] = G;
+      img.data[k+2] = B;
+      img.data[k+3] = Math.min(1, a) * 255;
+    }
+  }
+  x.putImageData(img, 0, 0);
+  const t = new T.CanvasTexture(c);
+  t.wrapS = T.ClampToEdgeWrapping;
+  t.wrapT = T.RepeatWrapping;
+  t.colorSpace = T.SRGBColorSpace;
+  return t;
+}
+
+const plumeTexA = plumeSheet(64, 160, 0x2b71);
+const plumeTexB = plumeSheet(64, 160, 0x9f04);
+
+// Three quads at sixty degrees around the vertical. From any camera angle at
+// least one is broadly facing you, which gives a billboard's readability
+// without a per-frame lookAt on twenty-four objects.
+const plumeGeo = new T.PlaneGeometry(1, 1);
+plumeGeo.translate(0, 0.5, 0);          // pivot at the foot, so it grows upward
+
+// Bright core at the base — the hot spot the plume rises out of.
+const coreGeo = new T.SphereGeometry(1, 10, 8);
+
 const auras = [];
 // Carry caps at 7, or 10 with Swarm. A full volley of 10 can be in flight
 // while the next 10 are already gathered, plus whatever a Warper has thrown
 // back — so 14 was not enough and the overflow would silently go unlit.
 for (let i = 0; i < 24; i++) {
-  const m = new T.Mesh(auraGeo, new T.MeshBasicMaterial({
-    color: 0xe94fbf, transparent: true, opacity: 0,
-    blending: T.AdditiveBlending, depthWrite: false, side: T.BackSide }));
-  m.visible = false;
-  m.frustumCulled = false;
-  scene.add(m);
-  auras.push(m);
+  const g = new T.Group();
+  const mat = new T.MeshBasicMaterial({
+    map: i % 2 ? plumeTexB : plumeTexA,
+    transparent: true, opacity: 0, blending: T.AdditiveBlending,
+    depthWrite: false, side: T.DoubleSide });
+  const blades = [];
+  for (let k = 0; k < 3; k++) {
+    const q = new T.Mesh(plumeGeo, mat);
+    q.rotation.y = (k / 3) * Math.PI;      // 0, 60, 120 degrees
+    g.add(q); blades.push(q);
+  }
+  const coreMat = new T.MeshBasicMaterial({
+    color: 0xffb0f0, transparent: true, opacity: 0,
+    blending: T.AdditiveBlending, depthWrite: false });
+  const core = new T.Mesh(coreGeo, coreMat);
+  g.add(core);
+  g.visible = false;
+  g.frustumCulled = false;
+  scene.add(g);
+  auras.push({ g, mat, coreMat, blades, core });
 }
 
-// Colours by what kind of control the object is under, so the aura carries
-// information rather than just decoration.
-const AURA_HELD   = new T.Color(0xe94fbf);   // in your carry
-const AURA_SEEK   = new T.Color(0xffb060);   // launched and guiding
-const AURA_HOSTILE= new T.Color(0xff3020);   // thrown back at you
+// Tints by what kind of control the object is under, so the aura still carries
+// information rather than only decoration. The plume's own ramp already runs
+// magenta at the core to blue at the tips, so HELD is left essentially
+// untinted — that IS the intended look — and the other two states pull it warm
+// or red so a returning prop still reads as danger at a glance.
+const AURA_HELD    = new T.Color(0xffffff);
+const AURA_SEEK    = new T.Color(0xffc890);
+const AURA_HOSTILE = new T.Color(0xff7060);
 
-function updateAuras() {
+function updateAuras(dt) {
+  // Scroll the two shared sheets rather than a clone per object: twenty-four
+  // cloned textures would be twenty-four GPU uploads to animate what is really
+  // one motion. Two different rates so alternating auras never march in step.
+  plumeTexA.offset.y = (plumeTexA.offset.y - 0.55*dt) % 1;
+  plumeTexB.offset.y = (plumeTexB.offset.y - 0.80*dt) % 1;
+
   let i = 0;
   const claim = (o, col, base, pulseHz) => {
     if (i >= auras.length) return;
-    const m = auras[i++];
-    m.visible = true;
-    m.position.copy(o.pos);
-    // Follows the prop's own scale, which the zoom shrinks when held, so the
-    // aura never becomes the thing filling the screen.
-    // Just over the prop's own size. The shell is BackSide, so the prop —
-    // which writes depth — hides everything except the sliver that peeks out
-    // around its silhouette. That sliver is the glow. At 1.85 the whole far
-    // hemisphere showed and each one read as a filled bubble instead, and
-    // seven of them merged into a single pink mass.
-    const s = o.r * o.mesh.scale.x * 1.24;
-    const pulse = 1 + 0.07*Math.sin(S.t*pulseHz + o.slot*1.7);
-    m.scale.setScalar(s * pulse);
-    m.material.color.copy(col);
+    const A = auras[i++];
+    A.g.visible = true;
+
+    // Sized off the prop, so a boulder wears a taller column than a plank and
+    // the zoom-shrunk carry never becomes the thing filling the screen — the
+    // failure the old spherical shell had to be tuned down twice to avoid.
+    const r = o.r * o.mesh.scale.x;
+    const pulse = 1 + 0.09*Math.sin(S.t*pulseHz + o.slot*1.7);
+    for (const q of A.blades) q.scale.set(r*2.5, r*4.6*pulse, 1);
+
+    // Seated below the prop's centre so the column rises THROUGH the object
+    // rather than balancing on top of it.
+    A.g.position.set(o.pos.x, o.pos.y - r*0.85, o.pos.z);
+
+    A.mat.color.copy(col);
     // A fresh grab flares, then settles.
-    m.material.opacity = base + 0.30*Math.max(0, o.grabT||0)
-                       + 0.06*Math.sin(S.t*pulseHz*1.6 + o.slot);
+    A.mat.opacity = base + 0.34*Math.max(0, o.grabT||0)
+                  + 0.07*Math.sin(S.t*pulseHz*1.6 + o.slot);
+
+    // The hot core sits back at the prop itself — the bright spot the column
+    // is rising out of.
+    A.core.position.y = r*0.85;
+    A.core.scale.setScalar(r * (0.82 + 0.10*Math.sin(S.t*pulseHz*2.1 + o.slot)));
+    A.coreMat.color.copy(col);
+    A.coreMat.opacity = base*0.7 + 0.30*Math.max(0, o.grabT||0);
   };
 
   for (const o of S.held) claim(o, AURA_HELD, 0.55, 7);
@@ -3132,7 +3240,7 @@ function updateAuras() {
     if (o.hostile > 0)     claim(o, AURA_HOSTILE, 0.75, 13);
     else if (o.seekT > 0)  claim(o, AURA_SEEK, 0.62, 11);
   }
-  for (; i < auras.length; i++) auras[i].visible = false;
+  for (; i < auras.length; i++) auras[i].g.visible = false;
 }
 
 function updateTethers() {
@@ -5125,7 +5233,7 @@ function step(dt) {
   }
 
   updateTethers();
-  updateAuras();
+  updateAuras(dt);
 
   motes.rotation.y += dt*0.012;
   motes.position.y = Math.sin(S.t*0.25)*0.4;
