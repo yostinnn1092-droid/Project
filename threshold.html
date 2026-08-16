@@ -5662,6 +5662,9 @@ const MAT = {
   mote:   new T.MeshStandardMaterial({ color:0x4a6f9c, roughness:0.4, emissive:0x1a3a5c, emissiveIntensity:0.8 }),
   lash:   new T.MeshStandardMaterial({ color:0x8c3550, roughness:0.7 }),
   warden: new T.MeshStandardMaterial({ color:0x5a5a66, roughness:0.55, metalness:0.5 }),
+  bell:   new T.MeshStandardMaterial({ color:0x8a6a2e, roughness:0.45, metalness:0.65 }),
+  scribe: new T.MeshStandardMaterial({ color:0x9a8f74, roughness:0.8,
+                                        emissive:0x2a2410, emissiveIntensity:0.5 }),
   boss:   new T.MeshStandardMaterial({ color:0x2b2b34, roughness:0.6, metalness:0.35,
                                         emissive:0x401505, emissiveIntensity:0.7 }),
   shield: new T.MeshStandardMaterial({ color:0x88aadd, transparent:true, opacity:0.30,
@@ -5973,11 +5976,13 @@ function generateFloor(n) {
       if (Math.hypot(ex-P.pos.x, ez-P.pos.z) < 12) continue;
       let kind = "husk";
       const roll = rnd();
-      if (n >= CFG.eliteFrom && roll < 0.16) kind = "warden";
-      else if (roll < 0.42) kind = "mote";
-      else if (roll < 0.66) kind = "lash";
+      if (n >= CFG.eliteFrom && roll < 0.13) kind = "warden";
+      else if (n >= 2 && roll < 0.25) kind = "bell";
+      else if (n >= 2 && roll < 0.38) kind = "scribe";
+      else if (roll < 0.56) kind = "mote";
+      else if (roll < 0.76) kind = "lash";
       spawnEnemy(kind, ex, ez, n);
-      spent += kind === "warden" ? 3 : 1;
+      spent += kind === "warden" ? 3 : (kind === "bell" ? 2 : 1);
     }
   }
 
@@ -6067,6 +6072,16 @@ const EDEF = {
            mat:"mote",   name:"Mote", ranged:true },
   warden:{ hp:120,dmg:24, spd:2.4, reach:2.6, wind:0.95, rec:0.95, xp:26, r:0.70, h:2.1,
            mat:"warden", name:"Warden", shielded:true },
+
+  // Two archetypes drafted through the local OmniRoute gateway and kept for the
+  // mechanics they add rather than the names. Neither duplicates an existing
+  // behaviour: the Bellwether punishes standing anywhere near it and leaves you
+  // slowed rather than damaged, and the Scribe covers ground a single Mote bolt
+  // cannot, so cover stops being optional.
+  bell:  { hp:74, dmg:9,  spd:2.2, reach:6.8, wind:1.10, rec:1.25, xp:17, r:0.56, h:1.95,
+           mat:"bell",   name:"Bellwether", aoe:true, slow:2.0 },
+  scribe:{ hp:34, dmg:9,  spd:2.0, reach:16,  wind:0.92, rec:1.15, xp:13, r:0.46, h:1.65,
+           mat:"scribe", name:"Scribe", ranged:true, volley:3, spread:0.30 },
 };
 
 function spawnEnemy(kind, x, z, floor) {
@@ -6540,6 +6555,7 @@ function updatePlayer(dt) {
   for (const k in P.buffs) { P.buffs[k] -= dt; if (P.buffs[k] <= 0) delete P.buffs[k]; }
 
   if (G.touch.latch > 0) G.touch.latch -= dt;
+  P.slow = Math.max(0,(P.slow||0)-dt);
   P.dodgeCd = Math.max(0,P.dodgeCd-dt);
   P.iframe  = Math.max(0,P.iframe-dt);
   P.boltCd  = Math.max(0,P.boltCd-dt);
@@ -6557,7 +6573,10 @@ function updatePlayer(dt) {
     const mv = moveIntent();
     if (mv.lengthSq() > 0.01) {
       mv.normalize();
-      const spd = CFG.moveSpeed * (P.atkT>0?0.42:1);
+      // Slowed, never rooted. A Bellwether should make escaping expensive, not
+      // take the controls away — being unable to act while something winds up
+      // is the difference between hard and cheap.
+      const spd = CFG.moveSpeed * (P.atkT>0?0.42:1) * (P.slow>0 ? 0.55 : 1);
       P.vel.x = lerp(P.vel.x, mv.x*spd, 1-Math.pow(0.0015,dt));
       P.vel.z = lerp(P.vel.z, mv.z*spd, 1-Math.pow(0.0015,dt));
     } else {
@@ -6659,7 +6678,24 @@ function updateEnemies(dt) {
           e.tell.visible = false;
           e.state = "recover"; e.t = e.def.rec; e.cd = e.def.rec + 0.3 + rnd()*0.5;
           if (e.def.ranged) {
-            spawnBolt(e.pos, toP, e.dmg, true, 15);
+            // A volley fans out, so strafing sideways no longer clears it and
+            // the answer becomes a pillar or a dodge through the gap.
+            const n = e.def.volley || 1;
+            for (let k = 0; k < n; k++) {
+              const off = (k - (n-1)/2) * (e.def.spread || 0);
+              const dir = new T.Vector3(
+                toP.x*Math.cos(off) - toP.z*Math.sin(off), 0,
+                toP.x*Math.sin(off) + toP.z*Math.cos(off));
+              spawnBolt(e.pos, dir, e.dmg, true, 15);
+            }
+          } else if (e.def.aoe) {
+            // Rings out to its full reach — there is no safe melee spacing, you
+            // either interrupt it or you leave.
+            ring(e.pos, 0xffc973, e.def.reach);
+            if (dist <= e.def.reach) {
+              damagePlayer(e.dmg, e.pos);
+              P.slow = Math.max(P.slow || 0, e.def.slow);
+            }
           } else if (dist <= e.def.reach + 0.9) {
             damagePlayer(e.dmg, e.pos);
           }
@@ -6924,7 +6960,7 @@ function startRun() {
   G.phase = "playing"; G.floor = 1; G.runTime = 0; G.marksRun = 0;
   P.lv = 1; P.xp = 0; P.xpNext = 22;
   P.relics = []; P.equip = { weapon:null, armour:null, charm:null };
-  P.skills = []; P.buffs = {};
+  P.skills = []; P.buffs = {}; P.slow = 0;
   // first skill is free so the kit is never empty
   P.skills.push({ id:pick(["cinder","bulwark","sunder"]), cd:0 });
   // Prior Credit: start with relics already in hand
