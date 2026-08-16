@@ -1083,47 +1083,153 @@ const hero = { pos: new T.Vector3(0,0,0), yaw: 0, walk: 0, hp: CFG.maxHealth,
 const RING = {
   levels: [
     null,
-    { orbs:1, radius:3.6, dps:52,  orbR:0.62, spin:2.5 },
-    { orbs:2, radius:5.0, dps:88,  orbR:0.74, spin:2.9 },
-    { orbs:3, radius:6.6, dps:140, orbR:0.88, spin:3.3 },
+    { radius:3.6, height:1.55, dps:52,  glow:0.85, orbR:0.62 },
+    { radius:5.0, height:2.10, dps:88,  glow:1.00, orbR:0.74 },
+    { radius:6.6, height:2.75, dps:140, glow:1.20, orbR:0.88 },
   ],
   tick: 0.22,          // seconds between damage applications per body
 };
 
 const ringState = { lv:0, ang:0, orbs:[], group:null, cool:new Map() };
 
-const ringCoreMat = new T.MeshBasicMaterial({ color:0xffd08a });
-const ringGlowMat = new T.MeshBasicMaterial({ color:0xff6a1a, transparent:true,
-                                              opacity:0.42, depthWrite:false });
-const ringTrailMat= new T.MeshBasicMaterial({ color:0xff8a2a, transparent:true,
-                                              opacity:0.16, depthWrite:false,
-                                              side:T.DoubleSide });
+// A procedural flame sheet. Tiles horizontally, so it can be wrapped around a
+// cylinder and scrolled forever without a seam — every term below is a sine at
+// an INTEGER frequency over 0..1 for exactly that reason. Alpha carries the
+// tongue shapes; colour runs white-hot at the base through orange to deep red
+// at the tips, which is what makes a flat sheet read as fire rather than paint.
+function flameSheet(w, h, seed) {
+  const c = canvasOf(1); c.width = w; c.height = h;
+  const x = c.getContext("2d");
+  const img = x.createImageData(w, h);
+  let sd = seed >>> 0;
+  const rr = () => (sd = (sd*1664525 + 1013904223) >>> 0) / 4294967296;
+  // a handful of random phases, fixed up front so the field is stable
+  const ph = []; for (let i = 0; i < 10; i++) ph.push(rr()*Math.PI*2);
+
+  for (let i = 0; i < w; i++) {
+    const u = i / w, a = u * Math.PI * 2;
+    // Layered integer harmonics. More terms at lower amplitude gives wavy
+    // licks; three big terms gave sharp triangular spikes.
+    let top = 0.44
+      + 0.17 * Math.sin(a*3  + ph[0])
+      + 0.12 * Math.sin(a*5  + ph[1])
+      + 0.09 * Math.sin(a*8  + ph[2])
+      + 0.06 * Math.sin(a*13 + ph[3])
+      + 0.04 * Math.sin(a*21 + ph[6]);
+    top = Math.max(0.14, Math.min(0.96, top));
+
+    for (let j = 0; j < h; j++) {
+      const v = 1 - j / h;                     // 0 at the top, 1 at the base
+      const k = (j*w + i) * 4;
+      if (v > top) { img.data[k+3] = 0; continue; }
+      const t = v / top;                        // 0 at the tip, 1 at the base
+
+      // Palette pushed warm. An almost-white core over three ADDITIVE layers
+      // blew the whole ring out to white — additive stacking is what turns a
+      // pale core into a floodlight. The hottest point is now a deep amber and
+      // the tips run to red, which is what fire looks like from outside it.
+      let R, G, B;
+      if (t > 0.86)      { R=255; G=226; B=150; }
+      else if (t > 0.58) { const f=(t-0.58)/0.28; R=255; G=150+f*70; B=36+f*100; }
+      else if (t > 0.30) { const f=(t-0.30)/0.28; R=252; G=76+f*72;  B=14+f*20; }
+      else               { const f=t/0.30;        R=182+f*70; G=22+f*52; B=8+f*6; }
+
+      // Soft shoulder at the tip instead of a hard cut, so the flame fades out
+      // rather than ending in a point.
+      const edge = 0.55 + 0.45*Math.sin(a*17 + ph[4] + v*9);
+      const tipFade = Math.min(1, Math.max(0, (t - 0.06*edge) / 0.30));
+      const flick = 0.80 + 0.20*Math.sin(a*11 + ph[5] + v*13);
+      const alpha = tipFade * tipFade * flick;   // squared: gentler shoulder
+
+      img.data[k]   = R;
+      img.data[k+1] = G;
+      img.data[k+2] = B;
+      img.data[k+3] = alpha * 255;
+    }
+  }
+  x.putImageData(img, 0, 0);
+  const tex = new T.CanvasTexture(c);
+  tex.wrapS = T.RepeatWrapping;
+  tex.wrapT = T.ClampToEdgeWrapping;
+  tex.colorSpace = T.SRGBColorSpace;
+  return tex;
+}
+
+// Two sheets at different seeds. Counter-scrolling them at different speeds is
+// what turns a repeating band into something that churns.
+const flameTexA = flameSheet(512, 128, 0x1f3a);
+const flameTexB = flameSheet(512, 128, 0x77c1);
+const flameMatA = new T.MeshBasicMaterial({ map:flameTexA, transparent:true,
+  blending:T.AdditiveBlending, depthWrite:false, side:T.DoubleSide, opacity:0.78 });
+const flameMatB = new T.MeshBasicMaterial({ map:flameTexB, transparent:true,
+  blending:T.AdditiveBlending, depthWrite:false, side:T.DoubleSide, opacity:0.52 });
+
+// The scorched ground under the ring — a soft annulus, so the hitbox is
+// legible from directly overhead where the vertical curtain is edge-on.
+function groundGlowTexture() {
+  const c = canvasOf(128), x = c.getContext("2d");
+  const g = x.createRadialGradient(64,64,0, 64,64,64);
+  g.addColorStop(0.00, "rgba(0,0,0,0)");
+  g.addColorStop(0.62, "rgba(0,0,0,0)");
+  g.addColorStop(0.78, "rgba(255,140,40,0.55)");
+  g.addColorStop(0.90, "rgba(255,70,20,0.42)");
+  g.addColorStop(1.00, "rgba(120,20,0,0)");
+  x.fillStyle = g; x.fillRect(0,0,128,128);
+  const t = new T.CanvasTexture(c);
+  t.colorSpace = T.SRGBColorSpace;
+  return t;
+}
+const groundGlowMat = new T.MeshBasicMaterial({ map:groundGlowTexture(),
+  transparent:true, blending:T.AdditiveBlending, depthWrite:false, side:T.DoubleSide });
 
 function buildRingOrbs() {
   if (!ringState.group) { ringState.group = new T.Group(); scene.add(ringState.group); }
   const g = ringState.group;
   while (g.children.length) { const c = g.children.pop(); disposeGroup(c); }
-  ringState.orbs.length = 0;
+  ringState.curtains = [];
+  ringState.disc = null; ringState.light = null;
   if (!ringState.lv) return;
   const L = RING.levels[ringState.lv];
 
-  // The orbit path, drawn once as a faint annulus so the danger zone is
-  // legible even between orbs. Without it the player cannot see how wide the
-  // ring actually reaches, which matters the moment they upgrade.
-  const path = new T.Mesh(
-    new T.RingGeometry(L.radius - 0.13, L.radius + 0.13, 48), ringTrailMat);
-  path.rotation.x = -Math.PI/2; path.position.y = 0.9;
-  g.add(path);
-
-  for (let i = 0; i < L.orbs; i++) {
-    const o = new T.Group();
-    const core = new T.Mesh(new T.SphereGeometry(L.orbR*0.55, 10, 8), ringCoreMat);
-    const halo = new T.Mesh(new T.SphereGeometry(L.orbR*1.5, 10, 8), ringGlowMat);
-    const lt = new T.PointLight(0xff7a26, 1.5, 9, 1.8);
-    o.add(core, halo, lt);
-    g.add(o);
-    ringState.orbs.push({ g:o });
+  // A continuous wall of flame rather than orbiting balls — which is also what
+  // the hitbox has always been, since damage applies to the whole annulus.
+  // Three concentric curtains at slightly different radii, heights and scroll
+  // rates: one alone reads as a printed cylinder, three churn.
+  const layers = [
+    { r:L.radius-0.30, h:L.height*0.78, mat:flameMatB, rep:3, spd:-0.55, op:0.44 },
+    { r:L.radius,      h:L.height,      mat:flameMatA, rep:4, spd: 0.85, op:0.82 },
+    { r:L.radius+0.30, h:L.height*0.62, mat:flameMatB, rep:5, spd:-1.25, op:0.36 },
+  ];
+  for (const cfg of layers) {
+    const mat = cfg.mat.clone();
+    mat.map = cfg.mat.map.clone();
+    mat.map.needsUpdate = true;
+    mat.map.wrapS = T.RepeatWrapping;
+    mat.map.repeat.set(cfg.rep, 1);
+    mat.opacity = cfg.op * L.glow;
+    mat._own = true;
+    const geo = new T.CylinderGeometry(cfg.r, cfg.r*0.94, cfg.h, 48, 1, true);
+    const m = new T.Mesh(geo, mat);
+    m.position.y = cfg.h/2;
+    g.add(m);
+    ringState.curtains.push({ mesh:m, mat, spd:cfg.spd });
   }
+
+  // Ground scorch, so the ring stays readable looking straight down where the
+  // vertical curtain is edge-on and nearly invisible.
+  const gm = groundGlowMat.clone(); gm._own = true;
+  gm.opacity = 0.8 * L.glow;
+  const disc = new T.Mesh(new T.PlaneGeometry(L.radius*2.5, L.radius*2.5), gm);
+  disc.rotation.x = -Math.PI/2; disc.position.y = 0.06;
+  g.add(disc);
+  ringState.disc = disc;
+
+  // The light rides with the ring, so the fire actually falls on whatever is
+  // standing in it.
+  const lt = new T.PointLight(0xff7a26, 2.2*L.glow, L.radius*3.4, 1.7);
+  lt.position.y = L.height*0.6;
+  g.add(lt);
+  ringState.light = lt;
 }
 
 function ringUpgrade() {
@@ -1137,8 +1243,7 @@ function ringUpgrade() {
   buildRingOrbs();
   const L = RING.levels[ringState.lv];
   banner("RING OF FIRE · " + ringState.lv);
-  toast(L.orbs + (L.orbs===1?" flame":" flames") + " · " + Math.round(L.dps) +
-        " dps · radius " + L.radius.toFixed(1), 2800);
+  toast("radius " + L.radius.toFixed(1) + " · " + Math.round(L.dps) + " dps", 2800);
   SFX.overload();
   S.shake = Math.min(1.0, S.shake + 0.35);
 }
@@ -1147,19 +1252,19 @@ function stepRing(dt) {
   const g = ringState.group;
   if (!ringState.lv || !g) return;
   const L = RING.levels[ringState.lv];
-  ringState.ang += dt * L.spin;
   g.position.set(hero.pos.x, 0, hero.pos.z);
 
-  for (let i = 0; i < ringState.orbs.length; i++) {
-    const orb = ringState.orbs[i];
-    const a = ringState.ang + (i / L.orbs) * Math.PI * 2;
-    const ox = Math.cos(a) * L.radius, oz = Math.sin(a) * L.radius;
-    // Bob so it reads as fire rather than a rigid solid.
-    orb.g.position.set(ox, 1.05 + Math.sin(S.t*6 + i*2.1)*0.14, oz);
-    const pulse = 1 + Math.sin(S.t*9 + i)*0.10;
-    orb.g.scale.setScalar(pulse);
-
+  // Scrolling the texture instead of moving geometry: the churn is free, and
+  // counter-scrolling layers at different rates is what stops a repeating band
+  // from reading as a repeat.
+  for (const c of ringState.curtains) {
+    c.mat.map.offset.x = (c.mat.map.offset.x + dt*c.spd) % 1;
+    c.mesh.scale.y = 1 + Math.sin(S.t*3.1 + c.spd)*0.09;
   }
+  if (ringState.disc)
+    ringState.disc.material.opacity = (0.66 + Math.sin(S.t*4.2)*0.14) * L.glow;
+  if (ringState.light)
+    ringState.light.intensity = (2.0 + Math.sin(S.t*6.5)*0.55) * L.glow;
 
   // ── damage ────────────────────────────────────────────────────────────────
   // The burning ANNULUS is the hitbox, not the three orbs. Testing the orbs
