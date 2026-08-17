@@ -144,6 +144,59 @@ test("archer: carries a bow silhouette", async (pg) => {
      "the archer has no lit nock: an archetype needs a silhouette, not only a statline");
 });
 
+test("archetypes: no two enemies are the same silhouette at the same size", async (pg) => {
+  // The archer once shipped "with only a skin-tone difference and was invisible
+  // at range". That was never only the archer: measured, NINE of the thirteen
+  // archetypes are built from a byte-identical part list, and several sit
+  // within a few percent of each other in scale. On a dark arena that is one
+  // enemy wearing nine hats.
+  //
+  // Colour is deliberately NOT part of the signature. Hue is what failed the
+  // archer, so a test that accepts hue as distinctness would bless the bug.
+  // Scale IS allowed to distinguish — the crawler at 0.58 and the tank at 1.42
+  // genuinely read differently across a room — but only when the gap is large.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe, sigs = {};
+    for (const t of Object.keys(P.ENEMIES)) {
+      P.parkWalkers();
+      P.spawnWalker(t, 0, -10);
+      const w = P.walkers[P.walkers.length - 1];
+      const kinds = {};
+      w.g.traverse(o => {
+        if (o.isMesh && o.geometry) {
+          const k = o.geometry.type.replace("Geometry", "");
+          kinds[k] = (kinds[k] || 0) + 1;
+        }
+      });
+      // Part counts alone are too coarse: three quills swept back off the
+      // skull and three fins running down the spine both read as "Cone3",
+      // and they are plainly different shapes. Fold in the normalised
+      // bounding box so WHERE the mass sits counts too. Divided by height,
+      // so this still refuses to treat pure scaling as a silhouette.
+      const box = new window.THREE.Box3().setFromObject(w.g);
+      const sz = box.getSize(new window.THREE.Vector3());
+      const prof = sz.y > 1e-3
+        ? (sz.x / sz.y).toFixed(1) + "x" + (sz.z / sz.y).toFixed(1) : "flat";
+      sigs[t] = { shape: Object.entries(kinds).sort().map(([k, v]) => k + v).join("/") + "|" + prof,
+                  scale: P.ENEMIES[t].scale || 1 };
+    }
+    const clashes = [];
+    const names = Object.keys(sigs);
+    for (let i = 0; i < names.length; i++)
+      for (let j = i + 1; j < names.length; j++) {
+        const a = sigs[names[i]], b = sigs[names[j]];
+        if (a.shape !== b.shape) continue;
+        const ratio = Math.max(a.scale, b.scale) / Math.min(a.scale, b.scale);
+        if (ratio < 1.25) clashes.push(`${names[i]}/${names[j]}`);
+      }
+    return { total: names.length, clashes };
+  });
+  eq(r.clashes.length, 0,
+     `${r.clashes.length} archetype pairs share a part list AND a size, so they ` +
+     `are the same silhouette in play: ${r.clashes.slice(0, 8).join(", ")}` +
+     (r.clashes.length > 8 ? ` (+${r.clashes.length - 8} more)` : ""));
+});
+
 test("archer: draws, fires, and its arrow can hit", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe;
