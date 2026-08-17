@@ -2021,7 +2021,7 @@ function spawnMaw(x, z) {
 
   g.position.set(x, 0, z);
   scene.add(g);
-  walkers.push({ g, body, torso: body, head, jaw,
+  walkers.push({ g, body, torso: body, head, jaw, bodyY: HIP,
     aL, aR, lL, lR, pos: g.position,
     type:"maw", boss:true, maw:true, core, glow, plates, platesLeft:MAW.plates,
     E:{ name:"THE GORGER", hp:MAW.coreHp, speed:MAW.speed, scale:3.6, skin:0x3a2f28,
@@ -2110,48 +2110,150 @@ function spawnChoir(x, z, lap) {
 function spawnHollow(x, z, lap) {
   const scale = 1 + lap * 0.3;
   const g = new T.Group();
-  const shellM = new T.MeshStandardMaterial({ color:0x2a2f3a, roughness:0.35,
-    metalness:0.85, envMapIntensity:1.4 });
-  const voidM = new T.MeshBasicMaterial({ color:0x0a0a12 });
+  // Matte charcoal, not the polished metal it used to be. The reference this
+  // is built from is a charcoal drawing: the form has to read from silhouette
+  // and edge alone, so a shiny surface actively fights it.
+  const hideM = new T.MeshStandardMaterial({ color:0x272b34, roughness:0.82,
+    metalness:0.05, envMapIntensity:0.35 });
+  const boneM = new T.MeshStandardMaterial({ color:0x3d434e, roughness:0.6,
+    metalness:0.18, envMapIntensity:0.7 });
+  const voidM = new T.MeshBasicMaterial({ color:0x05060a });
   const eyeM  = new T.MeshBasicMaterial({ color:0x8fd8ff });
 
-  // A hollow shell: an open ring where a torso should be, so the silhouette
-  // says "there is nothing here to hit" before the damage numbers do.
-  g.add(part(new T.TorusGeometry(1.25, 0.42, 8, 18), shellM, 0, 2.5, 0));
-  g.add(part(new T.SphereGeometry(0.95, 12, 9), voidM, 0, 2.5, 0));
-  g.add(part(new T.CylinderGeometry(0.5, 0.85, 1.9, 8), shellM, 0, 0.95, 0));
-  g.add(part(new T.SphereGeometry(0.55, 12, 9), shellM, 0, 3.9, 0));
-  g.add(part(new T.SphereGeometry(0.14, 8, 6), eyeM, -0.24, 3.95, 0.44));
-  g.add(part(new T.SphereGeometry(0.14, 8, 6), eyeM,  0.24, 3.95, 0.44));
-  const core = part(new T.OctahedronGeometry(0.5, 0),
-    new T.MeshStandardMaterial({ color:0x8fd8ff, emissive:0x8fd8ff,
-      emissiveIntensity:1.8, roughness:0.3 }), 0, 2.5, 0);
-  g.add(core);
-  const glow = new T.PointLight(0x8fd8ff, 1.2, 22, 2);
-  glow.position.set(0, 2.5, 0); g.add(glow);
+  // A thorn. Every spike on this thing is one of these, which is what makes
+  // the crown and the arm barbs the same language rather than two ideas.
+  const thorn = (parent, len, rad, px, py, pz, rx, rz) => {
+    const m = part(new T.ConeGeometry(rad, len, 5), boneM, px, py, pz);
+    m.rotation.set(rx, 0, rz);
+    parent.add(m);
+    return m;
+  };
 
-  const tell = new T.Mesh(new T.RingGeometry(1.4, 2.0, 22),
+  const HIP = 2.8, SHOULDER = 5.05;
+
+  // Digitigrade legs: thin, and long enough that the thing towers. The claws
+  // are added to the shin so they swing with the step.
+  const lL = limb(g, HIP, hideM, -0.66, HIP, 0, 0.33);
+  const lR = limb(g, HIP, hideM,  0.66, HIP, 0, 0.33);
+  for (const leg of [lL, lR]) {
+    const foot = part(new T.BoxGeometry(0.5, 0.18, 0.9), hideM, 0, -HIP*0.48 - 0.06, 0.24);
+    leg.joint.add(foot);
+    // Splayed toe-claws. Three forward, one back — the reference's feet are
+    // the widest part of its footprint and that is what sells the weight.
+    for (let i = -1; i <= 1; i++)
+      thorn(leg.joint, 0.62, 0.10, i*0.20, -HIP*0.48 - 0.10, 0.72, 1.35, 0);
+    thorn(leg.joint, 0.44, 0.09, 0, -HIP*0.48 - 0.10, -0.26, -1.5, 0);
+    // Bound from hip to knee, as in the reference.
+    for (let i = 0; i < 3; i++) {
+      const wrap = part(new T.TorusGeometry(0.37 - i*0.02, 0.07, 5, 12), boneM,
+                        0, -0.42 - i*0.36, 0);
+      wrap.rotation.x = Math.PI/2;
+      leg.add(wrap);
+    }
+  }
+
+  // Everything above the hip leans as one piece, so the gait's hunch drives
+  // the whole upper mass. bodyY is the rest height the bob is added to.
+  const body = new T.Group();
+  body.position.y = HIP;
+  g.add(body);
+
+  // Trunk: narrow at the waist, broad at the shoulders — an inverted wedge.
+  const waist = part(new T.CylinderGeometry(0.68, 0.5, 0.95, 8), hideM, 0, 0.12, 0);
+  body.add(waist);
+  const trunk = part(new T.CylinderGeometry(1.28, 0.92, 2.15, 10), hideM, 0, 1.55, 0);
+  body.add(trunk);
+
+  // Ribbed segmentation up the trunk. The reference's torso is banded the
+  // whole way, and those bands are most of why it reads as flayed rather
+  // than armoured.
+  for (let i = 0; i < 7; i++) {
+    const t = i / 6;
+    const rib = part(new T.TorusGeometry(0.56 + t*0.86, 0.085, 5, 14), boneM,
+                     0, 0.5 + i*0.42, 0.02);
+    rib.rotation.x = Math.PI/2;
+    rib.scale.set(1, 0.66, 1);
+    body.add(rib);
+  }
+
+  // No head. The mass just ends in a shoulder yoke, and the only feature on
+  // it is a single vertical slit — which is far more unpleasant than a face.
+  const yoke = part(new T.SphereGeometry(1.2, 12, 10), hideM, 0, 2.92, -0.05);
+  yoke.scale.set(1.28, 0.98, 1.0);
+  body.add(yoke);
+  const slit = part(new T.BoxGeometry(0.18, 1.1, 0.12), voidM, 0, 2.72, 0.98);
+  body.add(slit);
+  body.add(part(new T.BoxGeometry(0.08, 0.7, 0.06), eyeM, 0, 2.72, 1.05));
+
+  // The crown: thorns fanned around and above the yoke, longest at the back,
+  // so the profile is a spread of spines rather than a hedgehog.
+  for (let i = 0; i < 13; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    const back = 0.55 + 0.45 * Math.cos(a);   // longest pointing rearward
+    thorn(body, 1.55 + back*1.9, 0.155,
+          Math.sin(a) * 1.34, 3.16, Math.cos(a) * 0.72 - 0.05,
+          -Math.cos(a) * 0.85, -Math.sin(a) * 0.95);
+  }
+  // A second, shorter rank down the spine.
+  for (let i = 0; i < 4; i++)
+    thorn(body, 0.95 - i*0.12, 0.11, 0, 2.6 - i*0.5, -0.78, -2.35, 0);
+
+  // The hollow itself: an open cavity in the chest where a sternum should be.
+  // This is the mechanic made visible — there is nothing in there to hit, and
+  // the only thing that reaches it is ordnance it threw at you first.
+  body.add(part(new T.TorusGeometry(0.72, 0.19, 7, 14), boneM, 0, 1.75, 0.52));
+  body.add(part(new T.SphereGeometry(0.6, 11, 9), voidM, 0, 1.75, 0.56));
+  const core = part(new T.OctahedronGeometry(0.34, 0),
+    new T.MeshStandardMaterial({ color:0x8fd8ff, emissive:0x8fd8ff,
+      emissiveIntensity:1.8, roughness:0.3 }), 0, 1.75, 0.6);
+  body.add(core);
+  const glow = new T.PointLight(0x8fd8ff, 1.2, 22, 2);
+  glow.position.set(0, HIP + 1.75, 0.7); g.add(glow);
+
+  const tell = new T.Mesh(new T.RingGeometry(2.2, 3.0, 24),
     new T.MeshBasicMaterial({ color:0x8fd8ff, transparent:true, opacity:0,
                               side:T.DoubleSide, depthWrite:false }));
-  tell.rotation.x = -Math.PI/2; tell.position.y = 4.8; tell.visible = false;
+  tell.rotation.x = -Math.PI/2; tell.position.y = 6.4; tell.visible = false;
   g.add(tell);
 
-  const aL = limb(g, 1.3, shellM, -1.5, 3.0, 0, 0.26);
-  const aR = limb(g, 1.3, shellM,  1.5, 3.0, 0, 0.26);
-  const lL = limb(g, 1.2, shellM, -0.5, 0.9, 0, 0.28);
-  const lR = limb(g, 1.2, shellM,  0.5, 0.9, 0, 0.28);
+  // Arms longer than the creature is tall, hung wide off the shoulders. This
+  // is the whole silhouette — in the reference they bow out and the hands
+  // reach past the feet.
+  const aL = limb(g, 4.35, hideM, -1.78, SHOULDER, -0.05, 0.3);
+  const aR = limb(g, 4.35, hideM,  1.78, SHOULDER, -0.05, 0.3);
+  for (const [arm, side] of [[aL, -1], [aR, 1]]) {
+    // Bowed outward at rest so the arms frame the body instead of hanging
+    // flat against it.
+    arm.rotation.z = side * 0.3;
+    arm.joint.rotation.z = -side * 0.34;
+    // Barbs down both segments, alternating and growing toward the hand —
+    // the reference's arms are serrated their whole length.
+    for (let i = 0; i < 5; i++) {
+      const t = i / 4;
+      thorn(arm, 0.5 + t*0.42, 0.085, side*0.16, -0.35 - i*0.5, -0.05,
+            -0.35, side * (1.05 + t*0.35));
+    }
+    for (let i = 0; i < 6; i++) {
+      const t = i / 5;
+      thorn(arm.joint, 0.62 + t*0.55, 0.09, side*0.15, -0.3 - i*0.42, -0.05,
+            -0.3, side * (1.15 + t*0.4));
+    }
+    // Hand: a splay of long claws rather than a fist.
+    for (let i = -1; i <= 1; i++)
+      thorn(arm.joint, 1.2, 0.085, i*0.17, -2.2, 0.05, 2.75, i*0.28);
+  }
 
   g.position.set(x, 0, z);
   g.scale.setScalar(scale);
   scene.add(g);
 
   const hp = Math.round(HOLLOW.coreHp * (1 + lap*0.6));
-  walkers.push({ g, body:g, torso:g, aL, aR, lL, lR, pos:g.position,
+  walkers.push({ g, body, torso: body, bodyY: HIP, aL, aR, lL, lR, pos:g.position,
     type:"hollow", boss:true, hollow:true, core, glow, tell,
     plates:[], platesLeft:0,
-    E:{ name:HOLLOW.name, hp, speed:HOLLOW.speed, scale:2.2*scale, skin:0x2a2f3a,
+    E:{ name:HOLLOW.name, hp, speed:HOLLOW.speed, scale:2.2*scale, skin:0x16181d,
         score:HOLLOW.score },
-    reach:3.0, r:1.7*scale, walk:0, gait:0, spd:0, dead:false, cool:0,
+    reach:4.2, r:1.9*scale, walk:0, gait:0, spd:0, dead:false, cool:0, armRest:-0.12,
     AI:AI.tank, arcDir:1, windup:0, atkT:HOLLOW.hurlEvery,
     hp, maxHp:hp, flash:0, kb:new T.Vector3(),
     thrown:0, tvel:new T.Vector3(), leapT:99, vy:0, air:false });
@@ -4855,14 +4957,17 @@ function step(dt) {
       if (w.slamWind > 0) {
         w.slamWind -= dt;
         const t = 1 - w.slamWind / (MAW.slamWind*rate);
-        w.body.position.y = 3.4 + Math.sin(t*Math.PI)*2.6;
+        // Rears from its own rest height. The literal 3.4 here disagreed with
+        // the 4.9 the rig is built at, so every slam also yanked the torso
+        // down a metre and a half.
+        w.body.position.y = (w.bodyY || 0) + Math.sin(t*Math.PI)*2.6;
         w.body.rotation.x = -Math.sin(t*Math.PI)*0.5;
         w.tell.visible = true;
         w.tell.material.opacity = 0.3 + 0.6*t;
         w.tell.scale.setScalar(1 + t*0.7);
         if (w.slamWind <= 0) {
           w.slamWind = 0;
-          w.body.position.y = 3.4; w.body.rotation.x = 0;
+          w.body.position.y = w.bodyY || 0; w.body.rotation.x = 0;
           w.tell.visible = false;
           shocks.push(makeShock(w.pos));
           S.shake = Math.min(1.4, S.shake + 1.0);
@@ -5044,7 +5149,7 @@ function step(dt) {
       }
     }
     // ---- walker gait (skipped while winding up: the tell owns the pose)
-    if (w.windup > 0) { w.body.position.y = 0; }
+    if (w.windup > 0) { w.body.position.y = w.bodyY || 0; }
     else {
     // Same blend as the hero, driven by the archetype's own speed, so a
     // Walker shambles, a Runner actually runs, and a leaper's burst reads as
@@ -5057,10 +5162,9 @@ function step(dt) {
     w.walk += dt * GAIT.cadence(wspd) * Math.PI*2;
 
     // Limbs are posed only if the rig actually has them. Not every body is a
-    // biped: THE CHOIR is a floating core with no legs OR arms, and THE HOLLOW
-    // has legs but no arms. Both threw here on the first frame they existed,
-    // which meant the animation loop died the instant wave 20 began — see
-    // hasLegs/hasArms on the walker.
+    // biped: THE CHOIR is a floating core with neither legs nor arms, and it
+    // threw here on the first frame it existed, which killed the animation
+    // loop the instant wave 20 began.
     if (w.lL) {
       const L = legPose(w.walk, gz), R = legPose(w.walk + Math.PI, gz);
       w.lL.rotation.x = L.hip;  w.lL.joint.rotation.x = L.knee;
@@ -5071,7 +5175,11 @@ function step(dt) {
     // gives way to a pumping arm as the thing starts to sprint.
     if (w.aL) {
       const A = armPose(w.walk + Math.PI, gz), B = armPose(w.walk, gz);
-      const shamble = -1.6 * (1 - gz);
+      // Rest angle is per rig. -1.6 is the classic outstretched zombie shamble
+      // and is right for a body with short arms; on THE HOLLOW, whose arms are
+      // longer than it is tall, it threw two five-metre sticks out horizontally
+      // instead of letting them hang. That one is armRest ~0.
+      const shamble = (w.armRest !== undefined ? w.armRest : -1.6) * (1 - gz);
       w.aL.rotation.x = shamble + A.shoulder*gz + Math.sin(w.walk*0.55)*0.14*(1-gz);
       w.aR.rotation.x = shamble + B.shoulder*gz - Math.sin(w.walk*0.55)*0.14*(1-gz);
       w.aL.joint.rotation.x = -0.25 - 1.1*gz + A.elbow*gz*0.5;
@@ -5079,7 +5187,11 @@ function step(dt) {
     }
 
     w.body.rotation.z = Math.sin(w.walk)*(0.11 - 0.05*gz);
-    w.body.position.y = gaitBob(w.walk, gz);
+    // Bob is a small offset ON TOP OF the rig's rest height, not an absolute
+    // position. Written absolutely it dropped the Gorger's whole torso from
+    // y=4.9 to y=0 on its first stepped frame, leaving its arms hanging in
+    // the air 7.9 units above the body they belong to.
+    w.body.position.y = (w.bodyY || 0) + gaitBob(w.walk, gz);
     // Hunched when shambling, driving forward when sprinting.
     w.torso.rotation.x = 0.34 + 0.30*gz + Math.sin(w.walk*0.5)*0.06;
     }

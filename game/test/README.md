@@ -30,7 +30,7 @@ remembering to look.
 | probe never leaks | a probe build published as the real artifact |
 | wave body ceiling | the separation pass is O(n²); an unbounded wave is a frame-rate cliff |
 | durability | a Rock did 100 and a Walker had exactly 100 HP — one-tap |
-| archer present from wave 3 | archers existed but first spawned at wave 5, past where runs ended |
+| archer present from wave 3 | archers existed but first spawned at wave 5, past where runs ended. The case itself was then a coin flip: it asked `counts()`, which sees only the opening group, so a pulse-arriving archer read as absent. It now asks `roster()` over eight passes |
 | archer bow silhouette | it shipped with only a skin-tone difference and was invisible at range |
 | archer arrow hits / dash beats it | substepping; at 26 u/s a single-step test tunnels through the player |
 | ring builds one more ring per rank | ranks silently not applying |
@@ -38,7 +38,8 @@ remembering to look.
 | boss closes, slams, throws | the rig was rebuilt quadruped → biped; limb slots feed the shared gait |
 | every tenth wave brings that tier's boss | the front-load that lifts a boss out of the shuffle listed two of the four boss types, so wave 20 opened bossless ~40% of the time |
 | never more than one big body | the late-wave ramp and HORDE both multiply counts — unguarded, that gave two Wardens |
-| every boss survives being animated | the shared gait posed limbs unconditionally; the Choir has no legs or arms and the Hollow no arms, so both killed the animation loop on their first frame |
+| every boss survives being animated | the shared gait posed limbs unconditionally; the Choir has neither legs nor arms, so it killed the animation loop on its first frame |
+| a body stays attached to its own shoulders | the walk bob was written as an absolute y, dropping the Gorger's torso from 4.9 to 0 while its arms stayed at 7.9 — no error, no log, boss silently in pieces |
 | choir core untouchable / acolytes die with it | the shield is the whole fight; a routing slip makes it either invincible or a plain sack of HP |
 | hollow only takes returned ordnance | same — the chip multiplier is the puzzle, and a missed gate collapses it to either wall or pushover |
 | wounds track health, bosses excluded | with 2-hit kills, nothing showed which bodies were finishable |
@@ -54,13 +55,30 @@ regressions were introduced and each turned the right case red:
 - a dangling reference in `clearAll` → wave-transition case threw
 - restoring the two-name front-load list → *"wave 20 opened with no boss on 7/12 passes"*
 - removing the `w.lL` guard from the gait → *"stepping \"choir\" threw"*
+- writing the walk bob absolutely again → *"maw torso drifted from its build height"*
+- skipping archers below wave 5 → *"wave 3 contained no archer on some passes"*
 
 ## Test the thing running, not just its functions
 
 Every choir and hollow case pokes `damageWalker` directly and never runs a
-frame — which is how both bosses shipped unable to animate at all while four
-green cases covered them. A case that calls a system's functions is not a case
-that runs the system. At least one per feature has to `step`.
+frame — which is how the Choir shipped unable to animate at all while four
+green cases covered it, and how the Gorger walked around in pieces for just as
+long. A case that calls a system's functions is not a case that runs the
+system. At least one per feature has to `step`.
+
+A related trap caught during the same work: a debug script that reused **one
+page** across several creature types kept earlier spawns alive in `walkers`, so
+a crash from the first type was reported against the third. That produced a
+confident, wrong diagnosis ("the Hollow has no arms" — it has a full rig).
+Isolate the subject per page, or the harness will lie to you.
+
+The same work produced a second wrong diagnosis worth recording: flooring wave
+counts at one (`Math.max(1, ...)`) was credited with fixing a missing archer.
+It did not. `CFG.enemyMul` is 2.0 and no modifier reduces counts, so the
+expression it guards can never round to zero — the floor is harmless insurance
+that has never once fired. The archer was missing because of the opening-group
+split above. A fix that is applied and then never proven to have been the cause
+is a guess wearing a commit message.
 
 ## Randomised cases need passes, not a pass
 

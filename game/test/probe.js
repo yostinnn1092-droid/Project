@@ -5,7 +5,7 @@
 window.__probe = {
   // state
   S, CFG, RING, ringState, MAW, ENEMIES, UPGRADES, OBJECTS, WAVES,
-  hero, walkers, rocks, arrows, shocks, taken, renderer,
+  hero, walkers, rocks, arrows, shocks, taken, renderer, spawnQ,
 
   // systems under test
   step, buildWave, spawnWalker, spawnMaw, damageWalker,
@@ -41,6 +41,17 @@ window.__probe = {
   counts() {
     const c = {};
     for (const w of walkers) if (!w.dead) c[w.type] = (c[w.type] || 0) + 1;
+    return c;
+  },
+
+  // The WHOLE wave, opening group plus everything still queued to arrive in a
+  // later pulse. counts() alone sees only what is standing on the field the
+  // instant the wave is built, which is ~60% of it — asking "does wave 3 have
+  // an archer" with counts() is a coin flip, because only bosses are lifted
+  // out of the shuffle into the opening group.
+  roster() {
+    const c = this.counts();
+    for (const p of spawnQ) for (const t of p.types) c[t] = (c[t] || 0) + 1;
     return c;
   },
 };

@@ -111,13 +111,25 @@ test("durability: no common archetype dies to a single rock", async (pg) => {
 });
 
 test("archer: present from wave 3 onward", async (pg) => {
+  // roster(), not counts(): only bosses are lifted into the opening group, so a
+  // lone archer legitimately arrives in a later pulse about 40% of the time.
+  // Asking counts() made this case a coin flip that happened to keep landing
+  // heads. Eight passes per wave, because one is not evidence about anything
+  // downstream of a shuffle.
   const r = await pg.evaluate(() => {
     const P = window.__probe, out = {};
-    for (let n = 3; n <= 8; n++) { P.buildWave(n); out[n] = P.counts().archer || 0; }
+    for (let n = 3; n <= 8; n++) {
+      out[n] = 0;
+      for (let pass = 0; pass < 8; pass++) {
+        P.buildWave(n);
+        if ((P.roster().archer || 0) > 0) out[n]++;
+      }
+    }
     return out;
   });
   for (const n of Object.keys(r))
-    ok(r[n] > 0, `wave ${n} contains no archer (an archetype nobody meets is not in the game)`);
+    eq(r[n], 8, `wave ${n} contained no archer on some passes ` +
+                `(an archetype nobody meets is not in the game)`);
 });
 
 test("archer: carries a bow silhouette", async (pg) => {
@@ -277,13 +289,39 @@ test("bosses: never more than one big body in a wave", async (pg) => {
   ok(r.length === 0, "waves produced multiple bosses: " + r.slice(0, 5).join(", "));
 });
 
+test("rigs: a body stays attached to its own shoulders", async (pg) => {
+  // The gait wrote the walk bob as an ABSOLUTE y, so any rig whose torso hangs
+  // above the origin was yanked to the floor on its first stepped frame. The
+  // Gorger built its body at y=4.9 and animated it at y=0, leaving its arms
+  // hanging 7.9 units above the torso they belong to. Nothing threw, nothing
+  // logged, and every boss case still passed — the boss was simply in pieces.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe, out = {};
+    for (const t of ["maw", "choir", "hollow", "boss"]) {
+      P.parkWalkers(); P.stripProps();
+      P.spawnWalker(t, P.hero.pos.x, P.hero.pos.z - 12);
+      const w = P.walkers[P.walkers.length - 1];
+      const built = w.body.position.y;
+      for (let i = 0; i < 240; i++) P.step(1 / 60);
+      out[t] = { built, after: w.body.position.y };
+    }
+    return out;
+  });
+  for (const t of Object.keys(r)) {
+    // The bob itself is under a quarter unit; anything beyond that is the rig
+    // coming apart rather than walking.
+    near(r[t].after, r[t].built, 0.3,
+         `"${t}" torso drifted from its build height — the rig is animating apart`);
+  }
+});
+
 test("bosses: every boss survives being animated", async (pg, errs) => {
   // The other boss cases all poke damageWalker directly and never run a frame,
-  // which is how two of the three shipped unable to animate at all: the shared
-  // walker gait poses lL/lR/aL/aR unconditionally, THE CHOIR has neither legs
-  // nor arms and THE HOLLOW has legs but no arms, so both threw on their first
-  // frame and took the whole animation loop down with them. Wave 20 was
-  // unplayable and nothing in the suite noticed, because nothing stepped.
+  // which is how THE CHOIR shipped unable to animate at all: the shared walker
+  // gait poses lL/lR/aL/aR unconditionally and the Choir is a floating core
+  // with neither, so it threw on its first frame and took the whole animation
+  // loop down with it. Wave 20 was unplayable and nothing in the suite
+  // noticed, because nothing stepped.
   const r = await pg.evaluate(() => {
     const P = window.__probe, out = {};
     for (const t of ["maw", "choir", "hollow", "boss"]) {
