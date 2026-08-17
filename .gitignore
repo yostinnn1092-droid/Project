@@ -20,3 +20,8 @@ data/m1/
 # Local agent tooling config (ECC install, permission overrides).
 # Not project source — reinstalled per machine, never shared.
 .claude/
+
+# Generated knowledge graph (graphify). Rebuildable from source with
+# /graphify — the HTML bundle alone is megabytes, and it goes stale the
+# moment the code it describes changes.
+graphify-out/

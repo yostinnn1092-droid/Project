@@ -621,17 +621,23 @@ test("damage flash: only at low health, and on every damage route", async (pg) =
 });
 
 test("wounds: skin darkens as health drops, bosses excluded", async (pg) => {
-  const r = await pg.evaluate(async () => {
+  const r = await pg.evaluate(() => {
     const P = window.__probe;
     P.parkWalkers();
     P.spawnWalker("walker", P.hero.pos.x + 6, P.hero.pos.z);
     const w = P.walkers[P.walkers.length - 1];
-    const read = async f => {
+    // Drive the sim directly instead of sleeping. The tint is applied in the
+    // walker step loop, so the old `await sleep(180)` was betting on the real
+    // render loop landing a frame inside that window — measured at 1-2 frames
+    // on an idle machine and zero under load, which is exactly how this case
+    // went red while the code it covers was correct. It was the last
+    // wall-clock-dependent case in the suite.
+    const read = f => {
       w.hp = w.maxHp * f;
-      await new Promise(r => setTimeout(r, 180));
+      for (let i = 0; i < 6; i++) P.step(1 / 60);
       return { hex: w.skinM.color.getHexString(), glow: w.skinM.emissiveIntensity };
     };
-    const full = await read(1.0), hurt = await read(0.12);
+    const full = read(1.0), hurt = read(0.12);
     P.spawnMaw(P.hero.pos.x, P.hero.pos.z - 30);
     const boss = P.walkers[P.walkers.length - 1];
     return { full, hurt, bossHasSkinM: !!boss.skinM };
