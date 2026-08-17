@@ -20,22 +20,25 @@
   .hide { display: none !important; }
 
   /* ───── HUD (landscape-first: hugs the top edge, never the middle) ───── */
-  #hud {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 5;
-    display: flex; align-items: flex-start; justify-content: space-between;
-    gap: 10px; padding: 10px 14px; pointer-events: none;
+  #hud { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+  /* Columns hug the top corners and run DOWN, so the readouts sit beside the
+     action instead of forming a band across the sky. */
+  #hudL, #hudR {
+    position: absolute; top: 8px; display: flex; flex-direction: column; gap: 4px;
   }
+  #hudL { left: 10px; align-items: flex-start; }
+  #hudR { right: 10px; align-items: flex-end; text-align: right; }
   .chip {
-    background: rgba(10,9,18,.6); border: 1px solid rgba(232,228,240,.13);
-    border-radius: 4px; padding: 5px 9px; backdrop-filter: blur(6px);
+    background: rgba(10,9,18,.55); border: 1px solid rgba(232,228,240,.11);
+    border-radius: 4px; padding: 3px 7px; backdrop-filter: blur(6px);
   }
-  .lbl { font-family: var(--mono); font-size: 8px; letter-spacing: .18em;
-         text-transform: uppercase; color: var(--dim); display: block; margin-bottom: 2px; }
-  .val { font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums; }
+  .lbl { font-family: var(--mono); font-size: 7px; letter-spacing: .16em;
+         text-transform: uppercase; color: var(--dim); display: block; margin-bottom: 1px; }
+  .val { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
 
-  #hp { display: flex; gap: 4px; }
+  #hp { display: flex; gap: 3px; }
   #hp i {
-    width: 11px; height: 11px; border-radius: 2px;
+    width: 8px; height: 8px; border-radius: 2px;
     background: var(--blood); box-shadow: 0 0 7px rgba(255,90,60,.6);
     transform: rotate(45deg);
   }
@@ -44,11 +47,11 @@
   #focusWrap { min-width: 90px; max-width: 190px; }
   @media (max-width: 780px) {
     #hud { gap: 6px; padding: 8px 10px; }
-    .chip { padding: 4px 7px; }
-    .val { font-size: 13px; }
-    #focusWrap { min-width: 64px; }
+    .chip { padding: 3px 6px; }
+    .val { font-size: 11px; }
+    #focusWrap { min-width: 54px; }
   }
-  @media (max-width: 620px) { #scoreChip { display: none; } }
+  @media (max-height: 430px) { #scoreChip { display: none; } }
   #focusBar { height: 5px; border-radius: 3px; background: rgba(232,228,240,.13); overflow: hidden; }
   /* Strain FILLS rather than drains, so a full bar is a warning and not a
      full tank. Colour turns in the last quarter, before overload. */
@@ -234,8 +237,8 @@
 
   /* ───── boss bar ───── */
   #bossBar {
-    position: fixed; left: 50%; top: 62px; transform: translateX(-50%);
-    width: min(520px, 76vw); z-index: 6; pointer-events: none;
+    position: fixed; left: 50%; top: 10px; transform: translateX(-50%);
+    width: min(400px, 52vw); z-index: 6; pointer-events: none;
     opacity: 0; transition: opacity .3s ease;
   }
   #bossBar.show { opacity: 1; }
@@ -449,26 +452,37 @@
 
 <canvas id="gl"></canvas>
 
+<!-- Two side columns rather than one row across the top. The row put ten
+     chips shoulder to shoulder, and the boss bar then landed underneath them
+     with nowhere to go. Splitting left/right frees the whole top centre for
+     the boss bar, which is the one readout that only appears when it matters.
+
+     Three chips were cut outright:
+       Carry    — the THROW button already prints the same number
+       In reach — the crosshair changes state on lock, and the "no objects in
+                  range" toast still fires; the raw count was never acted on
+       Combo    — transient, and Style already shows the same escalation -->
 <div id="hud" class="hide">
-  <div class="chip" id="waveChip"><span class="lbl">Wave</span><span class="val" id="wave">1</span>
-    <span id="arena"></span>
-    <span id="diffTag"><span id="diffName">NORMAL</span></span>
-    <span id="modName2"></span></div>
-  <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
-  <div class="chip" id="focusWrap"><span class="lbl">Strain</span>
-    <div id="focusBar"><div id="focusFill"></div></div></div>
-  <div class="chip"><span class="lbl">Carry</span><span class="val" id="carry">0</span></div>
-  <div class="chip" id="ammoWrap"><span class="lbl">In reach</span><span class="val" id="ammo">0</span></div>
-  <div class="chip" id="comboWrap"><span class="lbl">Combo</span><span class="val" id="comboVal">x1</span></div>
-  <div class="chip" id="styleWrap"><span class="lbl">Style</span>
-    <span class="val" id="rankVal">D</span>
-    <div id="styleBar"><div id="styleFill"></div></div></div>
-  <div class="chip" id="kinWrap"><span class="lbl">Kinetic</span>
-    <div id="kinBar"><div id="kinFill"></div></div></div>
-  <div class="chip" id="scoreChip"><span class="lbl">Score</span><span class="val" id="score">0</span></div>
-  <div class="chip"><span class="lbl">Threat</span>
-    <span class="val" id="left">0</span>
-    <span id="threat"></span></div>
+  <div id="hudL">
+    <div class="chip" id="waveChip"><span class="lbl">Wave</span><span class="val" id="wave">1</span>
+      <span id="arena"></span>
+      <span id="diffTag"><span id="diffName">NORMAL</span></span>
+      <span id="modName2"></span></div>
+    <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
+    <div class="chip" id="focusWrap"><span class="lbl">Strain</span>
+      <div id="focusBar"><div id="focusFill"></div></div></div>
+  </div>
+  <div id="hudR">
+    <div class="chip"><span class="lbl">Threat</span>
+      <span class="val" id="left">0</span>
+      <span id="threat"></span></div>
+    <div class="chip" id="styleWrap"><span class="lbl">Style</span>
+      <span class="val" id="rankVal">D</span>
+      <div id="styleBar"><div id="styleFill"></div></div></div>
+    <div class="chip" id="kinWrap"><span class="lbl">Kinetic</span>
+      <div id="kinBar"><div id="kinFill"></div></div></div>
+    <div class="chip" id="scoreChip"><span class="lbl">Score</span><span class="val" id="score">0</span></div>
+  </div>
 </div>
 
 <div id="cross" class="hide"><i></i><i></i><i></i><i></i><u></u></div>

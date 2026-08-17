@@ -4034,7 +4034,11 @@ function updateHUD() {
   const maxHp = CFG.maxHealth + MOD.hpBonus;
   for (let i = 0; i < maxHp; i++) h += `<i class="${i < hero.hp ? "" : "off"}"></i>`;
   el("hp").innerHTML = h;
-  el("carry").textContent = S.held.length;
+  // Carry chip removed from the HUD — the THROW button already prints this
+  // number, so it was the same figure twice. Guarded rather than deleted
+  // outright: the element is gone, and an unguarded write here would throw on
+  // every HUD update, which is every wave and every kill.
+  const cy = el("carry"); if (cy) cy.textContent = S.held.length;
   const sc = el("score"); if (sc) sc.textContent = S.score;
   const cv = el("comboVal"); if (cv) cv.textContent = "x" + Math.max(1, S.combo);
   const cw = el("comboWrap"); if (cw) cw.classList.toggle("hot", S.combo > 1);
