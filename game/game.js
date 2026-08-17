@@ -9,19 +9,31 @@ const CFG = {
   turnLerp:     11,
   grabRadius:   13,
   // Wave scaling knobs, kept together so they are easy to find and re-tune.
-  enemyMul:     2.0,     // every wave composition is doubled
+  enemyMul:     4.0,     // every wave composition is quadrupled (was 2.0)
   // Doubled from 0.01. Contact damage is a flat one heart, so damage cannot be
   // scaled without jumping from survivable to lethal — survivability is the
   // only lever that compounds smoothly. At 2% a wave-20 body carries ~1.46x
   // its base health against ~1.21x before, and wave 30 ~1.78x against ~1.34x.
   waveStrength: 0.02,    // compounding survivability per wave: 2% = 1.02^(n-1)
   // Hard ceiling on bodies per wave, applied AFTER every multiplier. The
-  // doubling compounds with the late-wave ramp and the HORDE modifier, and
-  // unchecked that reached 68 in a single wave — the walker separation pass
-  // is O(n^2), so that is 4,600 distance checks per frame before anything
-  // else happens. The cap keeps the doubling everywhere it is affordable and
-  // only bites at the extreme end.
-  maxWaveBodies: 44,
+  // separation pass is O(n^2), so this is the knob that decides how much
+  // quadratic work a frame carries.
+  //
+  // Raised 44 -> 88 alongside the multiplier above, because leaving it at 44
+  // would have made the increase a no-op exactly where it matters: measured
+  // roster at the old settings was already pinned to the cap from wave 15
+  // onward, so a bigger multiplier changed nothing past that point and only
+  // steepened the early waves.
+  //
+  // Affordable, measured rather than assumed. step() is pure CPU — AI,
+  // physics and separation, no rendering — and costs 0.21ms at 44 bodies,
+  // 0.35ms at 88 and 0.73ms at 120. Even 120 is 4.4% of a 60fps frame. The
+  // quadratic term is real but small against everything else in the loop.
+  //
+  // What this does NOT measure is the cost of RENDERING 88 rigs, which is the
+  // larger risk on a weak device. That is what the quality ladder is for: it
+  // samples real framerate and walks HIGH -> MED -> LOW on its own.
+  maxWaveBodies: 88,
 
   arenaStock:   26,      // props kept alive in the arena; spent ones return here
   zoneR:        6.5,
