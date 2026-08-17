@@ -35,7 +35,10 @@ remembering to look.
 | archer arrow hits / dash beats it | substepping; at 26 u/s a single-step test tunnels through the player |
 | ring builds one more ring per rank | ranks silently not applying |
 | ring burns centre and bands, not gaps | the middle was a safe pocket for anything that closed |
-| boss closes, slams, throws | the rig was rebuilt quadruped → biped; limb slots feed the shared gait |
+| Monolith closes and craters | the rig was rebuilt quadruped → biped → stone golem; limb slots feed the shared gait. The case also never aggroed the boss, so "closed more than 5 units" was satisfied by aimless drift |
+| Monolith hurls what is lying around | the hurl and the reinforcement call were both gated on `w.slamWind <= 0`; when the slam was replaced by the punch that field stopped existing, and `undefined <= 0` is false, so both attacks silently switched off |
+| punch charges, flies, craters | the wind-up is the entire read; a hand that charges without launching, or launches without cratering, breaks the fight without erroring |
+| dashing beats the fist | dash is invulnerability everywhere else and cannot fail here alone |
 | every tenth wave brings that tier's boss | the front-load that lifts a boss out of the shuffle listed two of the four boss types, so wave 20 opened bossless ~40% of the time |
 | never more than one big body | the late-wave ramp and HORDE both multiply counts — unguarded, that gave two Wardens |
 | every boss survives being animated | the shared gait posed limbs unconditionally; the Choir has neither legs nor arms, so it killed the animation loop on its first frame |
@@ -57,6 +60,8 @@ regressions were introduced and each turned the right case red:
 - removing the `w.lL` guard from the gait → *"stepping \"choir\" threw"*
 - writing the walk bob absolutely again → *"maw torso drifted from its build height"*
 - skipping archers below wave 5 → *"wave 3 contained no archer on some passes"*
+- removing the punch's dash guard → *"dashing took 5 fist hits"*
+- making a charged hand return instead of launch → *"a hand charged but never launched"*
 
 ## Test the thing running, not just its functions
 
@@ -79,6 +84,28 @@ expression it guards can never round to zero — the floor is harmless insurance
 that has never once fired. The archer was missing because of the opening-group
 split above. A fix that is applied and then never proven to have been the cause
 is a guess wearing a commit message.
+
+## Control the environment or the threshold is a coin flip
+
+"The boss closes more than 5 units in 40s" swung between 5 and 24 depending
+only on where the random prop scatter landed, because the boss gets stuck on a
+barrel. No threshold survives that. The case now strips props and asserts a
+real close (>15), and hurling — which needs props — was split into its own
+case that keeps them. Control the variable; do not tune a number against it.
+
+The same case also shows the other half of the lesson: it never aggroed the
+boss, so for its whole life it was measuring drift and calling it pursuit.
+Check that a case is exercising the thing it names.
+
+## Two things can land in the same frame
+
+The Monolith's punch always craters, and the fist and its ring arrive in the
+same `step()`. They have DIFFERENT answers — dash beats the fist, jump beats
+the ring — so hero health cannot tell you which one connected, and three
+attempts at isolating them by clearing rings, or by lifting the hero above
+`dodgeHeight` (gravity puts them straight back), all measured the wrong thing.
+The boss counts its own fist hits instead. When two effects share a frame,
+count them at the source.
 
 ## Randomised cases need passes, not a pass
 

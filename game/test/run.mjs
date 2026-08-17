@@ -224,27 +224,136 @@ test("ring: burns on every band and in the centre, not in the gaps", async (pg) 
   eq(r.outside, 0, "the ring damages beyond its outermost band");
 });
 
-test("boss: the Gorger closes, slams and throws", async (pg) => {
+test("boss: the Monolith closes and craters", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe;
     P.parkWalkers();
+    // Props stripped. With them in place this measurement swings between 5 and
+    // 24 units purely on where the scatter landed — the boss gets stuck on a
+    // barrel — and a threshold picked against that noise is a coin flip, not
+    // an assertion. The hurl needs props, so it gets its own case below.
+    P.stripProps();
     P.spawnMaw(P.hero.pos.x, P.hero.pos.z - 26);
     const b = P.walkers[P.walkers.length - 1];
+    b.aggro = true;
     const d0 = Math.hypot(b.pos.x - P.hero.pos.x, b.pos.z - P.hero.pos.z);
-    let minD = d0, shocks = 0, thrown = 0;
+    let minD = d0, craters = 0;
     for (let t = 0; t < 40; t += 1 / 30) {
       P.hero.hp = 99;
       const before = P.shocks.length;
       P.step(1 / 30);
-      if (P.shocks.length > before) shocks++;
+      if (P.shocks.length > before) craters++;
       minD = Math.min(minD, Math.hypot(b.pos.x - P.hero.pos.x, b.pos.z - P.hero.pos.z));
+    }
+    return { closed: d0 - minD, craters, legs: !!b.lL, arms: !!b.aL };
+  });
+  ok(r.closed > 15,
+     `an aggroed boss should walk the hero down; it closed only ` +
+     `${r.closed.toFixed(1)} of the 26 units it started away`);
+  ok(r.craters > 0, "the boss never cratered — the punch leaves a ring, hit or miss");
+  // Legs only. The Monolith's hands are not on its arms — they fly — so aL/aR
+  // are deliberately absent and the shared gait poses the legs alone.
+  ok(r.legs, "the boss rig lost its leg slots, so the shared gait cannot walk it");
+  ok(!r.arms, "the Monolith should have no arm limbs; its hands are detached");
+});
+
+test("boss: the Monolith hurls what is lying around", async (pg) => {
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    // Needs props, so this one deliberately does NOT strip them.
+    P.buildWave(10);
+    P.parkWalkers();
+    const b = P.walkers.find(w => !w.dead && w.maw) ||
+              (P.spawnMaw(P.hero.pos.x, P.hero.pos.z - 14),
+               P.walkers[P.walkers.length - 1]);
+    b.pos.set(P.hero.pos.x, 0, P.hero.pos.z - 14);
+    b.aggro = true;
+    let thrown = 0;
+    for (let t = 0; t < 40; t += 1 / 30) {
+      P.hero.hp = 99;
+      P.step(1 / 30);
       thrown = Math.max(thrown, P.rocks.filter(o => o.hostile).length);
     }
-    return { closed: d0 - minD, shocks, thrown, legs: !!b.lL, arms: !!b.aL };
+    return { thrown, props: P.rocks.length };
   });
-  ok(r.closed > 5, `the boss barely moved (closed ${r.closed.toFixed(1)} units in 40s)`);
-  ok(r.shocks > 0, "the boss never slammed");
-  ok(r.arms && r.legs, "the boss rig lost its limb slots, so the shared gait cannot drive it");
+  ok(r.props > 0, "no props on the field, so this run could not have tested hurling");
+  ok(r.thrown > 0, "the boss never threw anything in 40 simulated seconds");
+});
+
+test("monolith: the punch charges, flies, and craters where it lands", async (pg) => {
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.parkWalkers(); P.stripProps(); P.shocks.length = 0;
+    P.hero.hp = 99; P.hero.pos.set(0, 0, 0);
+    // Held at 20 units: inside punchRange (30) and far outside its melee reach
+    // (5.4), so the only thing that can reach the hero is a fist.
+    P.spawnMaw(0, -20);
+    const b = P.walkers[P.walkers.length - 1];
+    b.aggro = true;
+    const seen = { charge: 0, punch: 0, ret: 0 };
+    let reach = 0, craters = 0;
+    for (let i = 0; i < 60 * 20; i++) {
+      b.pos.set(0, 0, -20);
+      const before = P.shocks.length;
+      P.step(1 / 60);
+      if (P.shocks.length > before) craters++;
+      P.shocks.length = 0;
+      for (const h of b.hands) {
+        if (h.state === "charge") { seen.charge++; }
+        if (h.state === "punch")  { seen.punch++;
+          reach = Math.max(reach, Math.hypot(h.g.position.x, h.g.position.z + 20)); }
+        if (h.state === "return") seen.ret++;
+      }
+    }
+    return { ...seen, reach: +reach.toFixed(1), craters, hands: b.hands.length };
+  });
+  eq(r.hands, 2, "the Monolith should have two hands");
+  ok(r.charge > 0, "no hand ever charged — the wind-up is the whole read");
+  ok(r.punch > 0, "a hand charged but never launched");
+  ok(r.ret > 0, "a hand launched and never came back, so it can only punch twice");
+  ok(r.reach > 12,
+     `the fist only travelled ${r.reach} units of the 20 it needed to reach the hero`);
+  ok(r.craters > 0, "the fist never cratered where it landed");
+});
+
+test("monolith: dashing beats the fist", async (pg) => {
+  // Isolating the fist takes care. The punch ALWAYS craters, and a crater ring
+  // is beaten by JUMPING, not dashing — so a naive "dash and count damage" run
+  // measures the ring and reports the fist as un-dodgeable, which is what the
+  // first version of this case did.
+  //
+  // Lifting the hero above CFG.dodgeHeight does not work either: step() runs
+  // gravity and puts them back on the floor before the ring is ever checked.
+  // Nor does emptying the ring list after every step — the ring is created AND
+  // checked inside the same step(), and its first tick sweeps r=2 to 2.43,
+  // which is exactly where a fist that stopped on contact tends to be.
+  //
+  // So hero health cannot separate them at all, and the boss counts its own
+  // fist hits instead. That is the only signal that means the fist and nothing
+  // else.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const run = (dash) => {
+      P.parkWalkers(); P.stripProps(); P.shocks.length = 0;
+      P.hero.hp = 999; P.hero.pos.set(0, 0, 0);
+      P.spawnMaw(0, -20);
+      const b = P.walkers[P.walkers.length - 1];
+      b.aggro = true;
+      for (let i = 0; i < 60 * 20; i++) {
+        b.pos.set(0, 0, -20);
+        if (dash) P.S.dashT = 0.15;
+        P.step(1 / 60);
+      }
+      return b.punchHits;
+    };
+    return { standing: run(false), dashing: run(true) };
+  });
+  ok(r.standing > 0,
+     "standing still in front of the Monolith was never punched, so this run " +
+     "measures neither the fist nor the dodge");
+  eq(r.dashing, 0,
+     `dashing took ${r.dashing} fist hits; dashing is invulnerability everywhere ` +
+     `else in this game and cannot be the one thing it fails against`);
 });
 
 test("bosses: every tenth wave brings that tier's boss", async (pg) => {

@@ -1737,7 +1737,10 @@ const WAVES = [
 // than the same fight with a longer bar. Eighty thousand health is not a boss,
 // it is a wait.
 //
-//   10  THE GORGER   a giant that closes and throws. Break the chest plates.
+//   10  THE MONOLITH a stone construct whose hands are not attached to it.
+//                    It charges a punch, marks the ground it will land on,
+//                    and craters where the fist falls. Break the chest
+//                    plates to reach the core.
 //   20  THE CHOIR    one thing wearing many bodies. The core cannot be touched
 //                    while its acolytes orbit, and they move, so there is no
 //                    safe side to stand on — unlike the Warden's fixed ring.
@@ -1788,15 +1791,29 @@ const BOSS = {
 // telegraphed wind-up like everything else, debris throws like the Warden,
 // and a ground slam you beat with the jump button.
 const MAW = {
-  name:"THE GORGER", plateHp:420, plates:6, coreHp:4200,
-  speed:1.35, reach:5.4, score:20000,
-  slamEvery:  5.0,   // seconds between ground slams
-  slamWind:   1.15,  // long tell — this is the attack you must read
-  slamR:      17,    // shockwave reach
-  hurlEvery:  4.2,
-  roarEvery:  11,
-  enrageAt:   0.35,  // fraction of core health
+  name:"THE MONOLITH", plateHp:420, plates:6, coreHp:4200,
+  speed:1.05, reach:5.4, score:20000,
+  // The punch IS the fight. A hand pulls back off its slot, its seams light,
+  // and a ring burns on the ground where it is going to land. The ring is up
+  // for the whole wind-up, so the attack is always answerable: you move, or
+  // you wear it. Everything else this thing does is pacing between punches.
+  punchEvery:  3.4,   // seconds between punches; the hands alternate
+  charge:      1.15,  // wind-up. Long, because it is the read
+  punchSpeed:  34,    // travel
+  punchR:      2.9,   // contact radius on the way in
+  craterR:     9.5,   // ring thrown out where the fist lands
+  returnSpeed: 15,
+  punchRange:  30,    // beyond this it closes on foot instead
+  slamR:       17,    // default reach of a shock ring
+  hurlEvery:   5.4,
+  roarEvery:   11,
+  enrageAt:    0.35,  // fraction of core health
 };
+// Reused every frame by the hand solver rather than allocating two vectors per
+// hand per frame.
+const HAND_TMP = new T.Vector3(), HAND_TMP2 = new T.Vector3();
+const UP_AXIS = new T.Vector3(0, 1, 0);
+const SEAM_COLD = new T.Color(0x3a1a08), SEAM_HOT = new T.Color(0xffb454);
 
 // Expanding ground shockwaves. A ring you jump over rather than out-run,
 // which is why the arena has a jump button at all.
@@ -1808,14 +1825,14 @@ const MAW = {
 const shocks = [];
 const shockGeo = new T.RingGeometry(0.92, 1.0, 56);
 
-function makeShock(pos) {
+function makeShock(pos, max) {
   const mesh = new T.Mesh(shockGeo, new T.MeshBasicMaterial({
     color: 0xff6a20, transparent: true, opacity: 0.9,
     side: T.DoubleSide, depthWrite: false, blending: T.AdditiveBlending }));
   mesh.rotation.x = -Math.PI/2;
   mesh.position.set(pos.x, 0.12, pos.z);
   scene.add(mesh);
-  return { pos: pos.clone(), r: 2, max: MAW.slamR, hit: false, mesh };
+  return { pos: pos.clone(), r: 2, max: max || MAW.slamR, hit: false, mesh };
 }
 
 function killShock(sw) {
@@ -1899,140 +1916,177 @@ const walkers = [];
 
 function spawnMaw(x, z) {
   const g = new T.Group();
-  // It measured 4.5x the hero's height and still read as a small dark lump
-  // at fighting distance — the first hide colour was darker than the Sunken
-  // Ruin floor it stands on. Size was never the problem; contrast was.
-  const hideM = new T.MeshStandardMaterial({
-    color:0x6b5647, roughness:0.9, metalness:0.04,
-    normalMap:TEX.fleshN, normalScale:new T.Vector2(1.6,1.6), envMapIntensity:0.6 });
+  // Granite, not hide. Two greys and one hot seam colour: the seams are the
+  // only lit thing on the whole body, which is what lets a charging fist read
+  // across a dark arena when the rest of it is the same value as the floor.
+  const rockM = new T.MeshStandardMaterial({
+    color:0x6f6a61, roughness:0.94, metalness:0.03,
+    normalMap:TEX.rockN, normalScale:new T.Vector2(1.5,1.5), envMapIntensity:0.5 });
+  const darkM = new T.MeshStandardMaterial({
+    color:0x4a463f, roughness:0.96, metalness:0.02,
+    normalMap:TEX.rockN, normalScale:new T.Vector2(1.2,1.2), envMapIntensity:0.4 });
   const plateM = new T.MeshStandardMaterial({
-    color:0x8a919c, roughness:0.35, metalness:0.8,
-    emissive:0x2a1408, emissiveIntensity:0.6,
-    normalMap:TEX.rockN, normalScale:new T.Vector2(0.9,0.9), envMapIntensity:1.3 });
+    color:0x8d8879, roughness:0.52, metalness:0.14,
+    normalMap:TEX.rockN, normalScale:new T.Vector2(1.1,1.1), envMapIntensity:0.95 });
+  const seamM = new T.MeshBasicMaterial({ color:0x8a3a10 });
   const coreM = new T.MeshStandardMaterial({ color:0xff5a1a, emissive:0xff5a1a,
                                              emissiveIntensity:1.8, roughness:0.3 });
-  const mawM = new T.MeshStandardMaterial({ color:0x8a2a20, roughness:0.65,
-                                            emissive:0x6a1408, emissiveIntensity:1.1 });
 
-  // A giant upright corpse rather than a beast on four legs. Everything else
-  // on the field is a zombie, and a quadruped read as a different game's boss
-  // wandering in. Upright also earns the hurl: a thing with hands is obviously
-  // capable of picking a car up, where a four-legged animal was not.
-  //
-  // The limb slots below are deliberately arms-into-aL/aR and legs-into-lL/lR,
-  // because that is what the shared gait code animates — a biped therefore
-  // walks and swings for free with no boss-specific animation path.
+  // A slab. The whole golem is these, set at slightly wrong angles — cut stone
+  // that has been stacked rather than carved, which is what separates it from
+  // the smooth organic shapes everything else on the field is made of.
+  const slab = (parent, sw, sh, sd, px, py, pz, mat, rx, ry, rz) => {
+    const m = part(new T.BoxGeometry(sw, sh, sd), mat || rockM, px, py, pz);
+    m.rotation.set(rx || 0, ry || 0, rz || 0);
+    parent.add(m);
+    return m;
+  };
+
   const HIP = 4.9, SHOULDER = 7.9;
 
-  // Legs: heavy, slightly bowed, carrying the whole mass.
-  const lL = limb(g, HIP, hideM, -1.35, HIP, 0.1, 0.90);
-  const lR = limb(g, HIP, hideM,  1.35, HIP, -0.1, 0.90);
+  // Legs: stone columns. They go in the lL/lR slots so the shared gait walks
+  // it for free — the golem's own code only has to worry about its hands.
+  const lL = limb(g, HIP, rockM, -1.5, HIP, 0.1, 1.05);
+  const lR = limb(g, HIP, rockM,  1.5, HIP, -0.1, 1.05);
+  for (const leg of [lL, lR]) {
+    slab(leg.joint, 2.5, 0.75, 3.1, 0, -HIP*0.48 - 0.2, 0.45, darkM);
+    slab(leg, 2.15, 1.5, 2.15, 0, -0.5, 0, darkM, 0, 0.3, 0.06);
+  }
 
-  // Torso hung from the hip so the whole upper body leans as one piece.
+  // Everything above the hip leans as one piece. bodyY is the rest height the
+  // walk bob is added to — see the gait.
   const body = new T.Group();
   body.position.y = HIP;
   g.add(body);
 
-  const pelvis = part(new T.SphereGeometry(1.85, 14, 12), hideM, 0, 0.1, 0);
-  pelvis.scale.set(1.0, 0.78, 0.86);
-  body.add(pelvis);
-
-  const trunk = part(new T.SphereGeometry(2.35, 18, 14), hideM, 0, 1.62, 0);
-  trunk.scale.set(1.06, 1.02, 0.80);
-  body.add(trunk);
-
-  // A ribcage that has opened. Reads at distance as "this one is long dead"
-  // and gives the chest core somewhere to sit that looks like a wound.
-  for (let i = 0; i < 4; i++) {
-    const rib = part(new T.TorusGeometry(1.5 - i*0.13, 0.14, 6, 14), plateM,
-                     0, 1.0 + i*0.42, 0.15);
-    rib.rotation.x = Math.PI/2;
-    rib.scale.set(1, 0.62, 1);
-    body.add(rib);
+  slab(body, 4.3, 2.0, 3.0, 0, 0.1, 0, darkM, 0, 0, 0.04);
+  // Trunk: three courses of stone, each wider than the one below, so the mass
+  // reads as built upward rather than as one carved block.
+  slab(body, 4.0, 1.7, 2.9, 0,  1.35, 0, rockM, 0.02, -0.06, -0.03);
+  slab(body, 4.6, 1.7, 3.1, 0,  2.75, 0, rockM, 0,     0.05,  0.035);
+  slab(body, 4.2, 1.4, 3.0, 0,  3.95, 0, rockM, -0.02, -0.03, -0.02);
+  // Glowing seams in the joins between courses. Thin, and inset, so they read
+  // as light escaping from inside rather than as painted stripes.
+  for (const sy of [0.95, 2.1, 3.35]) {
+    slab(body, 4.15, 0.16, 2.6, 0, sy, 0.28, seamM);
+    slab(body, 2.5, 0.16, 3.0, 0, sy, 0, seamM);
   }
 
-  // Shoulders sit high and forward — the classic dead stoop.
-  const shrug = part(new T.SphereGeometry(1.25, 12, 10), hideM, 0, SHOULDER-HIP-0.2, -0.15);
-  shrug.scale.set(1.9, 0.72, 0.95);
-  body.add(shrug);
+  // Shoulders: two great blocks cantilevered out past the body, which is what
+  // gives the hands somewhere to hover that looks deliberate.
+  slab(body, 3.1, 2.0, 2.9, -3.3, SHOULDER-HIP+0.1, 0, rockM, 0, 0, 0.2);
+  slab(body, 3.1, 2.0, 2.9,  3.3, SHOULDER-HIP+0.1, 0, rockM, 0, 0, -0.2);
 
-  // Head low between the shoulders on almost no neck.
+  // Head: a small angular block set low between the shoulders. No face — a
+  // single lit band across it, which is all a construct needs.
   const neck = new T.Group();
-  neck.position.set(0, SHOULDER-HIP-0.05, 0.35);
+  neck.position.set(0, SHOULDER-HIP+0.35, 0.25);
   body.add(neck);
   const head = new T.Group();
-  head.position.set(0, 0.62, 0.25);
+  head.position.set(0, 1.0, 0.1);
   neck.add(head);
-  const skull = part(new T.SphereGeometry(1.12, 14, 12), hideM, 0, 0, 0);
-  skull.scale.set(0.92, 1.05, 1.0);
-  head.add(skull);
-
-  // Hanging jaw — it never closes, and it opens further on the roar.
-  const jaw = new T.Group();
-  jaw.position.set(0, -0.62, 0.28);
-  head.add(jaw);
-  const jawMesh = part(new T.BoxGeometry(1.15, 0.85, 1.05), mawM, 0, -0.35, 0.28);
-  jaw.add(jawMesh);
-
-  // Eyes: big, hot and lit. On a dark arena the eyes are the only part of a
-  // silhouette that carries at range, so they announce it before anything else.
-  const eyeM = new T.MeshBasicMaterial({ color:0xffd23c });
-  head.add(part(new T.SphereGeometry(0.30, 10, 8), eyeM, -0.44, 0.22, 0.86));
-  head.add(part(new T.SphereGeometry(0.30, 10, 8), eyeM,  0.44, 0.22, 0.86));
-  const eyeLight = new T.PointLight(0xffa030, 3.2, 18, 2);
-  eyeLight.position.set(0, 0.25, 1.2);
+  slab(head, 2.05, 1.5, 1.9, 0, 0, 0, rockM, 0.06, 0, 0);
+  head.add(part(new T.BoxGeometry(1.72, 0.3, 0.14), seamM, 0, 0.14, 0.93));
+  const eyeLight = new T.PointLight(0xff7a28, 2.6, 18, 2);
+  eyeLight.position.set(0, 0.18, 1.25);
   head.add(eyeLight);
 
-  // Arms: long enough to reach the floor, which is where the things it throws
-  // are. Hung from the shoulder so the gait swings them.
-  const aL = limb(g, 4.2, hideM, -2.55, SHOULDER, 0.15, 0.74);
-  const aR = limb(g, 4.2, hideM,  2.55, SHOULDER, 0.15, 0.74);
+  // The jaw is the lower course of the head, hinged. It grinds open on the
+  // call — a construct with no mouth still needs somewhere for the sound to
+  // come from, and the step code drives w.jaw either way.
+  const jaw = new T.Group();
+  jaw.position.set(0, -0.64, 0.2);
+  head.add(jaw);
+  slab(jaw, 1.9, 0.55, 1.7, 0, -0.28, 0.1, darkM);
 
-  // Chest core — what you are actually trying to hit, lit so it is obvious,
-  // and only reachable once the plates covering it are gone.
-  const core = part(new T.OctahedronGeometry(1.10, 0), coreM, 0, 1.55, 0.75);
+  // Chest core — what you are actually trying to hit, once the plates are off.
+  const core = part(new T.OctahedronGeometry(1.10, 0), coreM, 0, 2.5, 1.35);
   body.add(core);
   const glow = new T.PointLight(0xff5a1a, 0, 26, 2);
-  glow.position.set(0, HIP + 1.6, 1.2);
+  glow.position.set(0, HIP + 2.5, 1.6);
   g.add(glow);
 
-  // Plates now armour the chest and shoulders rather than a spine. Same rule
-  // as the Warden's ring — each is its own body with its own health — but the
-  // silhouette says "break this open" instead of "flank it".
+  // Plates: stone shards spalled off the chest and shoulders. Each is its own
+  // body with its own health — break them to reach the core.
   const plates = [];
   for (let i = 0; i < MAW.plates; i++) {
     const a = (i / MAW.plates) * Math.PI * 2;
-    const wide = 1.55 - Math.abs(Math.sin(a)) * 0.35;
-    const pl = part(new T.BoxGeometry(wide, 1.5, 0.5), plateM,
-                    Math.sin(a) * 1.55, 1.55 + Math.cos(a) * 1.05, 0.95);
+    const wide = 1.75 - Math.abs(Math.sin(a)) * 0.4;
+    const pl = part(new T.BoxGeometry(wide, 1.6, 0.62), plateM,
+                    Math.sin(a) * 1.75, 2.5 + Math.cos(a) * 1.2, 1.55);
     pl.rotation.z = -Math.sin(a) * 0.5;
     pl.rotation.x = -0.12;
     body.add(pl);
     plates.push({ mesh: pl, hp: MAW.plateHp });
   }
 
-  const tell = new T.Mesh(new T.RingGeometry(3.4, 4.6, 28),
-    new T.MeshBasicMaterial({ color:0xff3c2a, transparent:true, opacity:0,
+  const tell = new T.Mesh(new T.RingGeometry(3.0, 4.2, 26),
+    new T.MeshBasicMaterial({ color:0xff6a20, transparent:true, opacity:0,
                               side:T.DoubleSide, depthWrite:false }));
   tell.rotation.x = -Math.PI/2;
-  tell.position.y = 10.4;
+  tell.position.y = 10.6;
   tell.visible = false;
   g.add(tell);
 
   g.position.set(x, 0, z);
   scene.add(g);
+
+  // ── the hands ─────────────────────────────────────────────────────────────
+  // They are NOT children of the golem. A hand has to be able to leave, cross
+  // twenty metres and come back, so it lives in world space and is flown to
+  // its slot every frame — the same arrangement the Choir's acolytes use, and
+  // it carries the same obligation: nothing in the normal teardown path
+  // reaches world-space parts, so both go on w.detached.
+  const hands = [], detached = [];
+  for (const side of [-1, 1]) {
+    const h = new T.Group();
+    slab(h, 2.6, 1.9, 2.2, 0, 0, 0, rockM, 0, 0, 0);
+    // Knuckles: three blocks along the front face.
+    for (let i = -1; i <= 1; i++)
+      slab(h, 0.72, 0.8, 0.9, i * 0.8, 0.42, 1.35, darkM, 0.12, 0, 0);
+    // Curled fingers under the fist.
+    for (let i = -1; i <= 1; i++)
+      slab(h, 0.68, 1.0, 1.5, i * 0.8, -0.75, 0.85, rockM, 0.5, 0, 0);
+    // Thumb across the front.
+    slab(h, 1.5, 0.7, 0.8, side * -0.6, -0.35, 1.15, rockM, 0, 0, side * 0.3);
+    // Seam around the wrist. Its own material instance per hand, because the
+    // charge ramps ONE hand's colour and a shared material would light both.
+    const seam = part(new T.BoxGeometry(2.75, 0.3, 2.35),
+                      new T.MeshBasicMaterial({ color: SEAM_COLD.getHex() }),
+                      0, -0.05, -0.7);
+    h.add(seam);
+    scene.add(h);
+
+    // The ring that marks where this fist is going to land. Drawn on the floor
+    // for the whole wind-up, which is what makes the punch fair.
+    const mark = new T.Mesh(new T.RingGeometry(MAW.punchR * 0.72, MAW.punchR, 30),
+      new T.MeshBasicMaterial({ color:0xff6a20, transparent:true, opacity:0.9,
+        side:T.DoubleSide, depthWrite:false, blending:T.AdditiveBlending }));
+    mark.rotation.x = -Math.PI/2;
+    mark.visible = false;
+    scene.add(mark);
+
+    hands.push({
+      g: h, seam, mark, side,
+      slot: new T.Vector3(side * 4.3, SHOULDER - 1.9, 2.6),
+      state: "idle", t: 0, target: new T.Vector3(),
+    });
+    detached.push(h, mark);
+  }
+  for (const h of hands) h.g.position.set(x + h.slot.x, h.slot.y, z + h.slot.z);
+
   walkers.push({ g, body, torso: body, head, jaw, bodyY: HIP,
-    aL, aR, lL, lR, pos: g.position,
+    lL, lR, pos: g.position,
     type:"maw", boss:true, maw:true, core, glow, plates, platesLeft:MAW.plates,
-    E:{ name:"THE GORGER", hp:MAW.coreHp, speed:MAW.speed, scale:3.6, skin:0x3a2f28,
+    hands, detached, nextHand:0, punchT: MAW.punchEvery, punchHits:0,
+    E:{ name:MAW.name, hp:MAW.coreHp, speed:MAW.speed, scale:3.6, skin:0x6f6a61,
         score:MAW.score },
     reach: MAW.reach,
     r:4.2, walk:0, gait:0, spd:0, dead:false, cool:0,
-    atkT: MAW.hurlEvery, slamT: MAW.slamEvery, roarT: MAW.roarEvery,
-    slamWind: 0, enraged: false,
-    AI: AI.tank, arcDir: 1, windup: 0, tell,
+    atkT: MAW.hurlEvery, roarT: MAW.roarEvery,
+    AI: AI.tank, arcDir:1, windup:0, jawOpen:0, enraged:false,
     hp:MAW.coreHp, maxHp:MAW.coreHp, flash:0, kb:new T.Vector3(),
-    // thrown/tvel are not optional. The movement guard reads `w.thrown <= 0`,
+    // Without these the shared mover never runs: it gates on `w.thrown <= 0`
     // and `undefined <= 0` is FALSE — so a boss record without these fields
     // simply never moves. That is how the Warden ended up frozen in place
     // from the moment the guard was added, and nobody noticed because every
@@ -3251,11 +3305,25 @@ function banner(txt) {
   b.classList.add("pop");
 }
 
+// Parts that live in world space instead of as children of w.g: the Choir's
+// acolytes and the Monolith's hands. Nothing in the normal teardown path
+// reaches them, because that path only walks w.g. Both death and the wave
+// clear sweep this, and the flag makes the sweep safe to run twice — an
+// acolyte killed individually is already gone by the time the core dies.
+function releaseDetached(w) {
+  if (!w.detached) return;
+  for (const o of w.detached) {
+    if (o.__released) continue;
+    o.__released = true;
+    scene.remove(o);
+    disposeGroup(o);
+  }
+}
+
 function killWalker(w) {
   if (w.dead) return;
   w.dead = true;
-  // The Choir's acolytes live in world space rather than as children, so
-  // nothing else would ever remove them.
+  releaseDetached(w);
   if (w.acolytes) for (const a of w.acolytes) {
     if (a.alive) { a.alive = false; scene.remove(a.g); disposeGroup(a.g); }
   }
@@ -3687,8 +3755,11 @@ const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2, distWant: 11.2 };
 
 function clearAll() {
   clearArrows();
-  for (const w of walkers) if (w.acolytes) {
-    for (const a of w.acolytes) if (a.alive) { scene.remove(a.g); disposeGroup(a.g); }
+  for (const w of walkers) {
+    releaseDetached(w);
+    if (w.acolytes) for (const a of w.acolytes) {
+      if (a.alive) { scene.remove(a.g); disposeGroup(a.g); }
+    }
   }
   rocks.forEach(o => { scene.remove(o.mesh); o.mesh.geometry.dispose(); });
   rocks.length = 0;
@@ -3881,7 +3952,7 @@ function updateHUD() {
       const pMax = bw.maw ? MAW.plates * MAW.plateHp : BOSS.plates * BOSS.plateHp;
       el("bossPlate").style.width = (plates/pMax*100) + "%";
       el("bossCore").style.width  = (Math.max(0,bw.hp)/bw.maxHp*100) + "%";
-      const bn = bw.maw ? "THE GORGER" : "WARDEN";
+      const bn = bw.maw ? MAW.name : "WARDEN";
       el("bossName").textContent = bn +
         (bw.platesLeft ? " · ARMOURED" : bw.enraged ? " · ENRAGED" : " · EXPOSED");
       el("bossBar").classList.toggle("open", !bw.platesLeft);
@@ -4944,50 +5015,122 @@ function step(dt) {
       // announced so a sudden change in rhythm is never a surprise.
       if (!w.enraged && !w.platesLeft && w.hp < w.maxHp * MAW.enrageAt) {
         w.enraged = true;
-        banner("THE GORGER IS ENRAGED");
+        banner("THE MONOLITH IS ENRAGED");
         toast("It stops pacing itself", 2600);
         SFX.overload();
         S.shake = Math.min(1.2, S.shake + 0.8);
       }
       const rate = w.enraged ? 0.62 : 1;
 
-      // GROUND SLAM. Long wind-up, rears up on its back legs, then drops —
-      // a ring races out across the floor and only touches you if you are
-      // standing on it. Jump the ring. That is the whole fight.
-      if (w.slamWind > 0) {
-        w.slamWind -= dt;
-        const t = 1 - w.slamWind / (MAW.slamWind*rate);
-        // Rears from its own rest height. The literal 3.4 here disagreed with
-        // the 4.9 the rig is built at, so every slam also yanked the torso
-        // down a metre and a half.
-        w.body.position.y = (w.bodyY || 0) + Math.sin(t*Math.PI)*2.6;
-        w.body.rotation.x = -Math.sin(t*Math.PI)*0.5;
-        w.tell.visible = true;
-        w.tell.material.opacity = 0.3 + 0.6*t;
-        w.tell.scale.setScalar(1 + t*0.7);
-        if (w.slamWind <= 0) {
-          w.slamWind = 0;
-          w.body.position.y = w.bodyY || 0; w.body.rotation.x = 0;
-          w.tell.visible = false;
-          shocks.push(makeShock(w.pos));
-          S.shake = Math.min(1.4, S.shake + 1.0);
-          SFX.boom();
-          S.freeze = Math.max(S.freeze, 0.12);
-        }
-      } else {
-        w.slamT -= dt;
-        if (w.slamT <= 0 && dist < MAW.slamR) {
-          w.slamT = MAW.slamEvery * rate;
-          w.slamWind = MAW.slamWind * rate;
-          banner("SLAM — JUMP");
-          SFX.warn();
+      // ---- THE PUNCH
+      // One hand at a time. It pulls back off its slot, its seams come up to
+      // heat, and a ring burns on the floor where it will land. The target is
+      // locked when the wind-up STARTS, not when it ends — locking it at the
+      // end would make the whole telegraph decoration, because there would be
+      // nothing you could do with the information.
+      w.punchT -= dt;
+      const yaw = w.g.rotation.y;
+      const anyBusy = w.hands.some(h => h.state !== "idle");
+      if (!anyBusy && w.punchT <= 0 && dist < MAW.punchRange) {
+        const h = w.hands[w.nextHand++ % w.hands.length];
+        w.punchT = MAW.punchEvery * rate;
+        h.state = "charge";
+        h.t = MAW.charge * rate;
+        h.target.set(hero.pos.x, 1.15, hero.pos.z);
+        h.mark.position.set(h.target.x, 0.14, h.target.z);
+        h.mark.visible = true;
+        banner("PUNCH — MOVE");
+        SFX.warn();
+      }
+
+      for (const h of w.hands) {
+        // Slot position in the golem's own frame, resolved to world.
+        HAND_TMP.copy(h.slot).applyAxisAngle(UP_AXIS, yaw).add(w.pos);
+        HAND_TMP.y = h.slot.y + Math.sin(S.t*1.6 + h.side*2.1)*0.24;
+
+        if (h.state === "charge") {
+          h.t -= dt;
+          const k = 1 - Math.max(0, h.t) / (MAW.charge * rate);
+          // Draws back and rises as it winds — the pose says which way it is
+          // about to go before the ring does.
+          HAND_TMP2.set(h.target.x - w.pos.x, 0, h.target.z - w.pos.z).normalize();
+          h.g.position.lerp(
+            HAND_TMP.addScaledVector(HAND_TMP2, -3.2*k).setY(HAND_TMP.y + 1.9*k),
+            Math.min(1, dt*7));
+          h.g.rotation.y = yaw;
+          h.seam.material.color.copy(SEAM_COLD).lerp(SEAM_HOT, k);
+          h.mark.material.opacity = 0.35 + 0.55*Math.abs(Math.sin(k*Math.PI*5));
+          h.mark.scale.setScalar(1 + (1-k)*0.5);
+          if (h.t <= 0) { h.state = "punch"; SFX.throw(2); }
+
+        } else if (h.state === "punch") {
+          // Substepped. At 34 u/s a frame at 30fps advances further than the
+          // contact radius, and an unsubstepped fist simply teleports through
+          // the player — the same tunnelling the archer's arrows hit.
+          const step = MAW.punchSpeed * dt;
+          const subs = Math.max(1, Math.ceil(step / (MAW.punchR * 0.5)));
+          let landed = false;
+          for (let i = 0; i < subs && !landed; i++) {
+            HAND_TMP2.copy(h.target).sub(h.g.position);
+            const d = HAND_TMP2.length();
+            if (d < 0.001 || d < step/subs) { h.g.position.copy(h.target); landed = true; }
+            else h.g.position.addScaledVector(HAND_TMP2.divideScalar(d), step/subs);
+            const hx = h.g.position.x - hero.pos.x, hz = h.g.position.z - hero.pos.z;
+            if (hx*hx + hz*hz < MAW.punchR*MAW.punchR) {
+              // Dashing is invulnerability everywhere else in this game and
+              // has to be here too, or the boss's one real attack is the only
+              // thing in the arena a dash cannot answer.
+              if (!(S.dashT > 0) && w.cool <= 0) {
+                // Counted so the fist can be told apart from its own crater.
+                // Both land in the same frame, so hero health alone cannot say
+                // which of the two touched you — and they have DIFFERENT
+                // answers: dash beats the fist, jump beats the ring.
+                w.punchHits++;
+                w.cool = CFG.zCooldown;
+                hurtHero(); SFX.hurt();
+                S.shake = Math.min(1.3, S.shake + 0.8);
+                el("dmg").classList.add("on");
+                setTimeout(() => el("dmg").classList.remove("on"), 220);
+                updateHUD();
+                if (hero.hp <= 0) { gameOver(); return; }
+              }
+              landed = true;
+            }
+          }
+          if (landed) {
+            // It always craters, hit or miss. Dodging the fist buys you the
+            // ring instead, and the ring is jumpable — so a clean dodge is two
+            // reads, not one.
+            shocks.push(makeShock(h.g.position, MAW.craterR));
+            sparks(tmp3.copy(h.g.position), 0xff8a30, 16, 20);
+            S.shake = Math.min(1.4, S.shake + 0.9);
+            SFX.boom();
+            S.freeze = Math.max(S.freeze, 0.1);
+            h.mark.visible = false;
+            h.state = "return";
+          }
+
+        } else if (h.state === "return") {
+          HAND_TMP2.copy(HAND_TMP).sub(h.g.position);
+          const d = HAND_TMP2.length();
+          h.seam.material.color.lerp(SEAM_COLD, Math.min(1, dt*3));
+          if (d < 0.6) { h.g.position.copy(HAND_TMP); h.state = "idle"; }
+          else h.g.position.addScaledVector(HAND_TMP2.divideScalar(d),
+                                            Math.min(d, MAW.returnSpeed*dt));
+          h.g.rotation.y = yaw;
+
+        } else {
+          h.g.position.lerp(HAND_TMP, Math.min(1, dt*3.4));
+          h.g.rotation.y = yaw + Math.sin(S.t*0.8 + h.side)*0.12;
+          h.seam.material.color.lerp(SEAM_COLD, Math.min(1, dt*2));
+          h.mark.visible = false;
         }
       }
 
       // HURL: picks up whatever is lying near it and throws it. Same hostile
       // prop path the Warden uses, so it can be shot out of the air.
       w.atkT -= dt;
-      if (w.atkT <= 0 && w.slamWind <= 0) {
+      if (w.atkT <= 0 && !w.hands.some(h => h.state !== "idle")) {
         w.atkT = MAW.hurlEvery * rate;
         let pick = null, bd = 22;
         for (const o of rocks) {
@@ -5008,11 +5151,11 @@ function step(dt) {
       // ROAR: opens the jaw and calls in bodies from a chosen bearing, so the
       // arena never empties out while you work on it.
       w.roarT -= dt;
-      if (w.roarT <= 0 && w.slamWind <= 0) {
+      if (w.roarT <= 0 && !w.hands.some(h => h.state !== "idle")) {
         w.roarT = MAW.roarEvery * rate;
         w.jawOpen = 0.55;
         reinforce(w.enraged ? ["runner","runner","leaper","crawler"]
-                            : ["walker","runner","crawler"], "THE MAW CALLS");
+                            : ["walker","runner","crawler"], "THE MONOLITH CALLS");
       }
       w.jawOpen = Math.max(0, (w.jawOpen || 0) - dt*0.8);
       w.jaw.rotation.x = w.jawOpen;
@@ -5237,7 +5380,11 @@ function step(dt) {
         }
       }
     } else if (dist < reach && w.cool <= 0 && hero.pos.y < CFG.dodgeHeight &&
-               !(w.maw && w.slamWind > 0)) {
+               // It does not swipe while a fist is out. The guard used to name
+               // the ground slam; when the slam was replaced by the punch the
+               // name went stale, and `undefined > 0` being false meant it
+               // silently stopped guarding anything at all.
+               !(w.maw && w.hands.some(h => h.state !== "idle"))) {
       w.windup = w.AI.telegraph;
       SFX.tell();
     }
