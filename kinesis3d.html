@@ -9102,18 +9102,6 @@ function arcLightning(from) {
   if (hit.length) { SFX.weak(); banner("ARC x" + hit.length); }
 }
 
-// Tether pool. One reusable line per carry slot — a link the player can see
-// is the clearest possible "this object is under my control" signal.
-const tethers = [];
-for (let i = 0; i < 12; i++) {
-  const geo = new T.BufferGeometry().setFromPoints([new T.Vector3(), new T.Vector3()]);
-  const m = new T.Line(geo, new T.LineBasicMaterial({
-    color: 0xe94fbf, transparent: true, opacity: 0 }));
-  m.frustumCulled = false;
-  m.visible = false;
-  scene.add(m);
-  tethers.push(m);
-}
 // Aura pool. A shell around every object currently under control, so the
 // telekinesis reads on the OBJECTS and not only on the character. Pooled
 // rather than parented per prop: there are up to ~170 props in an arena and
@@ -9124,10 +9112,9 @@ for (let i = 0; i < 12; i++) {
 // bloom pass on the high quality tier, which is what turns it from a
 // coloured shell into a glow.
 // Controlled objects carry no aura. There was a rising plume here; it was
-// removed on request. What an object is under the control of still reads from
-// the tethers running back to the hero and from the carry wheel overhead, so
-// nothing about the state is actually hidden — the arena is simply quieter,
-// which matters most with a full carry of seven.
+// removed on request, and the tethers that this note used to point at as the
+// surviving signal have since gone the same way. What an object is under the
+// control of now reads from the carry wheel overhead and the CARRY readout.
 //
 // The pool, the procedural plume sheet and the three-quad rig are all gone
 // rather than left disabled: keeping twenty-four hidden groups and two 64x160
@@ -9135,20 +9122,18 @@ for (let i = 0; i < 12; i++) {
 
 function updateAuras(dt) { /* auras removed — see the note above */ }
 
-function updateTethers() {
-  const n = S.held.length;
-  for (let i = 0; i < tethers.length; i++) {
-    const t2 = tethers[i], o = S.held[i];
-    if (!o) { t2.visible = false; continue; }
-    const p = t2.geometry.attributes.position;
-    p.setXYZ(0, hero.pos.x, hero.pos.y + 1.85, hero.pos.z);
-    p.setXYZ(1, o.pos.x, o.pos.y, o.pos.z);
-    p.needsUpdate = true;
-    t2.visible = true;
-    // Fresh grabs flare, then settle to a steady thread.
-    t2.material.opacity = 0.2 + 0.5*Math.max(0, o.grabT||0) + 0.06*Math.sin(S.t*9 + i);
-  }
-}
+// Tethers removed on request. The magenta threads from the hero to every
+// carried prop were the last piece of per-object control decoration, and with
+// a full carry of seven they were most of what was on screen.
+//
+// The state is not hidden by their absence: the carry wheel overhead still
+// shows every held prop, and the CARRY readout still counts them. Removed
+// outright rather than left disabled — twelve Line objects and their
+// geometries updated every frame to draw nothing is a cost with no payer.
+//
+// Every reference went with it. The last time a pool was removed here the
+// call in clearAll was left behind and threw on every wave transition, which
+// is why the grep for remaining uses is part of the job, not an afterthought.
 
 const bolts = [];
 function bolt(a, b2) {
@@ -9478,7 +9463,6 @@ function clearAll() {
   shells.forEach(s => { s.life = 0; s.mesh.visible = false; });
   blastQ.length = 0;
   bolts.forEach(b2 => scene.remove(b2.mesh)); bolts.length = 0;
-  tethers.forEach(t2 => { t2.visible = false; });
   S.held = []; S.lock = null; S.combo = 0; S.comboT = 0;
   resetObstacles();
 }
@@ -11104,7 +11088,8 @@ function step(dt) {
     for (const o of rocks) {
       if (o.held || o.gone) continue;
       tmp.set(o.pos.x-w.pos.x, o.pos.y-1.2, o.pos.z-w.pos.z);
-      if (tmp.length() < o.r + w.r) {
+      const hitD = tmp.length();
+      if (hitD < o.r + w.r) {
         const sp = o.vel.length();
 
         if (o.def.explode) { detonate(o); break; }
@@ -11187,8 +11172,25 @@ function step(dt) {
           }
           break;
         } else {
-          tmp.y = 0; tmp.normalize();
-          w.pos.addScaledVector(tmp,-0.35);
+          // Resting contact, not an impact. This used to shove the WALKER back
+          // a flat 0.35 every frame — roughly seven times its own per-frame
+          // step — so a body that walked into a barrel was pinned against it
+          // for the rest of the wave. It could not close, could not be found,
+          // and the wave could never be cleared: the run just stopped, with
+          // the threat counter still showing bodies that were never coming.
+          //
+          // Resolved as a mutual, penetration-proportional separation instead,
+          // so it settles at contact rather than oscillating, and the lighter
+          // side gives way — a body shoves a plank aside and leans on a
+          // boulder.
+          const pen = Math.max(0, (o.r + w.r) - hitD);
+          tmp.y = 0;
+          if (tmp.lengthSq() > 1e-6) {
+            tmp.normalize();
+            const give = 1 / (1 + (o.def.mass || 1));
+            w.pos.addScaledVector(tmp, -pen * (1 - give));
+            o.pos.addScaledVector(tmp,  pen * give);
+          }
           o.vel.multiplyScalar(0.6);
         }
       }
@@ -11376,7 +11378,6 @@ function step(dt) {
     if (S.comboT <= 0 && S.combo) { S.combo = 0; updateHUD(); }
   }
 
-  updateTethers();
   updateAuras(dt);
 
   motes.rotation.y += dt*0.012;
