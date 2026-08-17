@@ -5056,18 +5056,27 @@ function step(dt) {
     const gz = w.gait;
     w.walk += dt * GAIT.cadence(wspd) * Math.PI*2;
 
-    const L = legPose(w.walk, gz), R = legPose(w.walk + Math.PI, gz);
-    w.lL.rotation.x = L.hip;  w.lL.joint.rotation.x = L.knee;
-    w.lR.rotation.x = R.hip;  w.lR.joint.rotation.x = R.knee;
+    // Limbs are posed only if the rig actually has them. Not every body is a
+    // biped: THE CHOIR is a floating core with no legs OR arms, and THE HOLLOW
+    // has legs but no arms. Both threw here on the first frame they existed,
+    // which meant the animation loop died the instant wave 20 began — see
+    // hasLegs/hasArms on the walker.
+    if (w.lL) {
+      const L = legPose(w.walk, gz), R = legPose(w.walk + Math.PI, gz);
+      w.lL.rotation.x = L.hip;  w.lL.joint.rotation.x = L.knee;
+      w.lR.rotation.x = R.hip;  w.lR.joint.rotation.x = R.knee;
+    }
 
     // The reach is the shamble's signature, so it survives at low speed and
     // gives way to a pumping arm as the thing starts to sprint.
-    const A = armPose(w.walk + Math.PI, gz), B = armPose(w.walk, gz);
-    const shamble = -1.6 * (1 - gz);
-    w.aL.rotation.x = shamble + A.shoulder*gz + Math.sin(w.walk*0.55)*0.14*(1-gz);
-    w.aR.rotation.x = shamble + B.shoulder*gz - Math.sin(w.walk*0.55)*0.14*(1-gz);
-    w.aL.joint.rotation.x = -0.25 - 1.1*gz + A.elbow*gz*0.5;
-    w.aR.joint.rotation.x = -0.25 - 1.1*gz + B.elbow*gz*0.5;
+    if (w.aL) {
+      const A = armPose(w.walk + Math.PI, gz), B = armPose(w.walk, gz);
+      const shamble = -1.6 * (1 - gz);
+      w.aL.rotation.x = shamble + A.shoulder*gz + Math.sin(w.walk*0.55)*0.14*(1-gz);
+      w.aR.rotation.x = shamble + B.shoulder*gz - Math.sin(w.walk*0.55)*0.14*(1-gz);
+      w.aL.joint.rotation.x = -0.25 - 1.1*gz + A.elbow*gz*0.5;
+      w.aR.joint.rotation.x = -0.25 - 1.1*gz + B.elbow*gz*0.5;
+    }
 
     w.body.rotation.z = Math.sin(w.walk)*(0.11 - 0.05*gz);
     w.body.position.y = gaitBob(w.walk, gz);
@@ -5088,13 +5097,18 @@ function step(dt) {
       // pose alone is not enough of a tell at range.
       const t = 1 - w.windup / w.AI.telegraph;
       w.torso.rotation.x = 0.34 - 0.55*Math.sin(t*Math.PI);
-      w.aL.rotation.x = -1.6 - 1.5*Math.sin(t*Math.PI);
-      w.aR.rotation.x = -1.6 - 1.5*Math.sin(t*Math.PI);
-      w.tell.material.opacity = 0.25 + 0.55*Math.sin(t*Math.PI);
-      w.tell.visible = true;
-      w.tell.scale.setScalar(1 + t*0.5);
+      // Armless rigs rear with the torso alone — same guard as the gait above.
+      if (w.aL) {
+        w.aL.rotation.x = -1.6 - 1.5*Math.sin(t*Math.PI);
+        w.aR.rotation.x = -1.6 - 1.5*Math.sin(t*Math.PI);
+      }
+      if (w.tell) {
+        w.tell.material.opacity = 0.25 + 0.55*Math.sin(t*Math.PI);
+        w.tell.visible = true;
+        w.tell.scale.setScalar(1 + t*0.5);
+      }
       if (w.windup <= 0) {
-        w.tell.visible = false;
+        if (w.tell) w.tell.visible = false;
         w.cool = CFG.zCooldown;
         // Only lands if the player is still inside reach and on the ground:
         // moving, dashing or jumping all beat it.

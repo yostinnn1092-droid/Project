@@ -277,6 +277,31 @@ test("bosses: never more than one big body in a wave", async (pg) => {
   ok(r.length === 0, "waves produced multiple bosses: " + r.slice(0, 5).join(", "));
 });
 
+test("bosses: every boss survives being animated", async (pg, errs) => {
+  // The other boss cases all poke damageWalker directly and never run a frame,
+  // which is how two of the three shipped unable to animate at all: the shared
+  // walker gait poses lL/lR/aL/aR unconditionally, THE CHOIR has neither legs
+  // nor arms and THE HOLLOW has legs but no arms, so both threw on their first
+  // frame and took the whole animation loop down with them. Wave 20 was
+  // unplayable and nothing in the suite noticed, because nothing stepped.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe, out = {};
+    for (const t of ["maw", "choir", "hollow", "boss"]) {
+      P.parkWalkers(); P.stripProps();
+      P.spawnWalker(t, P.hero.pos.x, P.hero.pos.z - 12);
+      out[t] = null;
+      // Long enough to cross a wind-up: the attack pose writes limbs on a
+      // separate path from the gait, and that one was unguarded too.
+      try { for (let i = 0; i < 600; i++) P.step(1 / 60); }
+      catch (e) { out[t] = e.message; }
+    }
+    return out;
+  });
+  for (const t of Object.keys(r))
+    ok(!r[t], `stepping "${t}" threw: ${r[t]}`);
+  ok(errs.length === 0, "errors while animating bosses: " + errs.slice(0, 3).join(" | "));
+});
+
 test("choir: core is untouchable until the acolytes are gone", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe;

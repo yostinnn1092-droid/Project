@@ -38,6 +38,7 @@ remembering to look.
 | boss closes, slams, throws | the rig was rebuilt quadruped → biped; limb slots feed the shared gait |
 | every tenth wave brings that tier's boss | the front-load that lifts a boss out of the shuffle listed two of the four boss types, so wave 20 opened bossless ~40% of the time |
 | never more than one big body | the late-wave ramp and HORDE both multiply counts — unguarded, that gave two Wardens |
+| every boss survives being animated | the shared gait posed limbs unconditionally; the Choir has no legs or arms and the Hollow no arms, so both killed the animation loop on their first frame |
 | choir core untouchable / acolytes die with it | the shield is the whole fight; a routing slip makes it either invincible or a plain sack of HP |
 | hollow only takes returned ordnance | same — the chip multiplier is the puzzle, and a missed gate collapses it to either wall or pushover |
 | wounds track health, bosses excluded | with 2-hit kills, nothing showed which bodies were finishable |
@@ -52,6 +53,14 @@ regressions were introduced and each turned the right case red:
 - removing archers from waves 3–4 → *"wave 3 contains no archer"*
 - a dangling reference in `clearAll` → wave-transition case threw
 - restoring the two-name front-load list → *"wave 20 opened with no boss on 7/12 passes"*
+- removing the `w.lL` guard from the gait → *"stepping \"choir\" threw"*
+
+## Test the thing running, not just its functions
+
+Every choir and hollow case pokes `damageWalker` directly and never runs a
+frame — which is how both bosses shipped unable to animate at all while four
+green cases covered them. A case that calls a system's functions is not a case
+that runs the system. At least one per feature has to `step`.
 
 ## Randomised cases need passes, not a pass
 
