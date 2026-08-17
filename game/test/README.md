@@ -45,6 +45,7 @@ remembering to look.
 | a body stays attached to its own shoulders | the walk bob was written as an absolute y, dropping the Gorger's torso from 4.9 to 0 while its arms stayed at 7.9 — no error, no log, boss silently in pieces |
 | choir core untouchable / acolytes die with it | the shield is the whole fight; a routing slip makes it either invincible or a plain sack of HP |
 | hollow only takes returned ordnance | same — the chip multiplier is the puzzle, and a missed gate collapses it to either wall or pushover |
+| restart drops the last run's build | the fire ring keeps its rank outside `MOD`, so `restart()` reset everything else and left it — a new run opened at wave 1 with a maxed triple ring, and because the draft gates on `lv < 3` the pick then never reappeared all session |
 | wounds track health, bosses excluded | with 2-hit kills, nothing showed which bodies were finishable |
 | quality warm-up / hysteresis / recovery | the ladder judged the loading window and never re-checked |
 
@@ -62,6 +63,7 @@ regressions were introduced and each turned the right case red:
 - skipping archers below wave 5 → *"wave 3 contained no archer on some passes"*
 - removing the punch's dash guard → *"dashing took 5 fist hits"*
 - making a charged hand return instead of launch → *"a hand charged but never launched"*
+- removing the ring reset from `restart()` → *"the fire ring's rank survived a restart"*
 
 ## Test the thing running, not just its functions
 
@@ -106,6 +108,15 @@ attempts at isolating them by clearing rings, or by lifting the hero above
 `dodgeHeight` (gravity puts them straight back), all measured the wrong thing.
 The boss counts its own fist hits instead. When two effects share a frame,
 count them at the source.
+
+## State that lives outside the obvious container
+
+`restart()` reads as complete: it resets MOD, synergies, the taken list, wave,
+score, health, style, rank and overdrive. It was still wrong, because one
+drafted upgrade keeps its rank in its own module object and so was not in the
+list of things anybody thought to reset. Reviewing a reset function against
+itself cannot find that — the missing item is by definition not written there.
+Ask instead what a run OWNS, then check each of those against the reset.
 
 ## Randomised cases need passes, not a pass
 

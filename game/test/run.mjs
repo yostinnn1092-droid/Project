@@ -533,6 +533,40 @@ test("hollow: hurls, which is what arms the player", async (pg) => {
      "the hollow never threw anything, so the player is never handed the only thing that hurts it");
 });
 
+test("restart: a new run does not inherit the last run's build", async (pg) => {
+  // The ring of fire keeps its rank in its own module state rather than in
+  // MOD, so restart() rebuilt every other part of the build and left it
+  // standing: a new run opened at wave 1 with a fully ranked triple ring. The
+  // draft entry also gates on `ringState.lv < 3`, so a maxed ring then never
+  // came back as an option for the rest of the session — the pick was both
+  // free and gone.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.ringState.lv = 0;
+    for (let i = 0; i < 3; i++) P.ringUpgrade();
+    P.S.wave = 12; P.S.score = 5000; P.S.kills = 90;
+    const before = { lv: P.ringState.lv, curtains: (P.ringState.curtains || []).length };
+    P.restart();
+    return {
+      before,
+      lv: P.ringState.lv,
+      curtains: (P.ringState.curtains || []).length,
+      wave: P.S.wave,
+      score: P.S.score,
+      // The pool has to offer it again, which is the half that a rank check
+      // alone would not catch.
+      offered: P.UPGRADES.filter(u => u.id === "ring")
+                         .every(u => !u.more || u.more()),
+    };
+  });
+  eq(r.before.lv, 3, "the run under test never reached rank 3, so it proves nothing");
+  eq(r.lv, 0, "the fire ring's rank survived a restart — the new run starts with it for free");
+  eq(r.curtains, 0, "the fire ring's meshes survived a restart");
+  eq(r.wave, 1, "the wave counter survived a restart");
+  eq(r.score, 0, "the score survived a restart");
+  ok(r.offered, "the ring is no longer offered in the draft after a restart");
+});
+
 test("wounds: skin darkens as health drops, bosses excluded", async (pg) => {
   const r = await pg.evaluate(async () => {
     const P = window.__probe;

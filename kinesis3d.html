@@ -9191,8 +9191,11 @@ function damageWalker(w, amount, dir, knock, kind) {
         SFX.boom();
         S.shake = Math.min(1.2, S.shake + 0.6);
         S.freeze = Math.max(S.freeze, 0.16);
+        // "THROAT EXPOSED" was written for a fanged giant. A stone construct
+        // has no throat, and the line has to name what the player is now
+        // looking at — the lit core in its chest.
         banner(w.platesLeft ? "PLATE SHATTERED · " + w.platesLeft + " LEFT"
-                            : "THROAT EXPOSED");
+                            : "CORE EXPOSED");
       }
       return;
     }
@@ -11429,6 +11432,15 @@ function restart() {
     singularity:false, marksman:false, secondWind:false, avalanche:false });
   SYNERGIES.forEach(sy => { sy.got = false; });
   taken.length = 0;
+  // The ring of fire is a draft pick and belongs to the run, but it keeps its
+  // rank in its own module state rather than in MOD — so restart() rebuilt
+  // every other part of the build and left this one standing. A new run began
+  // at wave 1 with whatever rank the last run finished on, which hands over
+  // the strongest pick in the pool for free; and because the draft entry gates
+  // on `ringState.lv < 3`, a maxed ring then never appeared as an option again
+  // for the rest of the session.
+  ringState.lv = 0;
+  buildRingOrbs();
   S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0;
   S.style = 0; S.styleT = 0; S.rank = "D"; S.recent.length = 0; S.endless = false;
   buildArena(ARENAS[0]);
