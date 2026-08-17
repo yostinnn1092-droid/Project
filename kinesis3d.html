@@ -8292,6 +8292,115 @@ function spawnWalker(type, x, z) {
     body.add(halo);
   }
 
+  // ── the six that never got one ────────────────────────────────────────────
+  // The rule three branches up — "a silhouette, not just a statline" — was
+  // written for the Archer and then not applied to anyone else. Measured, NINE
+  // archetypes shared a byte-identical part list, and seven of those sit within
+  // 10% of each other in scale: at range they were one enemy wearing seven
+  // hats, exactly the failure that made the Archer invisible.
+  //
+  // Each shape below is keyed off the behaviour the archetype ALREADY has, so
+  // the silhouette answers "what is this about to do to me" rather than merely
+  // being different for a test's benefit.
+  const deco = (col, emi) => new T.MeshStandardMaterial({
+    color: col, emissive: emi || col, emissiveIntensity: emi ? 0.85 : 0.18,
+    roughness: 0.55, flatShading: true });
+
+  // RUNNER — the only archetype above speed 4. Backswept quills read as motion
+  // even while it stands still, so "the fast one" is legible before it moves.
+  if (EE.speed >= 4) {
+    for (let i = -1; i <= 1; i++) {
+      const q = new T.Mesh(new T.ConeGeometry(0.09, 0.95, 4), deco(0xd9dcc4));
+      q.position.set(i * 0.22, 2.02, -0.22);
+      q.rotation.x = 2.35 + Math.abs(i) * 0.12;
+      q.castShadow = true;
+      body.add(q);
+    }
+  }
+
+  // ARMORED — plated: pauldrons plus a chest slab. Bulk you can see, which is
+  // the whole point of an archetype whose statline is flat damage reduction.
+  if (EE.armor) {
+    for (const sx of [-1, 1]) {
+      const pad = new T.Mesh(new T.BoxGeometry(0.52, 0.34, 0.62), deco(0x9aa2ae));
+      pad.position.set(sx * 0.5, 1.62, 0);
+      pad.rotation.z = -sx * 0.22;
+      pad.castShadow = true;
+      body.add(pad);
+    }
+    const plate = new T.Mesh(new T.BoxGeometry(0.86, 0.72, 0.2), deco(0x9aa2ae));
+    plate.position.set(0, 1.2, 0.44);
+    plate.castShadow = true;
+    body.add(plate);
+  }
+
+  // EXPLODER — a swollen sac on the back with a hot seam. You should want to
+  // kill this one at a distance, and the shape should say so.
+  if (EE.onDeath === "blast") {
+    const sac = new T.Mesh(new T.SphereGeometry(0.56, 10, 8), deco(0xd88a44));
+    sac.scale.set(1, 0.92, 0.86);
+    sac.position.set(0, 1.5, -0.5);
+    sac.castShadow = true;
+    body.add(sac);
+    const seam = new T.Mesh(new T.TorusGeometry(0.44, 0.07, 5, 12),
+                            deco(0xff6a20, 0xff6a20));
+    seam.rotation.y = Math.PI / 2;
+    seam.position.set(0, 1.5, -0.5);
+    body.add(seam);
+  }
+
+  // LEAPER — haunches, not a crest. The first attempt gave it a dorsal fin row,
+  // which measured as the same silhouette as the Runner's backswept quills:
+  // both are three cones projecting rearward at about the same height, and the
+  // profile check was right to reject them. The identity here is JUMPING, so
+  // the read belongs in the legs — big raptor haunches that fold up behind the
+  // knee, which no other body has and which say "this one closes in one hop".
+  if (EE.leap) {
+    for (const sx of [-1, 1]) {
+      const thigh = new T.Mesh(new T.BoxGeometry(0.3, 0.72, 0.34), deco(0x8fbfae));
+      thigh.position.set(sx * 0.26, 0.86, -0.3);
+      thigh.rotation.x = 0.62;
+      thigh.castShadow = true;
+      body.add(thigh);
+      const shin = new T.Mesh(new T.BoxGeometry(0.2, 0.6, 0.24), deco(0x7fae9e));
+      shin.position.set(sx * 0.26, 0.42, -0.02);
+      shin.rotation.x = -0.75;
+      shin.castShadow = true;
+      body.add(shin);
+    }
+  }
+
+  // DISRUPTOR — antennae. It fights from eleven units by draining strain, so
+  // the tell is an instrument, not a weapon.
+  if (EE.disrupt) {
+    for (const sx of [-1, 1]) {
+      const ant = new T.Mesh(new T.ConeGeometry(0.06, 1.25, 4),
+                             deco(0x7fd6ff, 0x4FD6E9));
+      ant.position.set(sx * 0.2, 2.35, -0.05);
+      ant.rotation.z = sx * 0.3;
+      body.add(ant);
+    }
+    const dish = new T.Mesh(new T.TorusGeometry(0.3, 0.05, 5, 12),
+                            deco(0x7fd6ff, 0x4FD6E9));
+    dish.rotation.x = Math.PI / 2;
+    dish.position.set(0, 2.9, -0.05);
+    body.add(dish);
+  }
+
+  // GRABBER — hooked claws on both hands. The one that roots you should look
+  // like it reaches, and the hook is visible on the arm that swings at you.
+  if (EE.grab) {
+    for (const arm of [aL, aR]) {
+      for (let i = -1; i <= 1; i++) {
+        const claw = new T.Mesh(new T.ConeGeometry(0.07, 0.46, 4), deco(0xc0a080));
+        claw.position.set(i * 0.1, -0.72, 0.12);
+        claw.rotation.x = 2.5;
+        claw.castShadow = true;
+        arm.joint.add(claw);
+      }
+    }
+  }
+
   g.position.set(x,0,z);
   g.scale.setScalar(EE.scale * rand(0.94, 1.06));
   if (elite) {
