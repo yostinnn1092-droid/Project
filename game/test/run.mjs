@@ -567,6 +567,59 @@ test("restart: a new run does not inherit the last run's build", async (pg) => {
   ok(r.offered, "the ring is no longer offered in the draft after a restart");
 });
 
+test("damage flash: only at low health, and on every damage route", async (pg) => {
+  // The red vignette is a LOW-HEALTH warning, not a hit marker. It used to
+  // fire on every hit at any health — the loudest signal in the game was also
+  // its most common — and it was pasted at four call sites while several other
+  // damage routes had none, so an arrow took a heart off you in silence.
+  const r = await pg.evaluate(async () => {
+    const P = window.__probe;
+    const lit = () => document.getElementById("dmg").classList.contains("on");
+    const clear = () => document.getElementById("dmg").classList.remove("on");
+    const out = {};
+
+    P.parkWalkers(); P.stripProps();
+
+    clear(); P.hero.hp = 5; P.hurtHero();
+    out.atFull = { lit: lit(), hp: P.hero.hp };
+
+    clear(); P.hero.hp = 4; P.hurtHero();
+    out.atThree = { lit: lit(), hp: P.hero.hp };
+
+    // The hit that drops you TO the threshold must warn you — that is the
+    // moment the warning exists for.
+    clear(); P.hero.hp = 3; P.hurtHero();
+    out.droppingToTwo = { lit: lit(), hp: P.hero.hp };
+
+    clear(); P.hero.hp = 1; P.hurtHero();
+    out.lastHeart = { lit: lit(), hp: P.hero.hp };
+
+    // A route that never flashed before consolidation: an arrow.
+    clear(); P.hero.hp = 2; P.arrows.length = 0;
+    P.spawnWalker("archer", P.hero.pos.x, P.hero.pos.z - 8);
+    const a = P.walkers[P.walkers.length - 1];
+    a.aggro = true;
+    let arrowLit = false;
+    for (let i = 0; i < 60 * 20 && !arrowLit; i++) {
+      P.S.dashT = 0;
+      P.step(1 / 60);
+      if (lit()) arrowLit = true;
+    }
+    out.arrowRoute = { lit: arrowLit, hp: P.hero.hp };
+    return out;
+  });
+
+  eq(r.atFull.hp, 4, "hurtHero did not take a heart, so this case tested nothing");
+  ok(!r.atFull.lit, "the screen flashed red at full health; it is a low-health warning");
+  ok(!r.atThree.lit, "the screen flashed red at 3 hearts, above the warning threshold");
+  ok(r.droppingToTwo.lit,
+     "dropping to 2 hearts did not flash — that is exactly when the warning is for");
+  ok(r.lastHeart.lit, "the killing hit did not flash");
+  ok(r.arrowRoute.lit,
+     "an arrow took a heart at low health without colouring the screen; the flash " +
+     "must live on every damage route, not the four it happened to be pasted into");
+});
+
 test("wounds: skin darkens as health drops, bosses excluded", async (pg) => {
   const r = await pg.evaluate(async () => {
     const P = window.__probe;

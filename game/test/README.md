@@ -46,6 +46,7 @@ remembering to look.
 | choir core untouchable / acolytes die with it | the shield is the whole fight; a routing slip makes it either invincible or a plain sack of HP |
 | hollow only takes returned ordnance | same — the chip multiplier is the puzzle, and a missed gate collapses it to either wall or pushover |
 | restart drops the last run's build | the fire ring keeps its rank outside `MOD`, so `restart()` reset everything else and left it — a new run opened at wave 1 with a maxed triple ring, and because the draft gates on `lv < 3` the pick then never reappeared all session |
+| damage flash only at low health, on every route | the red vignette fired on every hit at any health, so the loudest signal in the game was also its most common. It was also pasted at four call sites and missing from the rest, so an arrow or a Choir acolyte took a heart in silence |
 | wounds track health, bosses excluded | with 2-hit kills, nothing showed which bodies were finishable |
 | quality warm-up / hysteresis / recovery | the ladder judged the loading window and never re-checked |
 
@@ -64,6 +65,8 @@ regressions were introduced and each turned the right case red:
 - removing the punch's dash guard → *"dashing took 5 fist hits"*
 - making a charged hand return instead of launch → *"a hand charged but never launched"*
 - removing the ring reset from `restart()` → *"the fire ring's rank survived a restart"*
+- removing the low-health gate → *"the screen flashed red at full health"*
+- removing `damageFlash()` from `hurtHero` → *"dropping to 2 hearts did not flash"*
 
 ## Test the thing running, not just its functions
 
@@ -117,6 +120,16 @@ drafted upgrade keeps its rank in its own module object and so was not in the
 list of things anybody thought to reset. Reviewing a reset function against
 itself cannot find that — the missing item is by definition not written there.
 Ask instead what a run OWNS, then check each of those against the reset.
+
+## A signal pasted per call site is a signal with holes
+
+The red damage vignette lived as the same two lines copied into four places.
+Four is enough to look deliberate and not enough to be complete: arrows and
+Choir acolytes took health off the player without ever colouring the screen,
+and nothing said so because there was no single place to compare against. It
+now lives in `hurtHero`, which the file already describes as the one route
+every point of player damage passes through. If a signal belongs to an event,
+put it where the event is, not where you happened to remember it.
 
 ## Randomised cases need passes, not a pass
 

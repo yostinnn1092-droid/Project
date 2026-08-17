@@ -8,7 +8,7 @@ window.__probe = {
   hero, walkers, rocks, arrows, shocks, taken, renderer, spawnQ,
 
   // systems under test
-  step, buildWave, spawnWalker, spawnMaw, damageWalker, restart,
+  step, buildWave, spawnWalker, spawnMaw, damageWalker, restart, hurtHero,
   ringUpgrade, buildRingOrbs, stepRing,
   judgeFrame, setQuality,
 

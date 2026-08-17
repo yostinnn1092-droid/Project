@@ -3479,6 +3479,30 @@ function bolt(a, b2) {
   bolts.push({ mesh:m, life:0.22 });
 }
 
+// Hearts at or below which the screen itself warns you.
+const LOW_HEALTH = 2;
+let dmgFlashT = 0;
+
+// The red vignette. It used to fire on EVERY hit at any health, which made the
+// loudest signal in the game also its most common one — by the time it meant
+// "one more and you are done" the player had long since learned to read past
+// it. Now it only appears once you are down to LOW_HEALTH, so it says exactly
+// one thing.
+//
+// It also used to be pasted at four call sites and absent from the others, so
+// an arrow and a Choir acolyte took health off you without ever colouring the
+// screen. Living in hurtHero means every route that costs a heart warns you,
+// which is the whole point of a low-health warning.
+function damageFlash() {
+  if (hero.hp > LOW_HEALTH) return;
+  const d = el("dmg");
+  d.classList.add("on");
+  // Re-arm rather than stack: two hits close together used to leave the first
+  // timer to strip the class mid-way through the second flash.
+  clearTimeout(dmgFlashT);
+  dmgFlashT = setTimeout(() => d.classList.remove("on"), 220);
+}
+
 // Every route that hurts the player goes through here, so GLASS only has to
 // be honoured in one place.
 function hurtHero() {
@@ -3489,6 +3513,7 @@ function hurtHero() {
     banner("SECOND WIND");
     SFX.rankUp(3);
   }
+  damageFlash();
 }
 
 function damageWalker(w, amount, dir, knock, kind) {
@@ -4758,8 +4783,6 @@ function step(dt) {
         hurtHero();
         SFX.hurt();
         S.shake = Math.min(1, S.shake+0.5);
-        el("dmg").classList.add("on");
-        setTimeout(() => el("dmg").classList.remove("on"), 220);
         updateHUD();
         if (hero.hp <= 0) { gameOver(); return; }
       }
@@ -5092,8 +5115,6 @@ function step(dt) {
                 w.cool = CFG.zCooldown;
                 hurtHero(); SFX.hurt();
                 S.shake = Math.min(1.3, S.shake + 0.8);
-                el("dmg").classList.add("on");
-                setTimeout(() => el("dmg").classList.remove("on"), 220);
                 updateHUD();
                 if (hero.hp <= 0) { gameOver(); return; }
               }
@@ -5374,8 +5395,6 @@ function step(dt) {
           hurtHero();
           SFX.hurt();
           S.shake = Math.min(1, S.shake+0.45);
-          el("dmg").classList.add("on");
-          setTimeout(() => el("dmg").classList.remove("on"), 220);
           updateHUD();
           if (hero.hp <= 0) { gameOver(); return; }
         } else {
@@ -5617,8 +5636,6 @@ function step(dt) {
       hurtHero();
       SFX.hurt();
       S.shake = Math.min(1.2, S.shake + 0.7);
-      el("dmg").classList.add("on");
-      setTimeout(() => el("dmg").classList.remove("on"), 220);
       updateHUD();
       if (hero.hp <= 0) { gameOver(); return; }
     }
