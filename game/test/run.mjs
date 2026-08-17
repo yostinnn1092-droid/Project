@@ -663,6 +663,38 @@ test("props: a resting prop cannot pin a walker", async (pg) => {
      "cleared: " + r.slice(0, 5).join(", "));
 });
 
+test("aura: controlled props glow, and the colour says which control", async (pg) => {
+  // Restored by request. Three states, three colours — held, guiding, and
+  // thrown back at you — so the shell carries information rather than being
+  // decoration. Two setup notes, both learned by getting them wrong:
+  // guidance is cleared the moment a prop touches the ground, and it is also
+  // cleared if the prop has no live mark, so a guiding prop has to be given
+  // BOTH a target and some air.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.buildWave(3); P.parkWalkers();
+    const scene = P.walkers[0].g.parent;
+    const shells = [];
+    scene.traverse(o => {
+      if (o.isMesh && o.material && o.material.blending === 2 &&
+          o.geometry && o.geometry.type === "SphereGeometry") shells.push(o);
+    });
+    const live = P.rocks.filter(o => !o.gone).slice(0, 3);
+    P.S.held = [live[0]]; live[0].held = true; live[0].grabT = 1;
+    live[1].seek = P.walkers.find(w => !w.dead);
+    live[1].seekT = 2; live[1].pos.y = 4; live[1].vel.set(0, 2, -14);
+    live[2].hostile = 2;
+    for (let i = 0; i < 10; i++) P.step(1 / 60);
+    const lit = shells.filter(m => m.visible && m.material.opacity > 0.1);
+    return { pool: shells.length, lit: lit.length,
+             colours: [...new Set(lit.map(m => m.material.color.getHexString()))].sort() };
+  });
+  ok(r.pool >= 24, `the aura pool is ${r.pool}; a full volley plus a carry needs 24`);
+  eq(r.lit, 3, "held, guiding and hostile props should each carry a shell");
+  eq(r.colours.join(","), "e94fbf,ff3020,ffb060",
+     "the three control states must stay visually distinct");
+});
+
 test("tethers: no control threads are drawn to carried props", async (pg) => {
   // Removed on request. Asserted rather than trusted: the last pool removed
   // here left its call in clearAll behind and threw on every wave transition.
