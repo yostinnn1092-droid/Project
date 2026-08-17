@@ -7550,117 +7550,163 @@ function clearArrows() {
 
 const walkers = [];
 
+// The Monolith's glowing crack network, drawn once and reused by every chunk of
+// its body. Geometry strips were the other option and they look like applied
+// stripes; an emissive map reads as light escaping from inside the stone, which
+// is the whole point of the reference.
+//
+// Each crack is a random walk. Every stroke is drawn nine times at +/- one
+// canvas width so the pattern wraps — a seam running down a boulder is more
+// visible than the cracks themselves.
+function makeCrackTex() {
+  const S = 256, c = canvasOf(S), g = c.getContext("2d");
+  g.fillStyle = "#000"; g.fillRect(0, 0, S, S);
+  g.lineCap = "round";
+  const stroke = (pts, w, a) => {
+    for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+      g.beginPath();
+      g.moveTo(pts[0][0] + ox*S, pts[0][1] + oy*S);
+      for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0] + ox*S, pts[i][1] + oy*S);
+      g.lineWidth = w; g.strokeStyle = "rgba(255,244,214," + a + ")"; g.stroke();
+    }
+  };
+  // Radiating hubs: the reference has star-bursts where several cracks meet,
+  // and those nodes are what stop it reading as crazed pottery.
+  for (let h = 0; h < 3; h++) {
+    const hx = Math.random()*S, hy = Math.random()*S;
+    const arms = 3 + Math.floor(Math.random()*2);
+    for (let a = 0; a < arms; a++) {
+      let ang = (a/arms)*Math.PI*2 + Math.random()*0.6;
+      let px = hx, py = hy;
+      const pts = [[px, py]];
+      const steps = 4 + Math.floor(Math.random()*3);
+      for (let i = 0; i < steps; i++) {
+        ang += (Math.random()-0.5)*0.9;
+        const len = 6 + Math.random()*13;
+        px += Math.cos(ang)*len; py += Math.sin(ang)*len;
+        pts.push([px, py]);
+      }
+      stroke(pts, 3.4, 0.22);   // soft halo under the hot line
+      stroke(pts, 1.5, 0.95);
+    }
+  }
+  const t = texFrom(c, 1);
+  return t;
+}
+
 function spawnMaw(x, z) {
   const g = new T.Group();
-  // Granite, not hide. Two greys and one hot seam colour: the seams are the
-  // only lit thing on the whole body, which is what lets a charging fist read
-  // across a dark arena when the rest of it is the same value as the floor.
-  const rockM = new T.MeshStandardMaterial({
-    color:0x6f6a61, roughness:0.94, metalness:0.03,
-    normalMap:TEX.rockN, normalScale:new T.Vector2(1.5,1.5), envMapIntensity:0.5 });
-  const darkM = new T.MeshStandardMaterial({
-    color:0x4a463f, roughness:0.96, metalness:0.02,
-    normalMap:TEX.rockN, normalScale:new T.Vector2(1.2,1.2), envMapIntensity:0.4 });
-  const plateM = new T.MeshStandardMaterial({
-    color:0x8d8879, roughness:0.52, metalness:0.14,
-    normalMap:TEX.rockN, normalScale:new T.Vector2(1.1,1.1), envMapIntensity:0.95 });
-  const seamM = new T.MeshBasicMaterial({ color:0x8a3a10 });
-  const coreM = new T.MeshStandardMaterial({ color:0xff5a1a, emissive:0xff5a1a,
-                                             emissiveIntensity:1.8, roughness:0.3 });
+  // Pale blue-green stone lit from inside, not grey granite. The cracks are an
+  // emissive map rather than painted lines, so the light reads as coming from
+  // under the surface — see makeCrackTex.
+  TEX.cracks = TEX.cracks || makeCrackTex();
+  const stoneM = (col, rough) => new T.MeshStandardMaterial({
+    color: col, roughness: rough, metalness: 0.04,
+    normalMap: TEX.rockN, normalScale: new T.Vector2(1.3, 1.3),
+    emissive: 0xffffff, emissiveMap: TEX.cracks, emissiveIntensity: 0.85,
+    envMapIntensity: 0.55 });
+  const rockM  = stoneM(0x74a3b0, 0.86);
+  const darkM  = stoneM(0x4f7783, 0.9);
+  const plateM = stoneM(0x8fbcc6, 0.72);
+  const coreM  = new T.MeshStandardMaterial({ color:0xfff2d0, emissive:0xffe9b0,
+                                              emissiveIntensity:2.0, roughness:0.35 });
 
-  // A slab. The whole golem is these, set at slightly wrong angles — cut stone
-  // that has been stacked rather than carved, which is what separates it from
-  // the smooth organic shapes everything else on the field is made of.
-  const slab = (parent, sw, sh, sd, px, py, pz, mat, rx, ry, rz) => {
-    const m = part(new T.BoxGeometry(sw, sh, sd), mat || rockM, px, py, pz);
-    m.rotation.set(rx || 0, ry || 0, rz || 0);
+  // A boulder. The whole body is these — a low-poly icosahedron squashed and
+  // spun at random, which reads as broken rock where a box reads as masonry.
+  // The reference is a pile of chunks, not a stack of slabs.
+  const chunk = (parent, r, px, py, pz, sx, sy, sz, mat) => {
+    const m = part(new T.IcosahedronGeometry(r, 0), mat || rockM, px, py, pz);
+    m.scale.set(sx, sy, sz);
+    m.rotation.set(rand(0, 6.283), rand(0, 6.283), rand(0, 6.283));
     parent.add(m);
     return m;
   };
 
-  const HIP = 4.9, SHOULDER = 7.9;
+  const HIP = 4.3, SHOULDER = 7.4;
 
-  // Legs: stone columns. They go in the lL/lR slots so the shared gait walks
-  // it for free — the golem's own code only has to worry about its hands.
-  const lL = limb(g, HIP, rockM, -1.5, HIP, 0.1, 1.05);
-  const lR = limb(g, HIP, rockM,  1.5, HIP, -0.1, 1.05);
+  // Legs: short and thick, carrying a top-heavy mass. Chunk overlays give the
+  // limb a broken outline instead of a smooth capsule.
+  const lL = limb(g, HIP, rockM, -1.7, HIP, 0.1, 1.15);
+  const lR = limb(g, HIP, rockM,  1.7, HIP, -0.1, 1.15);
   for (const leg of [lL, lR]) {
-    slab(leg.joint, 2.5, 0.75, 3.1, 0, -HIP*0.48 - 0.2, 0.45, darkM);
-    slab(leg, 2.15, 1.5, 2.15, 0, -0.5, 0, darkM, 0, 0.3, 0.06);
+    chunk(leg, 1.5, 0, -0.9, 0, 1.15, 1.0, 1.1, rockM);
+    chunk(leg.joint, 1.35, 0, -0.85, 0, 1.1, 0.95, 1.05, darkM);
+    // Wide splayed foot, built from three boulders rather than a box.
+    chunk(leg.joint, 1.05, -0.4, -HIP*0.48, 0.5, 1.0, 0.55, 1.3, darkM);
+    chunk(leg.joint, 0.95,  0.45, -HIP*0.48, 0.35, 0.95, 0.5, 1.2, darkM);
+    chunk(leg.joint, 0.8,   0.0, -HIP*0.46, -0.5, 0.9, 0.5, 0.85, rockM);
   }
 
-  // Everything above the hip leans as one piece. bodyY is the rest height the
-  // walk bob is added to — see the gait.
   const body = new T.Group();
   body.position.y = HIP;
   g.add(body);
 
-  slab(body, 4.3, 2.0, 3.0, 0, 0.1, 0, darkM, 0, 0, 0.04);
-  // Trunk: three courses of stone, each wider than the one below, so the mass
-  // reads as built upward rather than as one carved block.
-  slab(body, 4.0, 1.7, 2.9, 0,  1.35, 0, rockM, 0.02, -0.06, -0.03);
-  slab(body, 4.6, 1.7, 3.1, 0,  2.75, 0, rockM, 0,     0.05,  0.035);
-  slab(body, 4.2, 1.4, 3.0, 0,  3.95, 0, rockM, -0.02, -0.03, -0.02);
-  // Glowing seams in the joins between courses. Thin, and inset, so they read
-  // as light escaping from inside rather than as painted stripes.
-  for (const sy of [0.95, 2.1, 3.35]) {
-    slab(body, 4.15, 0.16, 2.6, 0, sy, 0.28, seamM);
-    slab(body, 2.5, 0.16, 3.0, 0, sy, 0, seamM);
-  }
+  // Torso: a hunched wedge of boulders, widest at the shoulders and tapering
+  // into the hips — the reference's mass is nearly all above the waist.
+  chunk(body, 1.9, 0, 0.05, 0, 1.25, 0.95, 1.05, darkM);
+  chunk(body, 2.15, 0, 1.35, 0.1, 1.2, 1.0, 1.0, rockM);
+  chunk(body, 2.35, -0.5, 2.5, 0, 1.15, 1.0, 0.95, rockM);
+  chunk(body, 2.3,  0.55, 2.55, 0.05, 1.15, 1.0, 0.95, rockM);
+  // Back slabs — the star-burst node between the shoulder blades is the most
+  // recognisable single feature of the reference from behind.
+  chunk(body, 1.6, 0, 2.6, -1.3, 1.5, 1.2, 0.7, rockM);
+  chunk(body, 1.2, -0.9, 3.4, -1.1, 1.1, 0.9, 0.65, darkM);
+  chunk(body, 1.2,  0.9, 3.4, -1.1, 1.1, 0.9, 0.65, darkM);
 
-  // Shoulders: two great blocks cantilevered out past the body, which is what
-  // gives the hands somewhere to hover that looks deliberate.
-  slab(body, 3.1, 2.0, 2.9, -3.3, SHOULDER-HIP+0.1, 0, rockM, 0, 0, 0.2);
-  slab(body, 3.1, 2.0, 2.9,  3.3, SHOULDER-HIP+0.1, 0, rockM, 0, 0, -0.2);
+  // Shoulders: two great boulder masses cantilevered out and UP, so the head
+  // sits in a trough between them.
+  chunk(body, 2.05, -2.55, SHOULDER-HIP-0.35, 0, 1.0, 0.9, 0.95, rockM);
+  chunk(body, 2.05,  2.55, SHOULDER-HIP-0.35, 0, 1.0, 0.9, 0.95, rockM);
+  chunk(body, 1.25, -2.95, SHOULDER-HIP+0.55, -0.35, 0.85, 0.75, 0.8, darkM);
+  chunk(body, 1.25,  2.95, SHOULDER-HIP+0.55, -0.35, 0.85, 0.75, 0.8, darkM);
 
-  // Head: a small angular block set low between the shoulders. No face — a
-  // single lit band across it, which is all a construct needs.
+  // Head: small, sunk low between the shoulders, barely clearing them.
   const neck = new T.Group();
-  neck.position.set(0, SHOULDER-HIP+0.35, 0.25);
+  neck.position.set(0, SHOULDER-HIP+0.05, 0.4);
   body.add(neck);
   const head = new T.Group();
-  head.position.set(0, 1.0, 0.1);
+  head.position.set(0, 0.7, 0.15);
   neck.add(head);
-  slab(head, 2.05, 1.5, 1.9, 0, 0, 0, rockM, 0.06, 0, 0);
-  head.add(part(new T.BoxGeometry(1.72, 0.3, 0.14), seamM, 0, 0.14, 0.93));
-  const eyeLight = new T.PointLight(0xff7a28, 2.6, 18, 2);
-  eyeLight.position.set(0, 0.18, 1.25);
+  chunk(head, 1.35, 0, 0, 0, 1.05, 0.9, 1.0, rockM);
+  chunk(head, 0.7, -0.75, 0.35, 0.35, 0.8, 0.7, 0.8, darkM);
+  chunk(head, 0.7,  0.75, 0.35, 0.35, 0.8, 0.7, 0.8, darkM);
+  // Eyes: two hot points in the crack light, the only symmetry on the model.
+  head.add(part(new T.SphereGeometry(0.19, 8, 6), coreM, -0.42, 0.05, 1.02));
+  head.add(part(new T.SphereGeometry(0.19, 8, 6), coreM,  0.42, 0.05, 1.02));
+  const eyeLight = new T.PointLight(0xffe9b0, 2.4, 16, 2);
+  eyeLight.position.set(0, 0.1, 1.4);
   head.add(eyeLight);
 
-  // The jaw is the lower course of the head, hinged. It grinds open on the
-  // call — a construct with no mouth still needs somewhere for the sound to
-  // come from, and the step code drives w.jaw either way.
+  // The jaw is the lower boulder of the head, hinged — the step code drives
+  // w.jaw on the reinforcement call either way.
   const jaw = new T.Group();
-  jaw.position.set(0, -0.64, 0.2);
+  jaw.position.set(0, -0.7, 0.25);
   head.add(jaw);
-  slab(jaw, 1.9, 0.55, 1.7, 0, -0.28, 0.1, darkM);
+  chunk(jaw, 0.85, 0, -0.25, 0.1, 1.15, 0.6, 0.9, darkM);
 
-  // Chest core — what you are actually trying to hit, once the plates are off.
-  const core = part(new T.OctahedronGeometry(1.10, 0), coreM, 0, 2.5, 1.35);
+  // Chest core — what you are trying to hit once the plates are off. It sits
+  // where the crack network converges, so an exposed core reads as the thing
+  // lighting the whole body.
+  const core = part(new T.OctahedronGeometry(1.05, 0), coreM, 0, 1.9, 1.5);
   body.add(core);
-  const glow = new T.PointLight(0xff5a1a, 0, 26, 2);
-  glow.position.set(0, HIP + 2.5, 1.6);
+  const glow = new T.PointLight(0xffd27a, 0, 26, 2);
+  glow.position.set(0, HIP + 1.9, 1.7);
   g.add(glow);
 
-  // Plates: stone shards spalled off the chest and shoulders. Each is its own
-  // body with its own health — break them to reach the core.
+  // Plates: paler boulders spalled over the chest. Break them to reach the core.
   const plates = [];
   for (let i = 0; i < MAW.plates; i++) {
     const a = (i / MAW.plates) * Math.PI * 2;
-    const wide = 1.75 - Math.abs(Math.sin(a)) * 0.4;
-    const pl = part(new T.BoxGeometry(wide, 1.6, 0.62), plateM,
-                    Math.sin(a) * 1.75, 2.5 + Math.cos(a) * 1.2, 1.55);
-    pl.rotation.z = -Math.sin(a) * 0.5;
-    pl.rotation.x = -0.12;
-    body.add(pl);
+    const pl = chunk(body, 1.0, Math.sin(a) * 1.75, 1.9 + Math.cos(a) * 1.3, 1.55,
+                     1.15, 1.0, 0.65, plateM);
     plates.push({ mesh: pl, hp: MAW.plateHp });
   }
 
   const tell = new T.Mesh(new T.RingGeometry(3.0, 4.2, 26),
-    new T.MeshBasicMaterial({ color:0xff6a20, transparent:true, opacity:0,
+    new T.MeshBasicMaterial({ color:0xffd27a, transparent:true, opacity:0,
                               side:T.DoubleSide, depthWrite:false }));
   tell.rotation.x = -Math.PI/2;
-  tell.position.y = 10.6;
+  tell.position.y = 10.2;
   tell.visible = false;
   g.add(tell);
 
@@ -7668,35 +7714,33 @@ function spawnMaw(x, z) {
   scene.add(g);
 
   // ── the hands ─────────────────────────────────────────────────────────────
-  // They are NOT children of the golem. A hand has to be able to leave, cross
-  // twenty metres and come back, so it lives in world space and is flown to
-  // its slot every frame — the same arrangement the Choir's acolytes use, and
-  // it carries the same obligation: nothing in the normal teardown path
-  // reaches world-space parts, so both go on w.detached.
+  // Kept detached, because the charging punch is the fight and it needs a hand
+  // that can leave, cross twenty metres and come back. The reference's arms are
+  // attached, but its fists are exactly this shape — so the silhouette matches
+  // and the mechanic survives. World-space parts go on w.detached; nothing in
+  // the normal teardown path reaches them otherwise.
   const hands = [], detached = [];
   for (const side of [-1, 1]) {
     const h = new T.Group();
-    slab(h, 2.6, 1.9, 2.2, 0, 0, 0, rockM, 0, 0, 0);
-    // Knuckles: three blocks along the front face.
+    chunk(h, 1.7, 0, 0, 0, 1.15, 1.0, 1.0, rockM);
+    // Knuckle boulders across the striking face.
     for (let i = -1; i <= 1; i++)
-      slab(h, 0.72, 0.8, 0.9, i * 0.8, 0.42, 1.35, darkM, 0.12, 0, 0);
-    // Curled fingers under the fist.
+      chunk(h, 0.72, i * 0.85, 0.35, 1.35, 1.0, 0.9, 0.9, plateM);
+    // Curled fingers underneath.
     for (let i = -1; i <= 1; i++)
-      slab(h, 0.68, 1.0, 1.5, i * 0.8, -0.75, 0.85, rockM, 0.5, 0, 0);
-    // Thumb across the front.
-    slab(h, 1.5, 0.7, 0.8, side * -0.6, -0.35, 1.15, rockM, 0, 0, side * 0.3);
-    // Seam around the wrist. Its own material instance per hand, because the
-    // charge ramps ONE hand's colour and a shared material would light both.
-    const seam = part(new T.BoxGeometry(2.75, 0.3, 2.35),
+      chunk(h, 0.62, i * 0.8, -0.85, 0.95, 0.95, 0.9, 1.35, darkM);
+    chunk(h, 0.8, side * -0.9, -0.35, 0.95, 1.1, 0.85, 0.9, darkM);
+    // Wrist ring: the one place a hand's own light is driven separately, so a
+    // charging fist can come up to heat while its twin stays cold.
+    const seam = part(new T.TorusGeometry(1.35, 0.16, 6, 12),
                       new T.MeshBasicMaterial({ color: SEAM_COLD.getHex() }),
-                      0, -0.05, -0.7);
+                      0, -0.1, -0.75);
+    seam.rotation.x = Math.PI/2;
     h.add(seam);
     scene.add(h);
 
-    // The ring that marks where this fist is going to land. Drawn on the floor
-    // for the whole wind-up, which is what makes the punch fair.
     const mark = new T.Mesh(new T.RingGeometry(MAW.punchR * 0.72, MAW.punchR, 30),
-      new T.MeshBasicMaterial({ color:0xff6a20, transparent:true, opacity:0.9,
+      new T.MeshBasicMaterial({ color:0xffd27a, transparent:true, opacity:0.9,
         side:T.DoubleSide, depthWrite:false, blending:T.AdditiveBlending }));
     mark.rotation.x = -Math.PI/2;
     mark.visible = false;
@@ -7704,7 +7748,7 @@ function spawnMaw(x, z) {
 
     hands.push({
       g: h, seam, mark, side,
-      slot: new T.Vector3(side * 4.3, SHOULDER - 1.9, 2.6),
+      slot: new T.Vector3(side * 4.7, SHOULDER - 3.9, 3.0),
       state: "idle", t: 0, target: new T.Vector3(),
     });
     detached.push(h, mark);
@@ -7715,7 +7759,7 @@ function spawnMaw(x, z) {
     lL, lR, pos: g.position,
     type:"maw", boss:true, maw:true, core, glow, plates, platesLeft:MAW.plates,
     hands, detached, nextHand:0, punchT: MAW.punchEvery, punchHits:0,
-    E:{ name:MAW.name, hp:MAW.coreHp, speed:MAW.speed, scale:3.6, skin:0x6f6a61,
+    E:{ name:MAW.name, hp:MAW.coreHp, speed:MAW.speed, scale:3.6, skin:0x74a3b0,
         score:MAW.score },
     reach: MAW.reach,
     r:4.2, walk:0, gait:0, spd:0, dead:false, cool:0,
