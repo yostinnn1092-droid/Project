@@ -620,6 +620,67 @@ test("damage flash: only at low health, and on every damage route", async (pg) =
      "must live on every damage route, not the four it happened to be pasted into");
 });
 
+test("props: a resting prop cannot pin a walker", async (pg) => {
+  // Reported from play: the wave stalls, the threat counter still shows bodies,
+  // and none of them ever arrive. Cause was the prop/walker resting-contact
+  // branch shoving the WALKER back a flat 0.35 every frame — about seven times
+  // its own per-frame step — so a body that walked into a prop was pinned
+  // against it for the rest of the wave.
+  //
+  // A single planted prop does NOT reproduce it: the body slides around one
+  // obstacle, and the first version of this case passed happily against the
+  // broken code. It takes a real scattered arena, so this runs live waves and
+  // looks for bodies that have stopped moving while still far from the hero.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const frozen = [];
+    for (const wave of [7, 8]) {
+      for (let trial = 0; trial < 2; trial++) {
+        P.buildWave(wave);
+        P.hero.pos.set(0, 0, 0);
+        const settle = () => { for (let i = 0; i < 60 * 40; i++) {
+          P.hero.hp = 99; P.hero.pos.set(0,0,0); P.step(1/60); } };
+        settle();
+        const snap = P.walkers.filter(w => !w.dead)
+                              .map(w => ({ w, x: w.pos.x, z: w.pos.z }));
+        for (let i = 0; i < 60 * 8; i++) {
+          P.hero.hp = 99; P.hero.pos.set(0,0,0); P.step(1/60); }
+        for (const o of snap) {
+          if (o.w.dead) continue;
+          const moved = Math.hypot(o.w.pos.x - o.x, o.w.pos.z - o.z);
+          const d = Math.hypot(o.w.pos.x, o.w.pos.z);
+          // Standoff archetypes (archer 17, warper 15, spawner 12) hold at
+          // range BY DESIGN and must not be counted as stuck.
+          if (moved < 0.5 && d > 6 && o.w.AI.ring < 5)
+            frozen.push(`${o.w.type}@${d.toFixed(1)} (wave ${wave})`);
+        }
+      }
+    }
+    return frozen;
+  });
+  eq(r.length, 0,
+     "bodies stopped moving while far from the hero, so the wave can never be " +
+     "cleared: " + r.slice(0, 5).join(", "));
+});
+
+test("tethers: no control threads are drawn to carried props", async (pg) => {
+  // Removed on request. Asserted rather than trusted: the last pool removed
+  // here left its call in clearAll behind and threw on every wave transition.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.buildWave(2);
+    const scene = P.walkers[0].g.parent;
+    const magenta = [];
+    scene.traverse(o => {
+      if (o.isLine && o.material && o.material.color &&
+          o.material.color.getHex() === 0xe94fbf) magenta.push(o);
+    });
+    return { magentaLines: magenta.length, hasUpdater: typeof P.updateTethers };
+  });
+  eq(r.magentaLines, 0, "magenta control tethers are still in the scene");
+  eq(r.hasUpdater, "undefined", "updateTethers still exists");
+});
+
 test("wounds: skin darkens as health drops, bosses excluded", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe;

@@ -5,11 +5,11 @@
 window.__probe = {
   // state
   S, CFG, RING, ringState, MAW, ENEMIES, UPGRADES, OBJECTS, WAVES,
-  hero, walkers, rocks, arrows, shocks, taken, renderer, spawnQ,
+  hero, walkers, rocks, arrows, shocks, taken, renderer, spawnQ, obstacles,
 
   // systems under test
-  step, buildWave, spawnWalker, spawnMaw, damageWalker, restart, hurtHero,
-  ringUpgrade, buildRingOrbs, stepRing,
+  step, buildWave, spawnWalker, spawnMaw, damageWalker, restart, hurtHero, spawnObject,
+  ringUpgrade, buildRingOrbs, stepRing, walkerHeading,
   judgeFrame, setQuality,
 
   // observers

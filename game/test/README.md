@@ -45,6 +45,8 @@ remembering to look.
 | a body stays attached to its own shoulders | the walk bob was written as an absolute y, dropping the Gorger's torso from 4.9 to 0 while its arms stayed at 7.9 — no error, no log, boss silently in pieces |
 | choir core untouchable / acolytes die with it | the shield is the whole fight; a routing slip makes it either invincible or a plain sack of HP |
 | hollow only takes returned ordnance | same — the chip multiplier is the puzzle, and a missed gate collapses it to either wall or pushover |
+| a resting prop cannot pin a walker | prop/walker resting contact shoved the WALKER back a flat 0.35 every frame, ~7x its own step, so a body that met a barrel was pinned for the rest of the wave — reported from play as "stuck, threat counter still counting, nothing arrives" |
+| no control threads drawn to carried props | the tether pool was removed on request; this asserts the meshes and the updater are actually gone, not just hidden |
 | restart drops the last run's build | the fire ring keeps its rank outside `MOD`, so `restart()` reset everything else and left it — a new run opened at wave 1 with a maxed triple ring, and because the draft gates on `lv < 3` the pick then never reappeared all session |
 | damage flash only at low health, on every route | the red vignette fired on every hit at any health, so the loudest signal in the game was also its most common. It was also pasted at four call sites and missing from the rest, so an arrow or a Choir acolyte took a heart in silence |
 | wounds track health, bosses excluded | with 2-hit kills, nothing showed which bodies were finishable |
@@ -67,6 +69,7 @@ regressions were introduced and each turned the right case red:
 - removing the ring reset from `restart()` → *"the fire ring's rank survived a restart"*
 - removing the low-health gate → *"the screen flashed red at full health"*
 - removing `damageFlash()` from `hurtHero` → *"dropping to 2 hearts did not flash"*
+- restoring the flat 0.35 prop shove → *"grabber@8.2, runner@7.0, grabber@8.7"*
 
 ## Test the thing running, not just its functions
 
@@ -130,6 +133,31 @@ and nothing said so because there was no single place to compare against. It
 now lives in `hurtHero`, which the file already describes as the one route
 every point of player damage passes through. If a signal belongs to an event,
 put it where the event is, not where you happened to remember it.
+
+## A reproduction that is too clean tests nothing
+
+The prop-pin case was first written as one walker with one boulder planted in
+front of it. It passed against the broken code — a body slides around a single
+obstacle, and the pin only emerges in a real scattered arena with bodies
+converging from several bearings. The case now runs live waves and looks for
+bodies that stopped moving while still far from the hero.
+
+Standoff archetypes must be excluded from any such check: the archer (ring 17),
+warper (15) and spawner (12) hold at range BY DESIGN, and counting them as
+stuck makes the case fail on correct code.
+
+## Guess, then disprove, then guess again
+
+Three causes were proposed for that stall and the first two were wrong, each
+killed by a control rather than by argument:
+
+1. crowd separation cancelling approach — removing every other body left it stuck
+2. arena obstacles (trees, pillars) — removing all 11 changed nothing
+3. throwable props — a DIFFERENT array; removing those moved it 15 -> 2.2 units
+
+The lesson is not "check props first". It is that each hypothesis was cheap to
+falsify and expensive to assume, and two fixes that would have shipped and done
+nothing were avoided by spending one control apiece.
 
 ## Randomised cases need passes, not a pass
 
