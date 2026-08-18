@@ -8073,7 +8073,13 @@ function spawnBoss(x, z) {
     type:"boss", boss:true, core, glow, plates, platesLeft:BOSS.plates,
     E:{ name:"WARDEN", hp:BOSS.coreHp, speed:BOSS.speed, scale:2.1, skin:0x4d5a44,
         score:BOSS.score },
-    r:2.0, walk:0, dead:false, cool:0, atkT:BOSS.atkEvery,
+    // gait/spd are not optional either, for the same reason as thrown/tvel
+    // below: the shared gait does `w.gait += ...`, and `undefined + n` is NaN.
+    // That NaN reached gaitBob, then body.position.y — and since this rig's
+    // body IS its root group, the Warden's WORLD Y went NaN on its first
+    // animated frame. It still walked and still threw, because those read x
+    // and z only, which is exactly why it survived untested this long.
+    r:2.0, walk:0, gait:0, spd:0, dead:false, cool:0, atkT:BOSS.atkEvery,
     AI: AI.tank, arcDir: 1, windup: 0, tell: bossTell,
     hp:BOSS.coreHp, maxHp:BOSS.coreHp, flash:0, kb:new T.Vector3(),
     // thrown/tvel are not optional. The movement guard reads `w.thrown <= 0`,
@@ -11274,7 +11280,10 @@ function step(dt) {
     // speed, therefore changes how the wave MOVES and not just how quickly.
     const wspd = w.spd || 0;
     const wg = GAIT.blend(wspd, 1.6, 4.6);
-    w.gait += (wg - (w.gait||0)) * Math.min(1, 5*dt);
+    // Written as an assignment, not `+=`. `undefined += n` is NaN and it never
+    // recovers; the guard on the right was already there but the read on the
+    // left was not, which is how the Warden animated itself to a NaN position.
+    w.gait = (w.gait || 0) + (wg - (w.gait || 0)) * Math.min(1, 5*dt);
     const gz = w.gait;
     w.walk += dt * GAIT.cadence(wspd) * Math.PI*2;
 
