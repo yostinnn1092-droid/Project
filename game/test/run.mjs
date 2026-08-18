@@ -787,16 +787,20 @@ test("props: a resting prop cannot pin a walker", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe;
     const frozen = [];
-    for (const wave of [7, 8]) {
-      for (let trial = 0; trial < 2; trial++) {
+    // Waves 1-30, not 7-8. The reported stall was on wave 3 and the two-wave
+    // window would never have seen it; re-introducing the pin bug lights this
+    // sweep up from wave 4 onward. The whole sweep costs about a minute, which
+    // is worth it for the one failure mode that makes a run unfinishable.
+    for (let wave = 1; wave <= 30; wave++) {
+      {
         P.buildWave(wave);
         P.hero.pos.set(0, 0, 0);
-        const settle = () => { for (let i = 0; i < 60 * 40; i++) {
+        const settle = () => { for (let i = 0; i < 60 * 30; i++) {
           P.hero.hp = 99; P.hero.pos.set(0,0,0); P.step(1/60); } };
         settle();
         const snap = P.walkers.filter(w => !w.dead)
                               .map(w => ({ w, x: w.pos.x, z: w.pos.z }));
-        for (let i = 0; i < 60 * 8; i++) {
+        for (let i = 0; i < 60 * 6; i++) {
           P.hero.hp = 99; P.hero.pos.set(0,0,0); P.step(1/60); }
         for (const o of snap) {
           if (o.w.dead) continue;
