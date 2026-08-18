@@ -328,6 +328,73 @@ test("abilities: every special actually fires", async (pg) => {
      "double rate: " + r.__timerClash.join(", "));
 });
 
+test("crown: each rank throws one more spike, and spikes land and slow", async (pg) => {
+  // The Ice Crown is the Ring of Fire's opposite half: the Ring punishes what
+  // closes, the Crown reaches out and picks a target. Ranks add SPIKES PER
+  // VOLLEY, which is what the upgrade is supposed to look like.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe, out = { ranks: [] };
+    P.crownState.lv = 0; P.buildCrown();
+    for (let lv = 1; lv <= 3; lv++) {
+      P.crownUpgrade();
+      P.buildWave(3); P.parkWalkers(); P.stripProps();
+      P.hero.pos.set(0, 0, 0); P.hero.hp = 99;
+      // Targets pinned in range and made unkillable, so the volley size is
+      // measured rather than "however many survived long enough to be shot".
+      const t = [];
+      for (let i = 0; i < 4; i++) {
+        P.spawnWalker("walker", (i - 1.5) * 2.5, -10);
+        const w = P.walkers[P.walkers.length - 1];
+        w.hp = w.maxHp = 1e6; t.push(w);
+      }
+      P.crownState.t = 0; P.crownState.spikes.length = 0;
+      let peak = 0;
+      for (let i = 0; i < 20; i++) {
+        for (const w of t) w.pos.set(w.pos.x, 0, -10);
+        P.hero.pos.set(0, 0, 0); P.step(1 / 60);
+        peak = Math.max(peak, P.crownState.spikes.length);
+      }
+      out.ranks.push({ lv, shards: P.crownState.shards.length, volley: peak });
+    }
+
+    // A spike has to actually connect and actually slow.
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.hero.pos.set(0, 0, 0);
+    P.spawnWalker("walker", 0, -9);
+    const w = P.walkers[P.walkers.length - 1];
+    const hp0 = w.hp;
+    P.crownState.t = 0;
+    let slowed = false;
+    for (let i = 0; i < 180; i++) {
+      w.pos.set(0, 0, -9); P.hero.pos.set(0, 0, 0); P.step(1 / 60);
+      if ((w.slowT || 0) > 0) slowed = true;
+    }
+    out.damage = hp0 - w.hp;
+    out.slowed = slowed;
+
+    // Offered in the draft, and gated at three like the Ring.
+    const entry = P.UPGRADES.find(u => u.id === "crown");
+    out.inTable = !!entry;
+    // Reset first: the rank loop above left it at 3, and asking "is it offered"
+    // there answers a different question than the one intended.
+    P.crownState.lv = 0;
+    out.offeredAtZero = !!entry && (!entry.more || entry.more());
+    P.crownState.lv = 3;
+    out.offeredAtMax = !!entry && (!entry.more || entry.more());
+    return out;
+  });
+
+  eq(r.ranks.map(x => x.volley).join(","), "1,2,3",
+     "ranks should throw 1, 2 then 3 spikes a volley; got " + r.ranks.map(x => x.volley).join(","));
+  ok(r.ranks[2].shards > r.ranks[0].shards,
+     "the crown should visibly gain shards with rank");
+  ok(r.damage > 0, "a spike never damaged a pinned target nine units away");
+  ok(r.slowed, "a struck body was never slowed, which is the Crown's whole identity");
+  ok(r.inTable, "there is no Ice Crown entry in the upgrade table at all");
+  ok(r.offeredAtZero, "the Ice Crown is never offered in the draft");
+  ok(!r.offeredAtMax, "the Ice Crown is still offered at rank 3");
+});
+
 test("ring: each rank builds one more ring", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe, out = [];
@@ -777,7 +844,9 @@ test("restart: a new run does not inherit the last run's build", async (pg) => {
     P.ringState.lv = 0;
     for (let i = 0; i < 3; i++) P.ringUpgrade();
     P.S.wave = 12; P.S.score = 5000; P.S.kills = 90;
-    const before = { lv: P.ringState.lv, curtains: (P.ringState.curtains || []).length };
+    for (let i = 0; i < 3; i++) P.crownUpgrade();
+    const before = { lv: P.ringState.lv, curtains: (P.ringState.curtains || []).length,
+                     crownLv: P.crownState.lv };
     P.restart();
     return {
       before,
@@ -785,6 +854,8 @@ test("restart: a new run does not inherit the last run's build", async (pg) => {
       curtains: (P.ringState.curtains || []).length,
       wave: P.S.wave,
       score: P.S.score,
+      crownLv: P.crownState.lv,
+      crownShards: P.crownState.shards.length,
       // The pool has to offer it again, which is the half that a rank check
       // alone would not catch.
       offered: P.UPGRADES.filter(u => u.id === "ring")
@@ -793,6 +864,9 @@ test("restart: a new run does not inherit the last run's build", async (pg) => {
   });
   eq(r.before.lv, 3, "the run under test never reached rank 3, so it proves nothing");
   eq(r.lv, 0, "the fire ring's rank survived a restart — the new run starts with it for free");
+  eq(r.before.crownLv, 3, "the crown never reached rank 3, so it proves nothing");
+  eq(r.crownLv, 0, "the Ice Crown's rank survived a restart, exactly as the ring once did");
+  eq(r.crownShards, 0, "the Ice Crown's shards survived a restart");
   eq(r.curtains, 0, "the fire ring's meshes survived a restart");
   eq(r.wave, 1, "the wave counter survived a restart");
   eq(r.score, 0, "the score survived a restart");

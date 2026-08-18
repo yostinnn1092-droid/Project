@@ -1331,6 +1331,157 @@ function stepRing(dt) {
     for (const k of ringState.cool.keys()) if (k.dead) ringState.cool.delete(k);
 }
 
+// ═══════════════════════════════════════════════════════════════ ice crown
+// The second drafted power. The Ring of Fire is area denial — it punishes
+// anything that closes. The Crown is the opposite half: it reaches OUT and
+// picks a target, so the two answer different problems and a run that takes
+// both is covering both. Ranks add spikes per volley, not damage per spike,
+// because "more ice" is what the upgrade should look like.
+//
+// Per-spike damage steps DOWN as ranks are added, the same way the Ring's
+// per-ring dps does. Total output still climbs hard (140 -> 240 -> 315), but
+// not by the flat 3x that a constant per-spike number would give.
+const CROWN = {
+  levels: [
+    null,
+    { spikes:1, dmg:140, every:1.90, shards:5 },
+    { spikes:2, dmg:120, every:1.70, shards:8 },
+    { spikes:3, dmg:105, every:1.50, shards:12 },
+  ],
+  range:   22,     // it will not fire at what it cannot reach
+  speed:   34,     // fast enough to feel like a bolt, slow enough to watch
+  hitR:    1.5,
+  slowMul: 0.55,   // struck bodies wade for a moment
+  slowT:   1.6,
+  ice:     0xbfe9ff,
+};
+
+const crownState = { lv:0, t:0, group:null, shards:[], spikes:[] };
+
+// One shared shard geometry — the crown can hold twelve of them and every
+// spike in flight reuses it too.
+const shardGeo = new T.ConeGeometry(0.13, 0.72, 4);
+const shardMat = new T.MeshStandardMaterial({
+  color: CROWN.ice, emissive: 0x5fc8ff, emissiveIntensity: 1.15,
+  roughness: 0.18, metalness: 0.1, transparent: true, opacity: 0.92,
+  flatShading: true });
+
+function buildCrown() {
+  if (!crownState.group) { crownState.group = new T.Group(); scene.add(crownState.group); }
+  const g = crownState.group;
+  // Dispose rather than hide. A rank rebuild that only hid the old ring would
+  // leave three sets of shards resident for the rest of the run.
+  for (const s2 of crownState.shards) { g.remove(s2); }
+  crownState.shards.length = 0;
+  if (!crownState.lv) return;
+  const n = CROWN.levels[crownState.lv].shards;
+  for (let i = 0; i < n; i++) {
+    const m = new T.Mesh(shardGeo, shardMat);
+    m.scale.set(1.25, 1.45, 1.25);
+    // Fanned outward and tilted, so it reads as a crown of spikes rather than
+    // a ring of pins — the reference is radiating, not vertical.
+    m.userData.a = (i / n) * Math.PI * 2;
+    m.userData.tilt = 0.95 + (i % 3) * 0.16;
+    m.castShadow = false;
+    g.add(m);
+    crownState.shards.push(m);
+  }
+}
+
+function crownUpgrade() {
+  if (crownState.lv >= 3) return;
+  crownState.lv++;
+  buildCrown();
+  const L = CROWN.levels[crownState.lv];
+  banner("ICE CROWN · " + crownState.lv);
+  toast(L.spikes + (L.spikes === 1 ? " spike" : " spikes") + " a volley · " +
+        L.dmg + " each", 2800);
+  SFX.rankUp ? SFX.rankUp(2) : SFX.overload();
+  S.shake = Math.min(1.0, S.shake + 0.3);
+}
+
+function clearSpikes() {
+  for (const sp of crownState.spikes) scene.remove(sp.g);
+  crownState.spikes.length = 0;
+}
+
+function stepCrown(dt) {
+  const g = crownState.group;
+  if (g && crownState.lv) {
+    // The crown rides above the head and turns slowly.
+    g.position.set(hero.pos.x, hero.pos.y + 2.35, hero.pos.z);
+    g.rotation.y += dt * 0.8;
+    for (const m of crownState.shards) {
+      const a = m.userData.a;
+      const bob = Math.sin(S.t * 2.1 + a * 2) * 0.06;
+      m.position.set(Math.cos(a) * 0.78, bob + 0.1, Math.sin(a) * 0.78);
+      m.rotation.set(m.userData.tilt, -a, 0);
+    }
+  }
+
+  // ---- volley
+  if (crownState.lv) {
+    const L = CROWN.levels[crownState.lv];
+    crownState.t -= dt;
+    if (crownState.t <= 0 && S.phase === "play") {
+      crownState.t = L.every;
+      // Nearest first, one spike per body: three spikes into one walker is a
+      // waste when three are closing, and picking distinct targets is what
+      // makes the rank feel like more coverage rather than more overkill.
+      const marks = walkers
+        .filter(w => !w.dead && w.pos.distanceTo(hero.pos) < CROWN.range)
+        .sort((a, b) => a.pos.distanceTo(hero.pos) - b.pos.distanceTo(hero.pos))
+        .slice(0, L.spikes);
+      for (const mk of marks) {
+        const m = new T.Mesh(shardGeo, shardMat);
+        m.scale.set(1.7, 2.9, 1.7);
+        m.position.set(hero.pos.x, hero.pos.y + 2.35, hero.pos.z);
+        scene.add(m);
+        crownState.spikes.push({ g: m, mark: mk, dmg: L.dmg, life: 3.0 });
+      }
+      if (marks.length) SFX.throw ? SFX.throw(1) : null;
+    }
+  }
+
+  // ---- spikes in flight
+  for (let i = crownState.spikes.length - 1; i >= 0; i--) {
+    const sp = crownState.spikes[i];
+    sp.life -= dt;
+    let done = sp.life <= 0;
+    const target = sp.mark && !sp.mark.dead ? sp.mark : null;
+    if (!target) done = true;
+    if (!done) {
+      // Substepped. At 34 u/s a frame at 30fps advances further than the 1.5
+      // hit radius, and an unsubstepped bolt passes straight through the body
+      // it was aimed at — the same tunnelling the archer's arrows hit.
+      const step = CROWN.speed * dt;
+      const subs = Math.max(1, Math.ceil(step / (CROWN.hitR * 0.5)));
+      for (let k = 0; k < subs && !done; k++) {
+        tmp.set(target.pos.x - sp.g.position.x,
+                (target.pos.y + 1.0) - sp.g.position.y,
+                target.pos.z - sp.g.position.z);
+        const d = tmp.length();
+        if (d > 1e-4) {
+          tmp.divideScalar(d);
+          sp.g.position.addScaledVector(tmp, Math.min(step / subs, d));
+          // Points where it is going.
+          sp.g.quaternion.setFromUnitVectors(UP_AXIS, tmp);
+        }
+        if (d < CROWN.hitR) {
+          damageWalker(target, sp.dmg, tmp, 1.2, "impact");
+          // Ice: the body wades for a moment. This is the Crown's identity —
+          // the Ring burns what closes, the Crown slows what is still coming.
+          target.slowT = CROWN.slowT;
+          sparks(tmp3.copy(sp.g.position), CROWN.ice, 10, 14);
+          SFX.impact(0.5, 1);
+          done = true;
+        }
+      }
+    }
+    if (done) { scene.remove(sp.g); crownState.spikes.splice(i, 1); }
+  }
+}
+
 // Dash ghosts: a handful of reusable translucent bodies, faded along the
 // dash path. Cloning the whole rig per frame would be far more expensive.
 const ghostMat = new T.MeshBasicMaterial({ color: 0xe94fbf, transparent: true,
@@ -2856,6 +3007,16 @@ const UPGRADES = [
     },
     more(){ return ringState.lv < 3; },
     take(){ ringUpgrade(); } },
+  { id:"crown",    name:"Ice Crown",       tag:"Power",
+    desc(){
+      const n = crownState.lv + 1, L = CROWN.levels[n];
+      return crownState.lv === 0
+        ? "A crown of ice picks a target and drives a spike through it. Struck bodies slow."
+        : "A " + (n===2?"second":"third") + " spike each volley, thrown at a " +
+          "different body. " + L.spikes + " spikes, " + L.dmg + " damage each.";
+    },
+    more(){ return crownState.lv < 3; },
+    take(){ crownUpgrade(); } },
   { id:"heft",     name:"Heft",            tag:"Power",
     desc:"All thrown objects deal 25% more damage.",
     take(){ MOD.allDmg *= 1.25; } },
@@ -4085,6 +4246,7 @@ const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2, distWant: 11.2 };
 
 function clearAll() {
   clearArrows();
+  clearSpikes();
   for (const w of walkers) {
     releaseDetached(w);
     if (w.acolytes) for (const a of w.acolytes) {
@@ -4774,6 +4936,7 @@ function nearestInCone() {
 function step(dt) {
   S.t += dt;
   stepRing(dt);
+  stepCrown(dt);
   stepArrows(dt);
 
   // Strain bleeds off on its own, and faster once you have stopped acting
@@ -5157,6 +5320,9 @@ function step(dt) {
       // leap all want that. `steer` is where the body actually goes.
       walkerHeading(w, tmp, dist, steer);
       let spd = w.E.speed;
+      // Struck by the Crown: wades for a moment. Decremented here rather than
+      // in stepCrown so it ticks with the body that owns it.
+      if (w.slowT > 0) { w.slowT -= dt; spd *= CROWN.slowMul; }
       // Leapers hold back, then cover ground in a burst — the threat is the
       // timing, not the top speed.
       if (w.E.leap) {
@@ -6148,6 +6314,12 @@ function restart() {
   // for the rest of the session.
   ringState.lv = 0;
   buildRingOrbs();
+  // Same treatment as the ring above, and for the same reason: rank lives in
+  // its own module state, so a restart that forgot it would hand the next run
+  // a maxed Crown for free and then never offer the pick again.
+  crownState.lv = 0;
+  buildCrown();
+  clearSpikes();
   S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0;
   S.style = 0; S.styleT = 0; S.rank = "D"; S.recent.length = 0; S.endless = false;
   buildArena(ARENAS[0]);

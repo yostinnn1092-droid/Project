@@ -10,6 +10,7 @@ window.__probe = {
   // systems under test
   step, buildWave, spawnWalker, spawnMaw, damageWalker, restart, hurtHero, spawnObject,
   ringUpgrade, buildRingOrbs, stepRing, walkerHeading,
+  CROWN, crownState, crownUpgrade, buildCrown, stepCrown,
   judgeFrame, setQuality,
 
   // observers
