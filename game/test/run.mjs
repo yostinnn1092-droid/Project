@@ -509,6 +509,51 @@ test("monolith: dashing beats the fist", async (pg) => {
      `else in this game and cannot be the one thing it fails against`);
 });
 
+test("boss: the Warden closes, throws, and its plates gate the core", async (pg) => {
+  // The every-fifth-wave boss, and the only one that had no behaviour test at
+  // all while its three siblings each turned out to be broken — the Gorger
+  // walking around in pieces, the Choir killing the animation loop on sight,
+  // the Hollow's damage gate. This one was hiding a NaN world position.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe, out = {};
+    out.onWave5 = P.walkers.length >= 0 &&
+      (P.buildWave(5), P.walkers.filter(w => !w.dead && w.boss && !w.maw).length);
+
+    // Closes and throws. Props deliberately kept: throwing needs something to
+    // pick up, and the arena is where it finds one.
+    P.buildWave(5); P.parkWalkers(); P.hero.pos.set(0, 0, 0);
+    P.spawnWalker("boss", 0, -26);
+    const w = P.walkers[P.walkers.length - 1];
+    let minD = 26, hostile = 0;
+    for (let i = 0; i < 60 * 40; i++) {
+      P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1 / 60);
+      minD = Math.min(minD, Math.hypot(w.pos.x, w.pos.z));
+      hostile = Math.max(hostile, P.rocks.filter(o => o.hostile > 0).length);
+    }
+    out.closed = 26 - minD;
+    out.threw = hostile;
+    out.survived = !w.dead;
+
+    // Plates absorb everything until they are gone — the same contract the
+    // Monolith has, and the reason the fight has two phases.
+    P.parkWalkers(); P.spawnWalker("boss", 0, -14);
+    const b = P.walkers[P.walkers.length - 1];
+    const hp0 = b.hp, plates0 = b.platesLeft;
+    P.damageWalker(b, 500, null, 0, "impact");
+    out.plates0 = plates0;
+    out.coreUntouched = b.hp === hp0;
+    out.platesFell = b.platesLeft < plates0;
+    return out;
+  });
+  eq(r.onWave5, 1, "wave 5 should bring exactly one Warden");
+  ok(r.survived, "the Warden died during its own behaviour run, so this tested nothing");
+  ok(r.closed > 15, `an aggroed Warden should walk the hero down; closed only ${r.closed.toFixed(1)} of 26`);
+  ok(r.threw > 0, "the Warden never threw anything in 40 simulated seconds");
+  ok(r.plates0 > 0, "the Warden spawned with no plates, so the gate below proves nothing");
+  ok(r.coreUntouched, "damage reached the core while plates were still up");
+  ok(r.platesFell, "damage did not break a plate either, so it went nowhere");
+});
+
 test("bosses: every tenth wave brings that tier's boss", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe, out = {}, misses = {};
@@ -575,6 +620,40 @@ test("rigs: a body stays attached to its own shoulders", async (pg) => {
     near(r[t].after, r[t].built, 0.3,
          `"${t}" torso drifted from its build height — the rig is animating apart`);
   }
+});
+
+test("rigs: nothing animates itself to a NaN position", async (pg) => {
+  // The Warden spent this whole project with `gait` and `spd` missing from its
+  // walker record. The shared gait does `w.gait += ...`, and `undefined + n` is
+  // NaN, which never recovers — it flowed into gaitBob, into body.position.y,
+  // and because that rig's body IS its root group, into the Warden's WORLD Y.
+  //
+  // It survived undetected because it still walked and still threw: both read
+  // x and z only. Nothing threw, nothing logged, and it is the one boss that
+  // never had a test. The comment directly above the omission in game.js warns
+  // about this exact class for two OTHER fields on the same record.
+  //
+  // Checked for every body, not just the Warden, because the failure is a
+  // missing numeric field and any archetype can be given one.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe, bad = [];
+    const finite = v => typeof v === "number" && Number.isFinite(v);
+    for (const t of [...Object.keys(P.ENEMIES), "boss", "maw", "choir", "hollow"]) {
+      P.parkWalkers(); P.stripProps();
+      P.spawnWalker(t, 0, -14);
+      const w = P.walkers[P.walkers.length - 1];
+      for (let i = 0; i < 120; i++) P.step(1 / 60);
+      const checks = { walk: w.walk, gait: w.gait, spd: w.spd,
+                       posX: w.pos.x, posY: w.pos.y, posZ: w.pos.z,
+                       bodyY: w.body ? w.body.position.y : 0 };
+      for (const [k, v] of Object.entries(checks))
+        if (!finite(v)) bad.push(`${t}.${k}`);
+    }
+    return bad;
+  });
+  eq(r.length, 0,
+     "these went non-finite while simply standing and animating, which silently " +
+     "corrupts position and every distance that reads it: " + r.slice(0, 8).join(", "));
 });
 
 test("bosses: every boss survives being animated", async (pg, errs) => {
