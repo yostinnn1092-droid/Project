@@ -395,6 +395,45 @@ test("crown: each rank throws one more spike, and spikes land and slow", async (
   ok(!r.offeredAtMax, "the Ice Crown is still offered at rank 3");
 });
 
+test("crown: a rank-up replaces the circlet rather than stacking another", async (pg) => {
+  // The crown model is a circlet, a lip, a foot, teeth, gems and a crest as
+  // well as the spike fan. The rebuild used to clear only the fan, which was
+  // correct while the fan WAS the whole model — carry that forward and rank 3
+  // wears three circlets, three sets of teeth and three crests, all coincident
+  // and all still being drawn. Nothing errors; it just quietly costs triple.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const kids = () => P.crownState.group.children.length;
+
+    P.crownState.lv = 0; P.buildCrown();
+    const atZero = kids();
+
+    P.crownState.lv = 3; P.buildCrown();
+    const fresh = kids();
+    P.buildCrown();                       // same rank, built again
+    const rebuilt = kids();
+
+    // And the way a run actually reaches rank 3: one draft pick at a time.
+    P.crownState.lv = 0; P.buildCrown();
+    for (let i = 0; i < 3; i++) P.crownUpgrade();
+    const climbed = kids();
+
+    P.crownState.lv = 0; P.buildCrown();
+    return { atZero, fresh, rebuilt, climbed, afterReset: kids(),
+             tracked: P.crownState.parts.length };
+  });
+
+  eq(r.atZero, 0, "rank 0 should leave nothing in the crown group");
+  ok(r.fresh > 12, "the crown model is missing — rank 3 built only " + r.fresh + " meshes");
+  eq(r.rebuilt, r.fresh,
+     "rebuilding at the same rank left " + (r.rebuilt - r.fresh) + " extra meshes behind");
+  eq(r.climbed, r.fresh,
+     "ranking up 1->2->3 ends with " + r.climbed + " meshes but building rank 3 " +
+     "outright gives " + r.fresh + ", so the earlier ranks are still resident");
+  eq(r.afterReset, 0, "dropping to rank 0 left " + r.afterReset + " meshes in the scene");
+  eq(r.tracked, 0, "the parts list still holds " + r.tracked + " meshes after teardown");
+});
+
 test("ring: each rank builds one more ring", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe, out = [];
