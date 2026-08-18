@@ -228,6 +228,106 @@ test("archer: dashing beats an arrow", async (pg) => {
   eq(r.hp, 5, "dashing did not grant immunity to an arrow, but it does to everything else");
 });
 
+test("abilities: every special actually fires", async (pg) => {
+  // Statlines are cheap to write and easy to leave unwired. Everything below
+  // was measured to fire before it was asserted — including two measurements
+  // that had to be redone, which is why the details matter:
+  //   spawner  — count its OWN spawn type, not total bodies. A total baseline
+  //              includes parked bodies that die during the run and masks the
+  //              growth; the first version reported "never fired" while the
+  //              spawner's own brood counter said five.
+  //   exploder — "it died" is not "it detonated". Put a bystander inside the
+  //              blast radius and check the bystander.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe, out = {};
+    // Props are stripped: buildWave scatters barrels and chem, and those kill
+    // things. A subject that died to a barrel reports its ability as "never
+    // fired" while the ability is perfectly fine — that cost three flaky runs
+    // before it was pinned down. Anything that needs a prop spawns its own.
+    const fresh = (type, d) => {
+      P.buildWave(2); P.parkWalkers(); P.stripProps();
+      for (const o of P.rocks) o.gone = true;
+      P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.S.strain = 0; P.S.grabbed = 0;
+      P.spawnWalker(type, 0, -d);
+      return P.walkers[P.walkers.length - 1];
+    };
+    const run = s => { for (let i = 0; i < 60 * s; i++) { P.hero.pos.set(0,0,0); P.step(1/60); } };
+
+    // Ask the spawner's OWN counter. Counting bodies on the field depends on
+    // what else is alive and what died meanwhile — that made this flaky in
+    // both directions: a false "never fired" AND a pass for the wrong reason.
+    { const w = fresh("spawner", 12); run(25);
+      out.spawner = (w.brood || 0) > 0;
+      out.__spawnerAlive = !w.dead; }
+
+    // The warper hurls a prop, and only finds one within 13 units. buildWave
+    // scatters props at random, so sometimes there was nothing in reach and
+    // the check failed on correct code. Put one where it can be found.
+    { fresh("warper", 10); P.spawnObject("rock", 1.5, -10); let h = 0;
+      for (let i = 0; i < 60*25; i++) { P.hero.pos.set(0,0,0); P.step(1/60);
+        h = Math.max(h, P.rocks.filter(o => o.hostile > 0).length); }
+      out.warper = h > 0; }
+
+    { fresh("disruptor", 8); P.S.strain = 0; let peak = 0;
+      for (let i = 0; i < 60*25; i++) { P.hero.pos.set(0,0,0); P.step(1/60);
+        peak = Math.max(peak, P.S.strain); }
+      out.disruptor = peak > 0.01; }
+
+    { fresh("grabber", 3); let g = 0;
+      for (let i = 0; i < 60*25; i++) { P.hero.pos.set(0,0,0); P.step(1/60);
+        g = Math.max(g, P.S.grabbed || 0); }
+      out.grabber = g > 0; }
+
+    // Held at 12 units. The leap gate is `dist > 4 && dist < 20`, so a leaper
+    // left to walk in closes inside 4 and then never leaps — this check was a
+    // coin flip until it was pinned, and it lost the toss on its first
+    // mutation run while the game code was untouched.
+    { fresh("leaper", 12); const w = P.walkers[P.walkers.length-1]; let air = false;
+      for (let i = 0; i < 60*25; i++) {
+        P.hero.pos.set(0,0,0);
+        if (!w.air) w.pos.set(0, w.pos.y, -12);
+        P.step(1/60); if (w.air) air = true; }
+      out.leaper = air; }
+
+    { P.buildWave(2); P.parkWalkers(); P.stripProps(); P.hero.pos.set(0,0,0);
+      P.spawnWalker("exploder", 0, -20); const ex = P.walkers[P.walkers.length-1];
+      P.spawnWalker("tank", 1.5, -20);   const by = P.walkers[P.walkers.length-1];
+      by.pos.set(1.5,0,-20); ex.pos.set(0,0,-20);
+      const hp0 = by.hp;
+      P.damageWalker(ex, 99999, null, 0, "impact");
+      for (let i = 0; i < 60*3; i++) { by.pos.set(1.5,0,-20); P.step(1/60); }
+      out.exploder = by.hp < hp0; }
+
+    { const w = fresh("shield", 6), hp0 = w.hp;
+      P.damageWalker(w, 200, new window.THREE.Vector3(0,0,1), 0, "impact");
+      const front = hp0 - w.hp; w.hp = hp0;
+      P.damageWalker(w, 200, new window.THREE.Vector3(0,0,-1), 0, "impact");
+      out.shield = front < hp0 - w.hp; }
+
+    // Tripwire, not a live bug: psy, disrupt and grab all drive the SAME
+    // w.psyT field. No archetype or elite carries two of them today, so
+    // nothing conflicts — but the moment one does, both abilities decrement
+    // the timer every frame and fire at double rate. Fail here rather than
+    // let that ship as a mystery.
+    const clash = [];
+    for (const [t, E] of Object.entries(P.ENEMIES)) {
+      const n = (E.psy ? 1 : 0) + (E.disrupt ? 1 : 0) + (E.grab ? 1 : 0);
+      if (n > 1) clash.push(t);
+    }
+    out.__timerClash = clash;
+    return out;
+  });
+
+  ok(r.__spawnerAlive,
+     "the spawner died during its own run, so nothing about spawning was tested");
+  const dead = Object.entries(r)
+    .filter(([k, v]) => !k.startsWith("__") && !v).map(([k]) => k);
+  eq(dead.length, 0, "these abilities never fired: " + dead.join(", "));
+  eq(r.__timerClash.length, 0,
+     "these archetypes carry two abilities sharing w.psyT, so both fire at " +
+     "double rate: " + r.__timerClash.join(", "));
+});
+
 test("ring: each rank builds one more ring", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe, out = [];
