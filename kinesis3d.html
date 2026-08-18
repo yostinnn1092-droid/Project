@@ -7006,7 +7006,11 @@ const CROWN = {
   ice:     0xbfe9ff,
 };
 
-const crownState = { lv:0, t:0, group:null, shards:[], spikes:[] };
+// `parts` is every mesh the current rank put in the group; `shards` is the
+// subset that animates (the spike fan). They are separate because the rebuild
+// has to clear ALL of it — a rank-up that only cleared the fan would leave
+// three stacked circlets behind by rank 3.
+const crownState = { lv:0, t:0, group:null, shards:[], parts:[], spikes:[], crest:null };
 
 // One shared shard geometry — the crown can hold twelve of them and every
 // spike in flight reuses it too.
@@ -7016,26 +7020,120 @@ const shardMat = new T.MeshStandardMaterial({
   roughness: 0.18, metalness: 0.1, transparent: true, opacity: 0.92,
   flatShading: true });
 
+// ---- the circlet itself. Shared at module scope: the crown is rebuilt on
+// every rank-up, and three ranks' worth of one-off geometry is three leaks.
+const CROWN_H = 0.30;                    // band height, before CROWN_FIT
+// The model is authored at a comfortable working size and then fitted to the
+// hero. Built 1:1 it is about three head-widths across and reads as a cage
+// around the player rather than a crown above them.
+const CROWN_FIT = 0.55;
+const CROWN_Y = 2.28;                    // ride height above the hero's origin
+const crownBandGeo  = new T.CylinderGeometry(0.80, 0.86, CROWN_H, 22, 1, true);
+const crownLipGeo   = new T.TorusGeometry(0.80, 0.022, 6, 26);
+const crownFootGeo  = new T.TorusGeometry(0.86, 0.018, 6, 26);
+const crownToothGeo = new T.ConeGeometry(0.05, 0.18, 4);
+const crownGemGeo   = new T.OctahedronGeometry(0.062, 0);
+const crownCrestGeo = new T.OctahedronGeometry(0.13, 0);
+
+const crownBandMat = new T.MeshStandardMaterial({
+  color: CROWN.ice, emissive: 0x2f86cc, emissiveIntensity: 0.5,
+  roughness: 0.22, metalness: 0.15, transparent: true, opacity: 0.78,
+  side: T.DoubleSide, flatShading: true });
+const crownLipMat = new T.MeshBasicMaterial({
+  color: 0xeaf7ff, transparent: true, opacity: 0.9 });
+const crownGemMat = new T.MeshStandardMaterial({
+  color: 0x2f5bb0, emissive: 0x1b3f8f, emissiveIntensity: 0.85,
+  roughness: 0.15, metalness: 0.3, flatShading: true });
+const crownCrestMat = new T.MeshStandardMaterial({
+  color: 0xffffff, emissive: 0x9fe0ff, emissiveIntensity: 1.7,
+  roughness: 0.1, metalness: 0, transparent: true, opacity: 0.95,
+  flatShading: true });
+
+// Hand-tuned heights, not a formula: the fan is meant to be irregular, with
+// tall blades interleaved by short ones, the way the key art reads. An even
+// ring of identical pins is the thing this replaced.
+const CROWN_FAN = [1.0, 0.58, 0.82, 0.48, 1.0, 0.66, 0.54, 0.9, 0.62, 1.0, 0.5, 0.76];
+const CROWN_TEETH = [0.9, 0.55, 1.0, 0.62, 0.85, 0.5, 1.0, 0.7, 0.58, 0.95, 0.52, 0.8];
+
 function buildCrown() {
   if (!crownState.group) { crownState.group = new T.Group(); scene.add(crownState.group); }
   const g = crownState.group;
-  // Dispose rather than hide. A rank rebuild that only hid the old ring would
-  // leave three sets of shards resident for the rest of the run.
-  for (const s2 of crownState.shards) { g.remove(s2); }
+  for (const p of crownState.parts) g.remove(p);
+  crownState.parts.length = 0;
   crownState.shards.length = 0;
+  crownState.crest = null;
   if (!crownState.lv) return;
-  const n = CROWN.levels[crownState.lv].shards;
+
+  const add = (m) => { m.castShadow = false; g.add(m); crownState.parts.push(m); return m; };
+  const lv = crownState.lv;
+  const n = CROWN.levels[lv].shards;
+
+  // ---- circlet: an open cylinder wall between a bright lip and a dim foot
+  add(new T.Mesh(crownBandGeo, crownBandMat));
+  const lip = add(new T.Mesh(crownLipGeo, crownLipMat));
+  lip.position.y = CROWN_H / 2; lip.rotation.x = Math.PI / 2;
+  const foot = add(new T.Mesh(crownFootGeo, crownLipMat));
+  foot.position.y = -CROWN_H / 2; foot.rotation.x = Math.PI / 2;
+
+  // ---- the spike fan, rising from the top rim and splaying outward
   for (let i = 0; i < n; i++) {
+    const h = CROWN_FAN[i % CROWN_FAN.length];
+    const a = (i / n) * Math.PI * 2;
+    const len = 0.72 * (1.05 + h * 0.95);
+    const tilt = 0.30 + (1 - h) * 0.72;   // the short ones splay hardest
     const m = new T.Mesh(shardGeo, shardMat);
-    m.scale.set(1.25, 1.45, 1.25);
-    // Fanned outward and tilted, so it reads as a crown of spikes rather than
-    // a ring of pins — the reference is radiating, not vertical.
-    m.userData.a = (i / n) * Math.PI * 2;
-    m.userData.tilt = 0.95 + (i % 3) * 0.16;
-    m.castShadow = false;
-    g.add(m);
+    m.scale.set(0.62 + h * 0.38, (1.05 + h * 0.95), 0.62 + h * 0.38);
+    m.position.set(Math.cos(a) * 0.80, CROWN_H / 2, Math.sin(a) * 0.80);
+    // rotateY puts local +X on the outward radial, rotateZ then tips the
+    // cone's own axis along it. Setting this once at build and only bobbing
+    // y per frame keeps the trig out of the step loop.
+    m.rotateY(-a);
+    m.rotateZ(-tilt);
+    m.translateY(len * 0.5);
+    m.userData.a = a;
+    m.userData.baseY = m.position.y;
+    crownState.parts.push(m);
     crownState.shards.push(m);
+    g.add(m);
   }
+
+  // ---- ice teeth under the rim, irregular and not on every station
+  for (let i = 0; i < n; i++) {
+    const t = CROWN_TEETH[i % CROWN_TEETH.length];
+    if (t < 0.55) continue;
+    const a = ((i + 0.5) / n) * Math.PI * 2;
+    const m = add(new T.Mesh(crownToothGeo, crownBandMat));
+    m.scale.set(1, t * 1.4, 1);
+    m.position.set(Math.cos(a) * 0.86, -CROWN_H / 2 - t * 0.126, Math.sin(a) * 0.86);
+    m.rotation.x = Math.PI;
+  }
+
+  // ---- gem clusters set into the wall, three more with every rank
+  for (let i = 0; i < lv * 3; i++) {
+    const a = (i / (lv * 3)) * Math.PI * 2;
+    const big = i % 3 === 0;
+    const m = add(new T.Mesh(crownGemGeo, crownGemMat));
+    m.scale.setScalar(big ? 1.15 : 0.7);
+    m.position.set(Math.cos(a) * 0.845, big ? 0.01 : -0.05, Math.sin(a) * 0.845);
+    m.rotation.set(0.4, -a, 0.3);
+  }
+
+  // ---- the crest: a centre spire carrying the crown's heart, as in the art.
+  // It has to out-reach the tallest blade in the fan (~1.53 at full height)
+  // or the heart sits buried inside the fan instead of crowning it.
+  const spireScale = 1.62 + lv * 0.13;
+  const spireLen = 0.72 * spireScale;
+  const spire = add(new T.Mesh(shardGeo, shardMat));
+  // Thick enough to actually be seen between the blades. At 0.6 it vanished
+  // and the heart read as an unrelated crystal hanging in the air.
+  spire.scale.set(1.05, spireScale, 1.05);
+  spire.position.y = CROWN_H / 2 + spireLen * 0.5;
+  const crest = add(new T.Mesh(crownCrestGeo, crownCrestMat));
+  crest.scale.setScalar(0.78 + lv * 0.16);
+  crest.position.y = CROWN_H / 2 + spireLen + 0.12;
+  crownState.crest = crest;
+
+  g.scale.setScalar(CROWN_FIT);
 }
 
 function crownUpgrade() {
@@ -7059,13 +7157,16 @@ function stepCrown(dt) {
   const g = crownState.group;
   if (g && crownState.lv) {
     // The crown rides above the head and turns slowly.
-    g.position.set(hero.pos.x, hero.pos.y + 2.35, hero.pos.z);
+    g.position.set(hero.pos.x, hero.pos.y + CROWN_Y, hero.pos.z);
     g.rotation.y += dt * 0.8;
+    // Placement and orientation are baked in at build time; only the bob
+    // moves, so the fan keeps its shape and this stays cheap at twelve blades.
     for (const m of crownState.shards) {
-      const a = m.userData.a;
-      const bob = Math.sin(S.t * 2.1 + a * 2) * 0.06;
-      m.position.set(Math.cos(a) * 0.78, bob + 0.1, Math.sin(a) * 0.78);
-      m.rotation.set(m.userData.tilt, -a, 0);
+      m.position.y = m.userData.baseY + Math.sin(S.t * 2.1 + m.userData.a * 2) * 0.05;
+    }
+    if (crownState.crest) {
+      crownState.crest.rotation.y -= dt * 1.7;
+      crownState.crest.rotation.x = Math.sin(S.t * 1.3) * 0.25;
     }
   }
 
@@ -7085,7 +7186,7 @@ function stepCrown(dt) {
       for (const mk of marks) {
         const m = new T.Mesh(shardGeo, shardMat);
         m.scale.set(1.7, 2.9, 1.7);
-        m.position.set(hero.pos.x, hero.pos.y + 2.35, hero.pos.z);
+        m.position.set(hero.pos.x, hero.pos.y + CROWN_Y, hero.pos.z);
         scene.add(m);
         crownState.spikes.push({ g: m, mark: mk, dmg: L.dmg, life: 3.0 });
       }
