@@ -434,6 +434,65 @@ test("crown: a rank-up replaces the circlet rather than stacking another", async
   eq(r.tracked, 0, "the parts list still holds " + r.tracked + " meshes after teardown");
 });
 
+test("aura: the plume licks like flame, it does not scroll like a belt", async (pg) => {
+  // Reported as "the aura just moves bottom to top". It did: the whole effect
+  // was one texture scrolled at a constant rate, and the sheet carried nine
+  // evenly spaced horizontal bands — a barcode on a conveyor. All three quads
+  // were also scaled from a single shared sine, so they breathed in lockstep.
+  //
+  // Fire is the opposite of both: the silhouette itself changes, and separate
+  // tongues move independently. Neither is visible in a screenshot of one
+  // frame, so this measures the geometry over time instead.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    const o = P.rocks.find(x => x.mesh);
+    o.gone = false; o.held = true; o.grabT = 0;
+    P.S.held = [o];
+    P.hero.pos.set(0, 0, 0);
+
+    let acrossBlades = 0, swayAcross = 0;
+    const y0 = [], z0 = [];
+    for (let i = 0; i < 180; i++) {
+      o.pos.set(0, 2.5, -5);
+      P.step(1 / 60);
+      const A = P.auras.find(a => a.g.visible);
+      if (!A) continue;
+      const ys = A.blades.map(b => b.scale.y);
+      const zs = A.blades.map(b => b.rotation.z);
+      const mean = ys.reduce((a, b) => a + b, 0) / ys.length;
+      // Scale-free: the prop's radius sets the absolute size.
+      acrossBlades = Math.max(acrossBlades, (Math.max(...ys) - Math.min(...ys)) / mean);
+      swayAcross = Math.max(swayAcross, Math.max(...zs) - Math.min(...zs));
+      y0.push(ys[0]); z0.push(zs[0]);
+    }
+    const my = y0.reduce((a, b) => a + b, 0) / y0.length;
+    return {
+      frames: y0.length,
+      acrossBlades,
+      swayAcross,
+      overTime: (Math.max(...y0) - Math.min(...y0)) / my,
+      leansLeft: z0.some(z => z < -0.02),
+      leansRight: z0.some(z => z > 0.02),
+    };
+  });
+
+  ok(r.frames > 100, "the plume was never visible; the case measured nothing");
+  ok(r.acrossBlades > 0.08,
+     "the three quads are the same height at every instant (spread " +
+     r.acrossBlades.toFixed(3) + "), so they breathe as one object rather " +
+     "than reading as separate tongues");
+  ok(r.swayAcross > 0.06,
+     "the quads never lean differently from each other (spread " +
+     r.swayAcross.toFixed(3) + " rad)");
+  ok(r.overTime > 0.12,
+     "a quad's height barely changes over three seconds (range " +
+     r.overTime.toFixed(3) + "): the silhouette is fixed and only the texture " +
+     "moves, which is the conveyor belt this replaced");
+  ok(r.leansLeft && r.leansRight,
+     "the flame never leans both ways, so it is not licking");
+});
+
 test("ring: each rank builds one more ring", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe, out = [];

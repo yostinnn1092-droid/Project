@@ -9535,26 +9535,42 @@ function plumeSheet(w, h, seed) {
     const v = j / h;
     const av = v * Math.PI * 2;
     for (let i = 0; i < w; i++) {
-      const u = i / w, au = u * Math.PI * 2;
+      const u = i / w;
       const k = (j*w + i) * 4;
 
       // Wisps over a body. The first version was filaments ALONE at a high
       // frequency, which rendered as thin scratches rather than a column of
       // energy — the reference is dense. So: a soft core column supplies the
       // mass, and fewer, fatter filaments ride on top of it as detail.
-      const wander = 0.16*Math.sin(av*3 + ph[0]) + 0.09*Math.sin(av*7 + ph[1]);
+      // Wander grows toward the tip. Fire is anchored where it burns and licks
+      // at the top; a constant-amplitude wander is a wavy ribbon instead.
+      // Near zero at the base and widest at the tip. Applied evenly it thinned
+      // the hot core into a string, which is a wisp of smoke, not a flame.
+      const lick = 0.30 + (1 - v) * 2.3;
+      const wander = (0.14*Math.sin(av*3 + ph[0]) + 0.08*Math.sin(av*7.3 + ph[1])
+                    + 0.045*Math.sin(av*13.7 + ph[5])) * lick;
       const uu = u + wander;
       const fil = Math.sin(uu * Math.PI * 5 + ph[2]) * Math.sin(uu * Math.PI * 2.5 + ph[3]);
 
-      // waist: 1 on the centre line, 0 at the edges
-      const waist = Math.max(0, 1 - Math.abs(u - 0.5) * 2);
+      // waist: 1 on the centre line, 0 at the edges. Measured on the WANDERED
+      // coordinate, so the column itself snakes rather than staying a straight
+      // bar with texture painted over it.
+      const waist = Math.max(0, 1 - Math.abs(uu - 0.5) * 2);
       // the body — a fat soft column that narrows as it rises
-      const body = Math.pow(waist, 0.9 + (1 - v) * 1.6);
-      let a = body * 0.72 + Math.max(0, fil) * body * 0.85;
+      const body = Math.pow(waist, 0.9 + (1 - v) * 1.5);
+      let a = body * 0.80 + Math.max(0, fil) * body * 0.85;
 
-      a *= Math.pow(v, 0.40);                 // thins out toward the top
-      a *= 0.70 + 0.30*Math.sin(av*9 + au*2 + ph[4]);   // gentle churn
-      a = Math.max(0, a) * 1.15;
+      a *= Math.pow(v, 0.42);                 // thins out toward the top
+      // Tongues, not bands. This was `sin(av*9 + au*2)`: nine cycles down the
+      // sheet with almost no u term, which is a stack of evenly spaced
+      // horizontal stripes — and scrolling evenly spaced stripes upward is
+      // exactly the conveyor-belt read this is meant to avoid. Tying the
+      // vertical term to the wandered u slants them into licks instead.
+      a *= 0.78 + 0.22*Math.sin(av*3.1 + uu*Math.PI*3.4 + ph[4]);
+      // Sharpen so the flame has edges — but only just. Three additive quads
+      // overlap at the centre line, so pushing the multiplier much past this
+      // blows the core out to flat white and the colour ramp stops reading.
+      a = Math.pow(Math.max(0, a), 1.05) * 1.28;
 
       // magenta core -> violet -> blue
       let R,G,B;
@@ -9625,12 +9641,23 @@ const AURA_HELD    = new T.Color(0xffffff);
 const AURA_SEEK    = new T.Color(0xffc890);
 const AURA_HOSTILE = new T.Color(0xff7060);
 
+// Irregular flicker in [-1,1]. Three sines at non-harmonic ratios, so the sum
+// never repeats on a human timescale. A single sine is a pulse, and a pulse
+// reads as breathing rather than burning.
+function flick(x) {
+  return 0.53*Math.sin(x) + 0.31*Math.sin(x*2.37 + 1.13) + 0.16*Math.sin(x*4.61 + 2.71);
+}
+
 function updateAuras(dt) {
   // Scroll the two shared sheets rather than a clone per object: twenty-four
   // cloned textures would be twenty-four GPU uploads to animate what is really
   // one motion. Two different rates so alternating auras never march in step.
-  plumeTexA.offset.y = (plumeTexA.offset.y - 0.55*dt) % 1;
-  plumeTexB.offset.y = (plumeTexB.offset.y - 0.80*dt) % 1;
+  //
+  // Slower than it was. The scroll is now the slowest thing in the effect —
+  // it supplies drift, while the per-blade lick below supplies the motion the
+  // eye actually reads as fire. Run fast, it goes back to being a conveyor.
+  plumeTexA.offset.y = (plumeTexA.offset.y - 0.34*dt) % 1;
+  plumeTexB.offset.y = (plumeTexB.offset.y - 0.47*dt) % 1;
 
   let i = 0;
   const claim = (o, col, base, pulseHz) => {
@@ -9642,8 +9669,29 @@ function updateAuras(dt) {
     // the zoom-shrunk carry never becomes the thing filling the screen — the
     // failure the old spherical shell had to be tuned down twice to avoid.
     const r = o.r * o.mesh.scale.x;
-    const pulse = 1 + 0.09*Math.sin(S.t*pulseHz + o.slot*1.7);
-    for (const q of A.blades) q.scale.set(r*2.5, r*4.6*pulse, 1);
+    const t = S.t, seed = o.slot * 1.7;
+    // `pulseHz` now sets how agitated the flame is rather than a beat rate, so
+    // a hostile prop still burns faster than a held one.
+    const rate = pulseHz * 0.55;
+
+    // Every blade on its own phase. Scaling all three together was the other
+    // half of the conveyor read: three quads growing and shrinking in lockstep
+    // is one object breathing, not a fire. Independent phases make them read
+    // as separate tongues.
+    for (let k = 0; k < 3; k++) {
+      const q = A.blades[k];
+      const ph = seed + k * 2.39;
+      // Tongue length, irregular, and guttering low now and then.
+      const lick = 0.86 + 0.38 * (0.5 + 0.5*flick(t*rate + ph));
+      // A taller tongue is a thinner one. Centred on 1 rather than below it —
+      // at 1.12 the whole column came out a quarter narrower than before and
+      // read as a wisp of smoke instead of a flame.
+      const wide = 1.34 - 0.32*lick;
+      q.scale.set(r*2.5*wide, r*4.6*lick, 1);
+      // The geometry's pivot is at its foot, so this leans the TIP and leaves
+      // the base sitting on the prop — which is how a flame moves.
+      q.rotation.z = 0.19*flick(t*rate*0.80 + ph*1.31);
+    }
 
     // Seated below the prop's centre so the column rises THROUGH the object
     // rather than balancing on top of it.
@@ -9652,12 +9700,13 @@ function updateAuras(dt) {
     A.mat.color.copy(col);
     // A fresh grab flares, then settles.
     A.mat.opacity = base + 0.34*Math.max(0, o.grabT||0)
-                  + 0.07*Math.sin(S.t*pulseHz*1.6 + o.slot);
+                  + 0.09*flick(t*rate*1.7 + seed);
 
     // The hot core sits back at the prop itself — the bright spot the column
-    // is rising out of.
+    // is rising out of. It flickers faster than the tongues, the way the base
+    // of a real flame is the busiest part of it.
     A.core.position.y = r*0.85;
-    A.core.scale.setScalar(r * (0.82 + 0.10*Math.sin(S.t*pulseHz*2.1 + o.slot)));
+    A.core.scale.setScalar(r * (0.80 + 0.13*flick(t*rate*2.4 + seed)));
     A.coreMat.color.copy(col);
     A.coreMat.opacity = base*0.7 + 0.30*Math.max(0, o.grabT||0);
   };
