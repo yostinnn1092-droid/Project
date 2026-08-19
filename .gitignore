@@ -41,3 +41,8 @@ graphify-out/
 ruvector.db
 *.rvf
 *.rvf.lock
+
+# Android build output. Holds the generated APK and, more importantly, the
+# signing keystore — a key belongs on the machine that signs, never in the
+# repo. Everything here is reproduced by android/build.sh.
+android/build/

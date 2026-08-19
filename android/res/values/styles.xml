@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- No title bar, and a window background matching the game's own void
+         colour so the launch frame before the WebView paints is dark rather
+         than a white flash. -->
+    <style name="GameTheme" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@color/void_bg</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

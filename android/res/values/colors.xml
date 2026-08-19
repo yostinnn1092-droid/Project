@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The game's own background colour, so the window under the WebView
+         matches the page and no seam shows at the edges. -->
+    <color name="void_bg">#FF0A0912</color>
+</resources>
