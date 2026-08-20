@@ -1613,6 +1613,173 @@ function stepCrown(dt) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════ pyromancer
+// The pyromancer's whole kit. Where the telekinetic's ammunition is the arena
+// — walk somewhere new when the ground runs dry — the pyromancer's is a stack
+// that refills on its own, so their pressure is a clock rather than a place.
+// That is why the arena spawns them nothing to pick up: two characters that
+// both solve "what do I throw" the same way are one character with two skins.
+//
+// The held count comes from the character's PERMANENT level, so levelling is
+// felt immediately and every run after.
+const PYRO = {
+  regen:    2.3,      // seconds to grow one back
+  speed:    32,
+  dmg:      170,
+  blastR:   4.4,
+  blastDmg: 95,
+  hitR:     1.15,
+  life:     3.4,
+  orbitR:   0.62,     // how far behind the shoulders they ride
+  hot:      0xff8a2e,
+};
+
+const pyroState = { held: 0, t: 0, group: null, orbs: [], shots: [] };
+
+// One geometry and one material for every ball, held and in flight alike.
+const pyroGeo = new T.IcosahedronGeometry(0.26, 1);
+const pyroMat = new T.MeshBasicMaterial({ color: PYRO.hot, transparent: true,
+  opacity: 0.95, blending: T.AdditiveBlending, depthWrite: false });
+const pyroCoreMat = new T.MeshBasicMaterial({ color: 0xffe6b0, transparent: true,
+  opacity: 0.9, blending: T.AdditiveBlending, depthWrite: false });
+
+// Rebuilt on a level change and on restart. Every orb the last cap created is
+// removed first — growing the cap without clearing would stack two sets of
+// balls on the same shoulders, the same way the crown once stacked circlets.
+function buildPyroStack() {
+  if (!pyroState.group) { pyroState.group = new T.Group(); scene.add(pyroState.group); }
+  const g = pyroState.group;
+  for (const o of pyroState.orbs) g.remove(o);
+  pyroState.orbs.length = 0;
+  if (!isPyro()) { g.visible = false; return; }
+  g.visible = true;
+  const cap = pyroCap(charLv());
+  for (let i = 0; i < cap; i++) {
+    const m = new T.Mesh(pyroGeo, pyroMat);
+    m.userData.slot = i;
+    g.add(m);
+    pyroState.orbs.push(m);
+  }
+  pyroState.held = Math.min(pyroState.held, cap);
+}
+
+function clearPyroShots() {
+  for (const s of pyroState.shots) scene.remove(s.g);
+  pyroState.shots.length = 0;
+}
+
+// Launched at whatever Single would have aimed at, so both characters read the
+// crosshair the same way and the lock-on the player already learned still
+// applies.
+function pyroFire() {
+  if (pyroState.held <= 0) { toast("NO FIRE LEFT — it grows back"); SFX.dry(); return; }
+  pyroState.held--;
+
+  const m = new T.Mesh(pyroGeo, pyroMat);
+  m.scale.setScalar(1.25);
+  const core = new T.Mesh(pyroGeo, pyroCoreMat);
+  core.scale.setScalar(0.55);
+  const g = new T.Group();
+  g.add(m); g.add(core);
+  g.position.set(hero.pos.x, hero.pos.y + 1.5, hero.pos.z);
+  scene.add(g);
+
+  aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
+  const seek = S.lock && !S.lock.dead ? S.lock : nearestInCone();
+  pyroState.shots.push({
+    g, seek,
+    vel: aimDir.clone().multiplyScalar(PYRO.speed),
+    life: PYRO.life,
+  });
+  SFX.throw ? SFX.throw(1.2) : null;
+  S.shake = Math.min(0.4, S.shake + 0.09);
+  updateForceLabel();
+}
+
+function stepPyro(dt) {
+  const g = pyroState.group;
+  if (g && isPyro()) {
+    g.visible = true;
+    // Grow one back on a timer. This is the pyromancer's only resource, so it
+    // is deliberately visible: the orb pops in rather than fading up.
+    const cap = pyroCap(charLv());
+    if (pyroState.held < cap && S.phase === "play") {
+      pyroState.t -= dt;
+      if (pyroState.t <= 0) {
+        pyroState.t = PYRO.regen;
+        pyroState.held++;
+        sparks(tmp.set(hero.pos.x, hero.pos.y + 1.6, hero.pos.z), PYRO.hot, 5, 6);
+        updateForceLabel();
+      }
+    } else {
+      pyroState.t = PYRO.regen;
+    }
+
+    // Ride behind the shoulders in a shallow fan, so they read as carried
+    // rather than orbiting — an orbit would be a second ring of fire.
+    const back = tmp.set(-Math.sin(cam.yaw), 0, -Math.cos(cam.yaw)).normalize();
+    const side = tmp2.set(back.z, 0, -back.x);
+    for (let i = 0; i < pyroState.orbs.length; i++) {
+      const orb = pyroState.orbs[i];
+      orb.visible = i < pyroState.held;
+      if (!orb.visible) continue;
+      const n = Math.max(1, pyroState.held);
+      const spread = (i - (n - 1) / 2) * 0.46;
+      const bob = Math.sin(S.t * 2.4 + i * 1.7) * 0.07;
+      orb.position.set(
+        hero.pos.x + back.x * PYRO.orbitR + side.x * spread,
+        hero.pos.y + 1.62 + bob,
+        hero.pos.z + back.z * PYRO.orbitR + side.z * spread);
+      // Each one breathes on its own phase, the same reason the ring's
+      // curtains do: a stack pulsing in unison reads as one object.
+      orb.scale.setScalar(0.9 + 0.16 * flick(S.t * 3.2 + i * 2.1));
+    }
+  } else if (g) {
+    g.visible = false;
+  }
+
+  // ---- shots in flight
+  for (let i = pyroState.shots.length - 1; i >= 0; i--) {
+    const s = pyroState.shots[i];
+    s.life -= dt;
+    // Light homing, matching the guided stone the telekinetic already throws.
+    if (s.seek && !s.seek.dead) {
+      tmp.set(s.seek.pos.x - s.g.position.x,
+              s.seek.pos.y + 1 - s.g.position.y,
+              s.seek.pos.z - s.g.position.z);
+      const d = tmp.length() || 1;
+      s.vel.addScaledVector(tmp.divideScalar(d), 62 * dt);
+      s.vel.setLength(PYRO.speed);
+    }
+    s.g.position.addScaledVector(s.vel, dt);
+    s.g.children[0].rotation.y += dt * 7;
+    s.g.children[0].rotation.x += dt * 5;
+
+    let done = s.life <= 0 || s.g.position.y < 0.2;
+    if (!done) {
+      for (const w of walkers) {
+        if (w.dead) continue;
+        const dx = w.pos.x - s.g.position.x, dz = w.pos.z - s.g.position.z;
+        const dy = (w.pos.y + 1) - s.g.position.y;
+        if (dx*dx + dy*dy + dz*dz < (PYRO.hitR + w.r) * (PYRO.hitR + w.r)) {
+          damageWalker(w, PYRO.dmg * MOD.allDmg, tmp3.copy(s.vel).normalize(), 6, "fire");
+          done = true;
+          break;
+        }
+      }
+    }
+    if (done) {
+      // Every fireball ends in a blast, so a miss into a crowd is still worth
+      // the shot — otherwise the whole kit is one unmissable projectile.
+      queueBlast(tmp3.copy(s.g.position), { r: PYRO.blastR * MOD.blastR,
+                                            dmg: PYRO.blastDmg * MOD.blastDmg }, null);
+      burst(s.g.position, PYRO.hot);
+      scene.remove(s.g);
+      pyroState.shots.splice(i, 1);
+    }
+  }
+}
+
 // Dash ghosts: a handful of reusable translucent bodies, faded along the
 // dash path. Cloning the whole rig per frame would be far more expensive.
 const ghostMat = new T.MeshBasicMaterial({ color: 0xe94fbf, transparent: true,
@@ -3095,9 +3262,11 @@ const MOD = {
 const UPGRADES = [
   { id:"kinetic",  name:"Kinetic Mastery", tag:"Single",
     desc:"Single-target shots hit 45% harder.",
+    more(){ return CHAR.power === "kinesis"; },
     take(){ MOD.singleDmg *= 1.45; } },
   { id:"swarm",    name:"Swarm",           tag:"Burst",
     desc:"Carry 3 more objects, and burst throws hit 20% harder.",
+    more(){ return CHAR.power === "kinesis"; },
     take(){ MOD.maxHeld += 3; MOD.burstDmg *= 1.2; } },
   { id:"berserk",  name:"Berserker",       tag:"Risk",
     desc:"Below 2 health, everything you throw deals double damage.",
@@ -3113,9 +3282,11 @@ const UPGRADES = [
     take(){ MOD.lightning = MOD.lightning ? Math.max(2, MOD.lightning-1) : 4; } },
   { id:"reach",    name:"Long Reach",      tag:"Utility",
     desc:"Telekinesis reaches 5 metres further.",
+    more(){ return CHAR.power === "kinesis"; },
     take(){ MOD.grabR += 5; } },
   { id:"flow",     name:"Flow State",      tag:"Utility",
     desc:"Kinetic strain clears 55% faster.",
+    more(){ return CHAR.power === "kinesis"; },
     take(){ MOD.focusRegen *= 1.55; } },
   { id:"hardened", name:"Hardened",        tag:"Defence",
     desc:"+2 maximum health, and refill now.",
@@ -3235,6 +3406,59 @@ function offerDraft() {
   ["hud","touch","cross"].forEach(i => el(i).classList.add("hide"));
 }
 
+// ─────────────────────────────────────────────────────────── characters
+// A character is not a loadout, it is a different arena. The telekinetic's
+// magazine is whatever is lying around, so the ground is covered in props;
+// the pyromancer carries their own ammunition, so there is nothing out there
+// to pick up at all. Choosing one changes what the level IS, not just which
+// button does damage — which is the only reason to have two.
+//
+// Their levels are PERMANENT and per-character: a boss kill raises the one
+// you are playing, and it survives the run that earned it. That is the only
+// progression in the game that outlives a death, so it is deliberately slow
+// and tied to the hardest thing in a wave rather than to score.
+const CHAR_MAX_LV = 8;
+function pyroCap(lv) { return Math.min(8, 1 + lv); }
+
+const CHARS = {
+  telekinetic: {
+    name: "TELEKINETIC",
+    desc: "The arena is your magazine.",
+    power: "kinesis",
+    props: 1,                                   // full prop density
+    perk(lv) { return "Carry " + (CFG.maxHeld + lv - 1) + " objects"; },
+  },
+  pyromancer: {
+    name: "PYROMANCER",
+    desc: "Nothing to lift. Fire rides your back.",
+    power: "pyro",
+    props: 0,                                   // an empty field by design
+    perk(lv) { return pyroCap(lv) + " fireballs held"; },
+  },
+};
+for (const k in CHARS) CHARS[k].key = k;
+let CHAR = CHARS.telekinetic;
+
+// Read through a clamp rather than trusted raw: PROFILE comes off localStorage,
+// which the player can edit and an older build may have written without this
+// field at all.
+function charLevel(key) {
+  const raw = (PROFILE.charLv && PROFILE.charLv[key]) || 1;
+  return Math.max(1, Math.min(CHAR_MAX_LV, raw | 0));
+}
+function charLv() { return charLevel(CHAR.key); }
+function isPyro() { return CHAR.power === "pyro"; }
+
+function setCharacter(key) {
+  CHAR = CHARS[key] || CHARS.telekinetic;
+  try { localStorage.setItem("kinesis.char", CHAR.key); } catch (e) {}
+  // The strain bar and the carry counter belong to telekinesis; the pyromancer
+  // has neither, and leaving them on screen reads as a broken HUD.
+  document.body.classList.toggle("pyroChar", isPyro());
+  const n = el("charName");
+  if (n) n.textContent = CHAR.name;
+}
+
 // ─────────────────────────────────────────────────────────── persistence
 // A run is disposable; the record of it is not. Everything here is
 // best-effort: private-mode browsers and file:// origins can both refuse
@@ -3243,6 +3467,7 @@ const SAVE_KEY = "kinesis.v1";
 const PROFILE = {
   best: 0, bestWave: 1, runs: 0, kills: 0,
   bestRank: "D", seen: {},        // modifier ids the player has met
+  charLv: {},                     // permanent per-character level, by CHARS key
 };
 
 function loadProfile() {
@@ -3254,11 +3479,32 @@ function loadProfile() {
       for (const k in PROFILE) if (k in p) PROFILE[k] = p[k];
     }
   } catch (e) { /* storage unavailable or corrupt — start clean */ }
+  // A save written before a character existed carries no level for it, and the
+  // copy above replaces the whole charLv object rather than merging into it —
+  // so seed every key AFTER the load, not in the defaults.
+  if (!PROFILE.charLv || typeof PROFILE.charLv !== "object") PROFILE.charLv = {};
+  for (const k in CHARS) {
+    if (typeof PROFILE.charLv[k] !== "number") PROFILE.charLv[k] = 1;
+  }
 }
 
 function saveProfile() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(PROFILE)); }
   catch (e) { /* nothing to do; the run still counts in this session */ }
+}
+
+// A boss kill raises the character that made it, permanently. Saved on the
+// spot rather than at the end of the run: the whole point is that dying after
+// beating a boss still leaves you stronger than you started.
+function levelCharacter() {
+  const lv = charLevel(CHAR.key);
+  if (lv >= CHAR_MAX_LV) return;
+  PROFILE.charLv[CHAR.key] = lv + 1;
+  saveProfile();
+  banner(CHAR.name + " · LEVEL " + (lv + 1));
+  toast(CHAR.perk(lv + 1) + " — kept between runs", 3200);
+  if (isPyro()) buildPyroStack();
+  SFX.rankUp ? SFX.rankUp(3) : SFX.overload();
 }
 
 // Returns what actually improved, so the end screen can call it out.
@@ -3804,6 +4050,9 @@ function killWalker(w) {
   // point, and killing one next to a barrel is better.
   if (w.E.onDeath === "blast") queueBlast(w.pos, { r:6.5, dmg:150 }, null);
   S.kills++;
+  // A big body is the only thing that raises a character, and the level it
+  // grants is kept — this is the one reward in the game that outlives the run.
+  if (BIG_TYPES.includes(w.type)) levelCharacter();
   const st = addStyle(w.lastHit || "impact");
   if (st.fresh && S.combo >= 1) banner(st.label);
   S.score += Math.round((w.E.score || 100) * Math.max(1, S.combo) * rankFor(S.style).mult);
@@ -4420,6 +4669,7 @@ const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2, distWant: 11.2 };
 function clearAll() {
   clearArrows();
   clearSpikes();
+  clearPyroShots();
   for (const w of walkers) {
     releaseDetached(w);
     if (w.acolytes) for (const a of w.acolytes) {
@@ -4471,7 +4721,11 @@ function buildWave(n) {
              * WMOD.propsAll;
     // Capped: past wave ~12 more props stop being more options and start
     // being a quadratic collision bill. The prop pass is O(n^2).
-    const dens = Math.min(3.2, 1.4 + n*0.15) * DIFF.stock;
+    const dens = Math.min(3.2, 1.4 + n*0.15) * DIFF.stock * CHAR.props;
+    // The floor of 1 is what keeps a wave from opening with nothing to throw —
+    // but the pyromancer is MEANT to have nothing, so their empty field has to
+    // skip the loop rather than be floored back up to one prop per type.
+    if (CHAR.props <= 0) continue;
     const n2 = Math.max(1, Math.round(def.count * dens * pm));
     for (let i = 0; i < n2; i++) {
       const a = rand(0,Math.PI*2);
@@ -4682,7 +4936,16 @@ function toast(msg, ms = 1900) {
 function updateForceLabel() {
   // The button IS the state readout: FORCE while empty, SHOOT/THROW while
   // loaded, with the remaining count on it. Reverts on its own at zero.
-  const n = S.held.length, btn = el("force");
+  const btn = el("force");
+  if (isPyro()) {
+    // The stack IS the readout: how many are left, and whether firing is even
+    // possible right now.
+    const f = pyroState.held;
+    btn.innerHTML = "Fire" + (f ? '<b class="cnt">' + f + '</b>' : "");
+    btn.classList.toggle("loaded", f > 0);
+    return;
+  }
+  const n = S.held.length;
   if (!n) {
     btn.innerHTML = "Force";
     btn.classList.remove("loaded");
@@ -4911,6 +5174,9 @@ canvas.addEventListener("wheel", e => {
 // ─────────────────────────────────────────────────────────── power
 function pressForce() {
   if (S.phase !== "play") return;
+  // The pyromancer has nothing to gather and no modes to switch between, so
+  // the same button is simply the trigger.
+  if (isPyro()) { pyroFire(); return; }
   if (S.held.length) {
     if (S.mode === "single") shootOne();
     else burstAll();
@@ -4948,7 +5214,11 @@ function grabReach() {
 }
 
 function carryCap() {
-  return Math.max(2, CFG.maxHeld + MOD.maxHeld - (overloaded() ? 3 : 0));
+  // The telekinetic's permanent level is one more object per level, on top of
+  // whatever the run's draft has added. It is the mirror of the pyromancer's
+  // fireball cap: the same reward, expressed in each character's own currency.
+  const perm = CHAR.power === "kinesis" ? charLv() - 1 : 0;
+  return Math.max(2, CFG.maxHeld + perm + MOD.maxHeld - (overloaded() ? 3 : 0));
 }
 
 function gather() {
@@ -5110,6 +5380,7 @@ function step(dt) {
   S.t += dt;
   stepRing(dt);
   stepCrown(dt);
+  stepPyro(dt);
   stepArrows(dt);
 
   // Strain bleeds off on its own, and faster once you have stopped acting
@@ -6230,8 +6501,19 @@ function step(dt) {
       el("ammoWrap").classList.toggle("dry", n === 0);
       el("ammoWrap").classList.toggle("low", n > 0 && n <= 2);
     }
+    // The pyromancer's ammunition is the stack on their back rather than the
+    // ground, so it gets a readout of its own. The touch FORCE button already
+    // carries the count, but that button is hidden on desktop — without this
+    // chip the whole resource would be invisible to a keyboard player.
+    const fc = el("fireCnt");
+    if (fc && isPyro()) {
+      fc.textContent = pyroState.held;
+      el("fireWrap").classList.toggle("dry", pyroState.held === 0);
+    }
     // Only nags when it is actionable: empty-handed with nothing in reach.
-    if (n === 0 && !S.held.length && S.phase === "play") {
+    // Never for the pyromancer — an empty field is their design, not a problem
+    // they can walk out of.
+    if (!isPyro() && n === 0 && !S.held.length && S.phase === "play") {
       if (!S.dryWarned) { S.dryWarned = true; toast("NO OBJECTS IN RANGE — move", 2000); }
     } else S.dryWarned = false;
   }
@@ -6493,6 +6775,12 @@ function restart() {
   crownState.lv = 0;
   buildCrown();
   clearSpikes();
+  // The stack is a per-run resource even though the CAP that sizes it is
+  // permanent, so a new run opens empty and has to earn its first shot.
+  pyroState.held = 0;
+  pyroState.t = PYRO.regen;
+  clearPyroShots();
+  buildPyroStack();
   S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0;
   S.style = 0; S.styleT = 0; S.rank = "D"; S.recent.length = 0; S.endless = false;
   buildArena(ARENAS[0]);
@@ -6655,11 +6943,19 @@ function start() {
   updateForceLabel();
   S.modeCd = 0;
   el("modeBtn").classList.remove("cool");
+  // The opening run reaches here without going through restart(), so the
+  // stack has to be raised on this path too — otherwise the pyromancer's very
+  // first run has a working trigger and no fireballs to show for it.
+  pyroState.held = 0;
+  pyroState.t = PYRO.regen;
+  clearPyroShots();
+  buildPyroStack();
   buildWave(S.wave);
   S.phase = "play";
   last = performance.now();
   resize();
-  toast("Tap FORCE to gather · then SHOOT one at a time", 3400);
+  toast(isPyro() ? "Tap FIRE to throw · the stack grows back on its own"
+                 : "Tap FORCE to gather · then SHOOT one at a time", 3400);
 }
 
 // Browsers only allow audio to start from a gesture, so the first tap of
@@ -6672,6 +6968,44 @@ el("startBtn").addEventListener("click", () => { audioInit(); start(); });
   let z = NaN;
   try { z = parseFloat(localStorage.getItem("kinesis.zoom")); } catch (e) {}
   if (isFinite(z)) { cam.distWant = clamp(z, CFG.camMin, CFG.camMax); cam.dist = cam.distWant; }
+})();
+
+// Before the picker, not after: the cards show each character's permanent
+// level, and the profile that holds those levels is what loadProfile reads
+// off storage. Painting first would show everyone level 1 on a fresh page.
+loadProfile();
+
+(function initCharacter() {
+  let saved = "telekinetic";
+  try { saved = localStorage.getItem("kinesis.char") || "telekinetic"; } catch (e) {}
+  if (!CHARS[saved]) saved = "telekinetic";
+  setCharacter(saved);
+  const box = el("charPick");
+  if (!box) return;
+
+  // Each card carries the permanent level as well as the name, because the
+  // level is the reason to pick one character over the other on a given day —
+  // and it is the only number on this screen that the last run could change.
+  const paint = () => {
+    [...box.children].forEach(btn => {
+      const key = btn.dataset.char, lv = charLevel(key);
+      btn.classList.toggle("on", key === CHAR.key);
+      btn.querySelector(".charLv").innerHTML =
+        (lv >= CHAR_MAX_LV ? "MAX" : "LV " + lv) + " · " +
+        "<s>" + CHARS[key].perk(lv) + "</s>";
+    });
+  };
+
+  for (const key in CHARS) {
+    const c = CHARS[key];
+    const btn = document.createElement("button");
+    btn.className = "diffBtn";
+    btn.dataset.char = key;
+    btn.innerHTML = '<b>' + c.name + '</b><i>' + c.desc + '</i><span class="charLv"></span>';
+    btn.onclick = () => { setCharacter(key); paint(); };
+    box.appendChild(btn);
+  }
+  paint();
 })();
 
 (function initDifficulty() {
@@ -6700,7 +7034,6 @@ el("startBtn").addEventListener("click", () => { audioInit(); start(); });
 buildArena(ARENAS[0]);
 el("arena").textContent = ARENAS[0].name;
 
-loadProfile();
 if (PROFILE.runs > 0) {
   const m = el("menuBest");
   if (m) {

@@ -493,6 +493,175 @@ test("aura: the plume licks like flame, it does not scroll like a belt", async (
      "the flame never leans both ways, so it is not licking");
 });
 
+test("characters: the pyromancer's arena has nothing to pick up", async (pg) => {
+  // The two characters are meant to be different LEVELS, not different
+  // buttons. The telekinetic's magazine is the ground, so it is covered; the
+  // pyromancer carries their own, so the ground is bare. If both fields look
+  // the same, the second character is the first one wearing a hat.
+  //
+  // The trap here is the `Math.max(1, ...)` floor on the per-type count: it
+  // exists so a wave never opens with nothing to throw, and it will happily
+  // floor a density of zero back up to one prop of every type.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const count = (who) => {
+      P.setCharacter(who);
+      P.buildWave(5);
+      return P.rocks.filter(o => !o.gone).length;
+    };
+    const tele = count("telekinetic");
+    const pyro = count("pyromancer");
+    P.setCharacter("telekinetic");
+    return { tele, pyro, back: count("telekinetic") };
+  });
+
+  ok(r.tele > 5, "the telekinetic's arena should be littered; got " + r.tele + " props");
+  eq(r.pyro, 0,
+     "the pyromancer's arena still spawned " + r.pyro + " throwable props — the " +
+     "per-type floor is flooring a zero density back up to one of each");
+  ok(r.back > 5, "switching back to the telekinetic left the arena bare (" + r.back + ")");
+});
+
+test("characters: a boss kill levels the one you are playing, permanently", async (pg) => {
+  // The only reward in the game that outlives a run. It has to be saved the
+  // moment it is earned rather than at the end of the run: dying after a boss
+  // must still leave you stronger, or the whole progression is a lie.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("pyromancer");
+    P.PROFILE.charLv.pyromancer = 1;
+    P.PROFILE.charLv.telekinetic = 1;
+
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.spawnMaw ? P.spawnMaw(0, -12) : P.spawnWalker("maw", 0, -12);
+    const boss = P.walkers.filter(w => !w.dead).pop();
+    const capBefore = P.pyroCap(P.charLevel("pyromancer"));
+    // The plates absorb damage while they stand, so a boss with its armour on
+    // simply will not die here — strip them first or this measures the shield.
+    boss.platesLeft = 0;
+    if (boss.plates) boss.plates.length = 0;
+    boss.hp = 1;
+    P.damageWalker(boss, 99999, null, 0, "impact");
+    P.hero.hp = 99;
+    P.step(1 / 60);
+
+    const out = {
+      before: 1,
+      after: P.charLevel("pyromancer"),
+      other: P.charLevel("telekinetic"),
+      capBefore,
+      capAfter: P.pyroCap(P.charLevel("pyromancer")),
+      saved: false,
+    };
+    // Written through to storage, not just held in memory.
+    try {
+      const raw = JSON.parse(localStorage.getItem("kinesis.v1") || "{}");
+      out.saved = raw.charLv && raw.charLv.pyromancer === out.after;
+    } catch (e) { out.saved = "storage unavailable"; }
+
+    // A plain body must NOT level anything.
+    const lv = P.charLevel("pyromancer");
+    P.spawnWalker("walker", 0, -8);
+    const mook = P.walkers.filter(w => !w.dead).pop();
+    P.damageWalker(mook, 99999, null, 0, "impact");
+    P.hero.hp = 99;
+    P.step(1 / 60);
+    out.afterMook = P.charLevel("pyromancer");
+    out.mookBase = lv;
+    return out;
+  });
+
+  eq(r.after, 2, "killing a boss did not raise the character's level");
+  eq(r.other, 1, "levelling the pyromancer also moved the telekinetic");
+  ok(r.capAfter > r.capBefore,
+     "the level bought nothing: fireball cap stayed at " + r.capBefore);
+  eq(r.saved, true, "the new level was not written to storage, so it dies with the tab");
+  eq(r.afterMook, r.mookBase, "an ordinary walker levelled the character");
+});
+
+test("characters: the pyromancer's stack is capped by level and grows back", async (pg) => {
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("pyromancer");
+    P.PROFILE.charLv.pyromancer = 1;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.pyroState.held = 0; P.buildPyroStack();
+
+    // Regenerates up to the cap and stops there.
+    const cap1 = P.pyroCap(1);
+    for (let i = 0; i < 60 * 40; i++) { P.hero.hp = 99; P.step(1 / 60); }
+    const filled = P.pyroState.held;
+
+    // A level raises the ceiling.
+    P.PROFILE.charLv.pyromancer = 4;
+    P.buildPyroStack();
+    for (let i = 0; i < 60 * 40; i++) { P.hero.hp = 99; P.step(1 / 60); }
+    const filled4 = P.pyroState.held;
+
+    // Firing spends one and puts something in the air.
+    const before = P.pyroState.held;
+    P.pyroFire();
+    return { cap1, filled, cap4: P.pyroCap(4), filled4,
+             spent: before - P.pyroState.held, inFlight: P.pyroState.shots.length,
+             orbs: P.pyroState.orbs.length };
+  });
+
+  eq(r.filled, r.cap1, "at level 1 the stack settled at " + r.filled + ", not the cap " + r.cap1);
+  eq(r.filled4, r.cap4, "at level 4 the stack settled at " + r.filled4 + ", not the cap " + r.cap4);
+  ok(r.cap4 > r.cap1, "levelling did not raise the fireball cap");
+  eq(r.orbs, r.cap4, "the visible stack (" + r.orbs + ") does not match the cap " + r.cap4);
+  eq(r.spent, 1, "firing did not spend exactly one fireball");
+  eq(r.inFlight, 1, "firing put nothing in the air");
+});
+
+test("characters: telekinesis-only drafts are withheld from the pyromancer", async (pg) => {
+  // Offering "carry 3 more objects" to a character with no objects is a dead
+  // pick, and the draft only ever shows three — one wasted slot is a third of
+  // the choice gone.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const ids = ["kinetic", "swarm", "reach", "flow"];
+    const offered = (who) => {
+      P.setCharacter(who);
+      return ids.filter(id => {
+        const u = P.UPGRADES.find(x => x.id === id);
+        return u && (!u.more || u.more());
+      });
+    };
+    const pyro = offered("pyromancer");
+    const tele = offered("telekinetic");
+    P.setCharacter("telekinetic");
+    return { pyro, tele };
+  });
+
+  eq(r.pyro.length, 0,
+     "the pyromancer is still offered telekinesis-only picks: " + r.pyro.join(", "));
+  eq(r.tele.length, 4,
+     "the gate also withheld these from the telekinetic: expected all four, got " +
+     r.tele.join(", "));
+});
+
+test("characters: the telekinetic's level buys carry capacity", async (pg) => {
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("telekinetic");
+    P.PROFILE.charLv.telekinetic = 1;
+    const lv1 = P.carryCap();
+    P.PROFILE.charLv.telekinetic = 5;
+    const lv5 = P.carryCap();
+    // The pyromancer must not inherit it.
+    P.setCharacter("pyromancer");
+    P.PROFILE.charLv.pyromancer = 5;
+    const pyro = P.carryCap();
+    P.setCharacter("telekinetic");
+    P.PROFILE.charLv.telekinetic = 1;
+    return { lv1, lv5, pyro };
+  });
+
+  eq(r.lv5 - r.lv1, 4, "four levels should buy four more objects; got " + (r.lv5 - r.lv1));
+  ok(r.pyro <= r.lv1, "the pyromancer's level is leaking into carry capacity");
+});
+
 test("ring of fire: the wall licks, it does not only turn", async (pg) => {
   // Reported as "it moves in a circle, not like flame". It did: every curtain
   // scrolled its texture sideways at a fixed rate, and all six were stretched

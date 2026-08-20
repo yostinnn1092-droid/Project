@@ -11,6 +11,9 @@ window.__probe = {
   // systems under test
   step, buildWave, spawnWalker, spawnMaw, damageWalker, restart, hurtHero, spawnObject,
   ringUpgrade, buildRingOrbs, stepRing, walkerHeading, auras, updateAuras,
+  CHARS, PROFILE, PYRO, pyroState, setCharacter, charLevel, pyroCap,
+  pyroFire, buildPyroStack, levelCharacter, carryCap,
+  charNow() { return CHAR.key; },
   CROWN, crownState, crownUpgrade, buildCrown, stepCrown,
   judgeFrame, setQuality,
 

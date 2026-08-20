@@ -197,6 +197,30 @@
   .diffBtn:hover { border-color: rgba(232,228,240,.4); }
   .diffBtn.on { border-color: var(--force); background: rgba(233,79,191,.12); }
   .diffBtn.on b { color: var(--force); }
+  /* character picker: the same control, one step up the page and wider,
+     because each card carries a permanent level as well as a name */
+  #charPick { display: flex; gap: 7px; justify-content: center; margin: 12px 0 2px;
+              flex-wrap: wrap; }
+  #charPick .diffBtn { min-width: 168px; }
+  .charLv { display: block; font-family: var(--mono); font-size: 9px;
+            letter-spacing: .1em; color: var(--force); margin-top: 5px; }
+  .charLv s { text-decoration: none; color: var(--dim); }
+  .pickLabel { font-family: var(--mono); font-size: 8px; letter-spacing: .22em;
+               color: var(--dim); text-transform: uppercase; margin-top: 12px; }
+  /* Each character shows only the resource it actually has: kinetic strain
+     belongs to the telekinetic, the fireball stack to the pyromancer. A widget
+     pinned at a permanent zero reads as a broken HUD, not as an empty one.
+     Mode is telekinesis-only too — the pyromancer has one shot, not two. */
+  /* The brief is per character: half of it is telekinesis-only, and the
+     pyromancer needs their own resource explained instead. */
+  .brief .pyro { display: none; }
+  body.pyroChar .brief .kin { display: none; }
+  body.pyroChar .brief .pyro { display: block; }
+  #fireWrap { display: none; }
+  body.pyroChar #fireWrap { display: flex; }
+  body.pyroChar #focusWrap { display: none; }
+  body.pyroChar #modeBtn { display: none; }
+  #fireWrap.dry .val { color: var(--blood); text-shadow: 0 0 10px rgba(255,90,60,.8); }
   #diffTag { display: block; font-family: var(--mono); font-size: 8px;
              letter-spacing: .16em; color: var(--dim); margin-top: 2px; }
   #menuBest { display: none; margin-top: 10px; font-size: 11px; color: var(--force); opacity: .85; }
@@ -471,6 +495,8 @@
     <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
     <div class="chip" id="focusWrap"><span class="lbl">Strain</span>
       <div id="focusBar"><div id="focusFill"></div></div></div>
+    <div class="chip" id="fireWrap"><span class="lbl">Fire</span>
+      <span class="val" id="fireCnt">0</span></div>
   </div>
   <div id="hudR">
     <div class="chip"><span class="lbl">Threat</span>
@@ -522,17 +548,27 @@
     <p class="sub">Best played in landscape</p>
 
     <div class="brief">
-      <p><b>FORCE</b> gathers what is in reach; the button becomes <b>SHOOT</b> until the wheel
+      <p class="kin"><b>FORCE</b> gathers what is in reach; the button becomes <b>SHOOT</b> until the wheel
          is empty. <b>Single</b> guides one stone into the crosshair and executes the wounded.
          <b>Burst</b> throws the lot — three landing together detonate a kinetic wave.</p>
 
-      <p><b>Strain</b> builds as you use the power and recovers when you ease off. Burst costs
+      <p class="kin"><b>Strain</b> builds as you use the power and recovers when you ease off. Burst costs
          about twice what an aimed shot does. Max it and you <em>overload</em>: reach and carry
          cut until it clears. <b>Watch the bar.</b></p>
 
-      <p><b>Objects run out where you are standing.</b> Fire everything nearby and you will read
+      <p class="kin"><b>Objects run out where you are standing.</b> Fire everything nearby and you will read
          NO OBJECTS IN RANGE. They are still out there — move. Boulders and girders beat armour;
          barrels chain; chem burns.</p>
+
+      <p class="pyro"><b>FIRE</b> throws one of the fireballs riding behind your
+         shoulders. They grow back on their own, a few seconds each, up to the number
+         your level allows — so your pressure is a <b>clock</b>, not a place. Every one
+         detonates where it lands, so a miss into a crowd is still worth the shot.</p>
+
+      <p class="pyro"><b>There is nothing on the ground to pick up.</b> That is the
+         trade: you never have to go and fetch ammunition, and you never get a boulder
+         when you need one. Beat a <b>boss</b> to raise your level for good — it is kept
+         between runs, and it is the only thing here that is.</p>
 
       <p>Every attack has a <b>wind-up</b> — a flaring ring and a sound. Step, dash or jump out
          of it and it whiffs. <em>Grabbers</em> root you; <b>DASH</b> always breaks it.
@@ -542,6 +578,9 @@
          Zoom — scroll wheel, pinch, or <b>[</b> <b>]</b> · <b>0</b> resets</p>
     </div>
 
+    <p class="pickLabel">Character</p>
+    <div id="charPick"></div>
+    <p class="pickLabel">Difficulty</p>
     <div id="diffPick"></div>
     <p class="rule" id="menuBest"></p>
     <button id="startBtn">Begin</button>
