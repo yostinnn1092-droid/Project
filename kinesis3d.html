@@ -6741,6 +6741,14 @@ const hero = { pos: new T.Vector3(0,0,0), yaw: 0, walk: 0, hp: CFG.maxHealth,
   speed: 0, gait: 0, lastX: 0, lastZ: 0,
                vy: 0, grounded: true };
 
+// Irregular flicker in [-1,1]. Three sines at non-harmonic ratios, so the sum
+// never repeats on a human timescale. A single sine is a pulse, and a pulse
+// reads as breathing rather than burning. Shared by both fire effects: the ring
+// of fire below and the control aura's plume.
+function flick(x) {
+  return 0.53*Math.sin(x) + 0.31*Math.sin(x*2.37 + 1.13) + 0.16*Math.sin(x*4.61 + 2.71);
+}
+
 // ═══════════════════════════════════════════════════════════════ ring of fire
 // An orbiting hazard rather than another thing to aim. It rewards standing in
 // the crowd, which is the opposite of everything else in the kit — telekinesis
@@ -6883,7 +6891,8 @@ function buildRingOrbs() {
       { r:R,        mat:flameMatA, rep:4+i, spd: 0.85 - i*0.22, op:0.80 },
       { r:R + 0.26, mat:flameMatB, rep:5+i, spd:-1.15 + i*0.20, op:0.40 },
     ];
-    for (const cfg of layers) {
+    for (let li = 0; li < layers.length; li++) {
+      const cfg = layers[li];
       const mat = cfg.mat.clone();
       mat.map = cfg.mat.map.clone();
       mat.map.needsUpdate = true;
@@ -6895,7 +6904,10 @@ function buildRingOrbs() {
       const m = new T.Mesh(geo, mat);
       m.position.y = h/2;
       g.add(m);
-      ringState.curtains.push({ mesh:m, mat, spd:cfg.spd });
+      // Its own phase, so no two curtains surge or lick together. Sharing one
+      // phase is what made six curtains read as a single turning barrel.
+      ringState.curtains.push({ mesh:m, mat, spd:cfg.spd, baseY: h/2,
+                                phase: i*2.7 + li*1.31 });
     }
   }
 
@@ -6941,13 +6953,31 @@ function stepRing(dt) {
   // counter-scrolling layers at different rates is what stops a repeating band
   // from reading as a repeat.
   for (const c of ringState.curtains) {
-    c.mat.map.offset.x = (c.mat.map.offset.x + dt*c.spd) % 1;
-    c.mesh.scale.y = 1 + Math.sin(S.t*3.1 + c.spd)*0.09;
+    // Fire rises; it does not travel around the ring. The lateral scroll is
+    // therefore cut to a drift and allowed to stall outright — a surge floor
+    // above zero still slides continuously, which the eye reads as a barrel
+    // turning past you no matter how the rate is modulated.
+    const surge = 0.06 + 0.94*(0.5 + 0.5*flick(S.t*1.9 + c.phase));
+    c.mat.map.offset.x = (c.mat.map.offset.x + dt*c.spd*0.45*surge) % 1;
+    // With the travel quietened, the vertical lick carries the motion. Each
+    // curtain reaches its own height, irregularly, and guts low now and then;
+    // one shared sine had all six breathing as a single cylinder.
+    c.mesh.scale.y = 0.80 + 0.48*(0.5 + 0.5*flick(S.t*3.6 + c.phase*1.7));
+    // A small leap on top of the stretch, out of phase with it, so the tips
+    // detach and recover instead of the whole wall inflating as one piece.
+    c.mesh.position.y = c.baseY * (1 + 0.06*flick(S.t*4.7 + c.phase*2.3));
+    // A slight radial billow. Kept to 2% because this wall is a hitbox as well
+    // as an effect, and a flame that visibly breathes past its damage band
+    // teaches the player the wrong edge.
+    const billow = 1 + 0.02*flick(S.t*2.4 + c.phase*0.9);
+    c.mesh.scale.x = c.mesh.scale.z = billow;
   }
+  // Firelight flickers; it does not throb. This is most of what sells fire at
+  // the edge of vision, where the curtain itself is only a glow.
   if (ringState.disc)
-    ringState.disc.material.opacity = (0.24 + Math.sin(S.t*4.2)*0.06) * L.glow;
+    ringState.disc.material.opacity = (0.24 + 0.07*flick(S.t*3.7)) * L.glow;
   if (ringState.light)
-    ringState.light.intensity = (1.4 + Math.sin(S.t*6.5)*0.35) * L.glow;
+    ringState.light.intensity = (1.4 + 0.42*flick(S.t*5.3 + 1.7)) * L.glow;
 
   // ── damage ──────────────────────────────────────────────────────────────
   // Each ring is its own annulus band, and a body crossing several is burned
@@ -9640,13 +9670,6 @@ for (let i = 0; i < 24; i++) {
 const AURA_HELD    = new T.Color(0xffffff);
 const AURA_SEEK    = new T.Color(0xffc890);
 const AURA_HOSTILE = new T.Color(0xff7060);
-
-// Irregular flicker in [-1,1]. Three sines at non-harmonic ratios, so the sum
-// never repeats on a human timescale. A single sine is a pulse, and a pulse
-// reads as breathing rather than burning.
-function flick(x) {
-  return 0.53*Math.sin(x) + 0.31*Math.sin(x*2.37 + 1.13) + 0.16*Math.sin(x*4.61 + 2.71);
-}
 
 function updateAuras(dt) {
   // Scroll the two shared sheets rather than a clone per object: twenty-four

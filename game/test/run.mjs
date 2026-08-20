@@ -493,6 +493,59 @@ test("aura: the plume licks like flame, it does not scroll like a belt", async (
      "the flame never leans both ways, so it is not licking");
 });
 
+test("ring of fire: the wall licks, it does not only turn", async (pg) => {
+  // Reported as "it moves in a circle, not like flame". It did: every curtain
+  // scrolled its texture sideways at a fixed rate, and all six were stretched
+  // by one shared sine. Constant lateral travel is a barrel turning past you.
+  //
+  // Fire rises and flickers in place, so the travel is now a stallable drift
+  // and the vertical lick carries the motion — per curtain, on its own phase.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.ringState.lv = 0; P.buildRingOrbs();
+    for (let i = 0; i < 3; i++) P.ringUpgrade();
+    P.hero.pos.set(0, 0, 0);
+
+    let acrossCurtains = 0;
+    const y0 = [], deltas = [];
+    let prev = P.ringState.curtains[0].mat.map.offset.x;
+    for (let i = 0; i < 180; i++) {
+      P.hero.pos.set(0, 0, 0);
+      P.step(1 / 60);
+      const ys = P.ringState.curtains.map(c => c.mesh.scale.y);
+      const mean = ys.reduce((a, b) => a + b, 0) / ys.length;
+      acrossCurtains = Math.max(acrossCurtains, (Math.max(...ys) - Math.min(...ys)) / mean);
+      y0.push(ys[0]);
+      // offset.x wraps at 1, so a wrapped step reads as a huge jump. Drop those.
+      const now = P.ringState.curtains[0].mat.map.offset.x;
+      const d = Math.abs(now - prev);
+      if (d < 0.4) deltas.push(d);
+      prev = now;
+    }
+    const my = y0.reduce((a, b) => a + b, 0) / y0.length;
+    return {
+      curtains: P.ringState.curtains.length,
+      frames: y0.length,
+      acrossCurtains,
+      overTime: (Math.max(...y0) - Math.min(...y0)) / my,
+      scrollRatio: Math.min(...deltas) / Math.max(...deltas),
+    };
+  });
+
+  ok(r.curtains >= 6, "rank 3 should stand up six curtains; got " + r.curtains);
+  ok(r.acrossCurtains > 0.08,
+     "every curtain is the same height at every instant (spread " +
+     r.acrossCurtains.toFixed(3) + "), so the wall inflates as one cylinder");
+  ok(r.overTime > 0.15,
+     "a curtain's height barely moves over three seconds (range " +
+     r.overTime.toFixed(3) + "): the silhouette is fixed and only the texture " +
+     "slides, which is the turning barrel this replaced");
+  ok(r.scrollRatio < 0.35,
+     "the texture scrolls at a near-constant rate (slowest step is " +
+     (r.scrollRatio * 100).toFixed(0) + "% of the fastest), so it reads as " +
+     "rotation rather than fire that surges and stalls");
+});
+
 test("ring: each rank builds one more ring", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe, out = [];
