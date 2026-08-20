@@ -1634,14 +1634,89 @@ const PYRO = {
   hot:      0xff8a2e,
 };
 
-const pyroState = { held: 0, t: 0, group: null, orbs: [], shots: [] };
+const pyroState = { held: 0, t: 0, group: null, orbs: [], shots: [], embers: [] };
 
 // One geometry and one material for every ball, held and in flight alike.
-const pyroGeo = new T.IcosahedronGeometry(0.26, 1);
-const pyroMat = new T.MeshBasicMaterial({ color: PYRO.hot, transparent: true,
+// A fireball is a hot core seen THROUGH burning gas, so it is built as nested
+// shells rather than one glowing ball: near-white at the centre, yellow over
+// that, and a ragged red-orange envelope on the outside. Additive blending
+// stacks them into the white-hot middle the reference has, and only the
+// envelope is irregular — a core that wobbles reads as jelly.
+const pyroGeo     = new T.IcosahedronGeometry(0.26, 1);   // core, smooth
+// Perturbed once at creation. Perfect nested spheres stack into concentric
+// rings — a target, not a flame. Lumpy shells break that banding, and because
+// the two envelopes spin against each other the lumps churn instead of sitting
+// still. The trail puffs borrow the same geometry, so smoke is ragged too.
+const pyroShellGeo = (() => {
+  const g = new T.IcosahedronGeometry(0.26, 1);
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const k = 0.70 + Math.random() * 0.60;
+    pos.setXYZ(i, pos.getX(i) * k, pos.getY(i) * k, pos.getZ(i) * k);
+  }
+  g.computeVertexNormals();
+  return g;
+})();
+
+const pyroCoreMat = new T.MeshBasicMaterial({ color: 0xfff6d8, transparent: true,
   opacity: 0.95, blending: T.AdditiveBlending, depthWrite: false });
-const pyroCoreMat = new T.MeshBasicMaterial({ color: 0xffe6b0, transparent: true,
-  opacity: 0.9, blending: T.AdditiveBlending, depthWrite: false });
+const pyroMidMat = new T.MeshBasicMaterial({ color: 0xffc23a, transparent: true,
+  opacity: 0.7, blending: T.AdditiveBlending, depthWrite: false });
+const pyroMat = new T.MeshBasicMaterial({ color: PYRO.hot, transparent: true,
+  opacity: 0.55, blending: T.AdditiveBlending, depthWrite: false });
+const pyroRimMat = new T.MeshBasicMaterial({ color: 0xff4a12, transparent: true,
+  opacity: 0.22, blending: T.AdditiveBlending, depthWrite: false });
+
+// The tail is what makes it read as a fireball in flight rather than a glowing
+// marble. Each puff picks a material by AGE from this ladder instead of owning
+// one — a per-puff material clone is a GPU program lookup per puff per frame,
+// and a volley can leave a hundred of them in the air.
+const pyroTrailMats = [
+  new T.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 0.60,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0xffb42e, transparent: true, opacity: 0.46,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0xff7a18, transparent: true, opacity: 0.34,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0xe8430e, transparent: true, opacity: 0.26,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0xc0350f, transparent: true, opacity: 0.20,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x8d2a12, transparent: true, opacity: 0.13,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  // The reference's tail goes to SMOKE at its far end, not to nothing. Grey
+  // and non-additive, so it darkens against the sky instead of glowing.
+  new T.MeshBasicMaterial({ color: 0x6b6a66, transparent: true, opacity: 0.05,
+    depthWrite: false }),
+];
+
+// Builds the layered ball. `lit` is the whole thing's brightness, so the orbs
+// riding on the back can be the same object at a lower burn than the one in
+// flight without a second set of materials.
+function makeFireball() {
+  const g = new T.Group();
+  g.add(new T.Mesh(pyroShellGeo, pyroRimMat));   // 0 ragged outer envelope
+  g.add(new T.Mesh(pyroShellGeo, pyroMat));      // 1 orange body
+  g.add(new T.Mesh(pyroGeo, pyroMidMat));        // 2 yellow
+  g.add(new T.Mesh(pyroGeo, pyroCoreMat));       // 3 white-hot core
+  g.children[0].scale.setScalar(1.42);
+  g.children[1].scale.setScalar(1.18);
+  g.children[2].scale.setScalar(0.78);
+  g.children[3].scale.setScalar(0.44);
+  return g;
+}
+
+// Per-frame life for one ball: the envelope churns and the core holds steady.
+function burnFireball(g, t, seed, size) {
+  const s = size || 1;
+  g.children[0].scale.setScalar(s * (1.42 + 0.28 * flick(t * 5.1 + seed)));
+  g.children[0].rotation.y += 0.06;
+  g.children[0].rotation.x += 0.04;
+  g.children[1].scale.setScalar(s * (1.18 + 0.16 * flick(t * 6.7 + seed * 1.7)));
+  g.children[1].rotation.y -= 0.09;
+  g.children[2].scale.setScalar(s * (0.78 + 0.07 * flick(t * 8.3 + seed * 2.3)));
+  g.children[3].scale.setScalar(s * 0.44);
+}
 
 // Rebuilt on a level change and on restart. Every orb the last cap created is
 // removed first — growing the cap without clearing would stack two sets of
@@ -1655,7 +1730,7 @@ function buildPyroStack() {
   g.visible = true;
   const cap = pyroCap(charLv());
   for (let i = 0; i < cap; i++) {
-    const m = new T.Mesh(pyroGeo, pyroMat);
+    const m = makeFireball();
     m.userData.slot = i;
     g.add(m);
     pyroState.orbs.push(m);
@@ -1666,6 +1741,8 @@ function buildPyroStack() {
 function clearPyroShots() {
   for (const s of pyroState.shots) scene.remove(s.g);
   pyroState.shots.length = 0;
+  for (const p of pyroState.embers) scene.remove(p.m);
+  pyroState.embers.length = 0;
 }
 
 // Launched at whatever Single would have aimed at, so both characters read the
@@ -1675,12 +1752,8 @@ function pyroFire() {
   if (pyroState.held <= 0) { toast("NO FIRE LEFT — it grows back"); SFX.dry(); return; }
   pyroState.held--;
 
-  const m = new T.Mesh(pyroGeo, pyroMat);
-  m.scale.setScalar(1.25);
-  const core = new T.Mesh(pyroGeo, pyroCoreMat);
-  core.scale.setScalar(0.55);
-  const g = new T.Group();
-  g.add(m); g.add(core);
+  const g = makeFireball();
+  g.scale.setScalar(1.75);             // the thrown one burns bigger than the carried
   g.position.set(hero.pos.x, hero.pos.y + 1.5, hero.pos.z);
   scene.add(g);
 
@@ -1690,6 +1763,8 @@ function pyroFire() {
     g, seek,
     vel: aimDir.clone().multiplyScalar(PYRO.speed),
     life: PYRO.life,
+    seed: Math.random() * 40,
+    puffT: 0,
   });
   SFX.throw ? SFX.throw(1.2) : null;
   S.shake = Math.min(0.4, S.shake + 0.09);
@@ -1730,9 +1805,9 @@ function stepPyro(dt) {
         hero.pos.x + back.x * PYRO.orbitR + side.x * spread,
         hero.pos.y + 1.62 + bob,
         hero.pos.z + back.z * PYRO.orbitR + side.z * spread);
-      // Each one breathes on its own phase, the same reason the ring's
-      // curtains do: a stack pulsing in unison reads as one object.
-      orb.scale.setScalar(0.9 + 0.16 * flick(S.t * 3.2 + i * 2.1));
+      // Each one burns on its own phase, the same reason the ring's curtains
+      // do: a stack pulsing in unison reads as one object.
+      burnFireball(orb, S.t, i * 2.1, 0.66);
     }
   } else if (g) {
     g.visible = false;
@@ -1752,8 +1827,29 @@ function stepPyro(dt) {
       s.vel.setLength(PYRO.speed);
     }
     s.g.position.addScaledVector(s.vel, dt);
-    s.g.children[0].rotation.y += dt * 7;
-    s.g.children[0].rotation.x += dt * 5;
+    burnFireball(s.g, S.t, s.seed, 1.75);
+
+    // ---- tail. Dropped at a fixed INTERVAL rather than once per frame, so
+    // the trail has the same density at 30fps as at 144 instead of being
+    // three times thinner on a slow machine.
+    s.puffT -= dt;
+    while (s.puffT <= 0 && s.life > 0 && pyroState.embers.length < 240) {
+      s.puffT += 0.018;
+      const p = new T.Mesh(pyroShellGeo, pyroTrailMats[0]);
+      p.position.copy(s.g.position);
+      // Scatter each puff off the line of flight, widening the tail behind the
+      // head the way the reference's does.
+      p.position.x += rand(-0.13, 0.13);
+      p.position.y += rand(-0.10, 0.16);
+      p.position.z += rand(-0.13, 0.13);
+      p.rotation.set(rand(0, 6.3), rand(0, 6.3), rand(0, 6.3));
+      scene.add(p);
+      // Owned by the SYSTEM, not by the shot that made it. A tail deleted the
+      // instant its head detonates snaps off mid-air; this way the smoke is
+      // still hanging there after the blast, which is what the reference shows.
+      pyroState.embers.push({ m: p, age: 0, spin: rand(-3, 3),
+                              drift: rand(0.25, 0.75), size: rand(0.85, 1.5) });
+    }
 
     let done = s.life <= 0 || s.g.position.y < 0.2;
     if (!done) {
@@ -1777,6 +1873,22 @@ function stepPyro(dt) {
       scene.remove(s.g);
       pyroState.shots.splice(i, 1);
     }
+  }
+
+  // ---- the tail, aged as one pool
+  for (let k = pyroState.embers.length - 1; k >= 0; k--) {
+    const p = pyroState.embers[k];
+    p.age += dt;
+    const f = p.age / 0.42;                        // 0 at birth, 1 at death
+    if (f >= 1) { scene.remove(p.m); pyroState.embers.splice(k, 1); continue; }
+    // Cools along the ladder as it ages: white, orange, red, then smoke.
+    p.m.material = pyroTrailMats[Math.min(pyroTrailMats.length - 1,
+                                          (f * pyroTrailMats.length) | 0)];
+    // Swells and lifts as it cools, which is what turns a line of dots into a
+    // plume rather than a dotted line.
+    p.m.scale.setScalar(p.size * (0.55 + f * 0.85));
+    p.m.position.y += p.drift * dt;
+    p.m.rotation.y += p.spin * dt;
   }
 }
 
