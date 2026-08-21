@@ -1812,10 +1812,24 @@ const bladeTrailMats = [
     depthWrite: false, side: T.DoubleSide }),
 ];
 
+// The launched blade holds ONE angle, and this is it: the crescent's opening
+// turned upward IN THE BLADE'S OWN PLANE, so a shot reads as a scoop driving
+// forward rather than as whatever angle that blade happened to be dealt while
+// it rode on the back. On screen it lands near upright rather than exactly —
+// the shape is squashed and the camera sits behind and above it.
+// Derived from the curve's own sweep rather than guessed — the arc covers
+// 1.7π of the circle, which leaves its opening centred near 5.46 radians, and
+// this turns that to straight up.
+const BLADE_ROLL = Math.PI / 2 - 5.46;
+
 // Two nested groups on purpose. The outer one is AIMED every frame — pointed
-// down the line of flight — and the inner one SPINS. Spinning the outer group
-// would be undone by the next aim, and spinning the three passes separately
-// would slide them off each other and lose the core.
+// down the line of flight — and the inner one carries the ROLL: the angle the
+// crescent is held at around that line. They have to be separate, because
+// rolling the outer group would be undone by the next aim, and rolling the
+// three passes one at a time would slide them off each other and lose the
+// core. The blades on the back are each dealt a random roll, which is what
+// keeps the carried stack from looking like one shape stamped out eight
+// times; a launched blade overwrites it with BLADE_ROLL.
 function makeAirBlade() {
   const g = new T.Group();
   const spin = new T.Group();
@@ -1827,11 +1841,14 @@ function makeAirBlade() {
   return g;
 }
 
-function spinAirBlade(g, t, seed, size) {
+// The blade does not turn. It is a held shape thrown forward — a slash that
+// keeps its angle the whole way out — so the only motion here is the light
+// breathing in and out of the edges. A rolling crescent read as a thrown
+// wheel, which is a different weapon.
+function pulseAirBlade(g, t, seed, size) {
   const s = size || 1;
   g.scale.setScalar(s);
   const spin = g.children[0];
-  spin.rotation.z += 0.115;
   // The haze breathes wider than the body and the core barely at all, so the
   // edge of the light moves while the blade itself stays a solid shape.
   spin.children[0].scale.setScalar(1 + 0.10 * flick(t * 3.4 + seed));
@@ -1851,6 +1868,10 @@ function aimAirBlade(g, vel) {
   if (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z < 1e-6) return;
   g.lookAt(g.position.x + vel.x, g.position.y + vel.y, g.position.z + vel.z);
 }
+
+// Called once, on the blade that has just left the hand: it drops the random
+// roll it was carrying and takes the one every launched blade shares.
+function launchAirBlade(g) { g.children[0].rotation.z = BLADE_ROLL; }
 
 // ── the two kits ──────────────────────────────────────────────────────────
 // Read by the machinery below. Anything a character does differently lives
@@ -1915,7 +1936,8 @@ const WIND = {
   high:     1.98,
   hot:      WIND_PALE,
   make:     makeAirBlade,
-  anim:     spinAirBlade,
+  anim:     pulseAirBlade,
+  launch:   launchAirBlade,
   aim:      aimAirBlade,
   carry:    0.62,
   // Bigger in the air than the carried ones by more than fire is, because a
@@ -2005,6 +2027,7 @@ function castFire() {
     puffT: 0,
     hit: null,        // bodies already cut by this shot, for a piercing kit
   };
+  if (spec.launch) spec.launch(g);
   if (spec.aim) spec.aim(g, shot.vel);
   castState.shots.push(shot);
   SFX.throw ? SFX.throw(1.2) : null;

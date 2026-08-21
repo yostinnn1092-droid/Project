@@ -731,6 +731,65 @@ test("characters: telekinesis-only drafts are withheld from the pyromancer", asy
      r.tele.join(", "));
 });
 
+test("characters: a launched blade holds its angle instead of rolling", async (pg) => {
+  // A crescent that turns on its way out reads as a thrown wheel. This one is
+  // a held shape driven forward, so the roll has to be FIXED — the same on
+  // every shot, and unchanged for the whole flight — while the blade still
+  // aims itself down the line it is travelling.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("windmage");
+    P.PROFILE.charLv.windmage = 6;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.castState.held = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 30; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1 / 60); }
+
+    // Re-park before firing: the 30 seconds above let later pulses of the wave
+    // spawn walkers that the first parkWalkers never saw, and one of those
+    // standing near the hero eats the shot on its opening frame.
+    P.parkWalkers();
+    P.S.lock = null;
+    P.castFire();
+    const first = P.castState.shots[0];
+    const rollOf = (shot) => shot.g.children[0].rotation.z;
+    const roll0 = rollOf(first);
+
+    const rolls = [];
+    for (let i = 0; i < 40; i++) {
+      P.hero.hp = 99; P.step(1 / 60);
+      if (P.castState.shots.includes(first)) rolls.push(rollOf(first));
+    }
+    P.parkWalkers();
+    P.S.lock = null;
+    P.castFire();
+    const second = P.castState.shots[P.castState.shots.length - 1];
+
+    // The carried blades must not be turning either.
+    const orb = P.castState.orbs[0];
+    const before = orb.children[0].rotation.z;
+    for (let i = 0; i < 30; i++) { P.hero.hp = 99; P.step(1 / 60); }
+
+    return {
+      roll0, drift: Math.max(...rolls.map(z => Math.abs(z - roll0))), frames: rolls.length,
+      matched: Math.abs(rollOf(second) - roll0) < 1e-9,
+      carried: Math.abs(orb.children[0].rotation.z - before),
+      spread: new Set(P.castState.orbs.map(o => o.children[0].rotation.z.toFixed(4))).size,
+      orbs: P.castState.orbs.length,
+    };
+  });
+
+  ok(r.frames > 20, "the shot died after " + r.frames + " frames, too soon to judge its roll");
+  ok(r.drift < 1e-9,
+     "the launched blade rolled " + r.drift.toFixed(4) + " rad in flight — it is spinning");
+  ok(r.matched, "two shots left the hand at different angles; the launch roll is not fixed");
+  ok(r.carried < 1e-9,
+     "the carried blades are still turning (" + r.carried.toFixed(4) + " rad in half a second)");
+  // Fixed roll must not mean identical blades on the back: the scatter is half
+  // of what stops the stack looking like one shape stamped out eight times.
+  ok(r.spread >= r.orbs - 1,
+     "the carried blades share angles: " + r.spread + " distinct across " + r.orbs);
+});
+
 test("characters: the wind mage's blade cuts a line and spares the bystanders", async (pg) => {
   // The two casters share every piece of machinery, so what has to be proven
   // is the part that is NOT shared: a fireball stops at the first body and
