@@ -1905,88 +1905,91 @@ function launchAirBlade(g) { g.children[0].rotation.z = BLADE_ROLL; }
 // Building water additively makes a blue lamp, which is what the first pass
 // of this looked like.
 const waterDropGeo = new T.IcosahedronGeometry(0.24, 1);
-// The whip from the reference: a tapered ribbon curling around the head, so
-// the shot reads as water being PULLED along rather than as a pellet. Barely
-// any spiral — water follows the arm, it does not fly off into a coil.
-const waterCurlGeo = crescentGeo({ r: 0.34, span: Math.PI * 1.25, w: 0.115,
-                                   spiral: 0.12, squash: 0.92, seg: 40 });
-const waterSprayGeo = new T.IcosahedronGeometry(0.14, 0);
+const waterSprayGeo = new T.IcosahedronGeometry(0.18, 0);
 
-// These are unlit materials, so what you see is simply colour x opacity —
-// there is no lamp to make a dim blue read as a bright one. Both are pushed
-// high for that reason: the pass before this used half these numbers and the
-// water came out the grey of dishwater against a night arena.
-const waterBodyMat = new T.MeshBasicMaterial({ color: 0x2b9ce4, transparent: true,
-  opacity: 0.86, depthWrite: false, side: T.DoubleSide });
-// Deeper than the head, not lighter. The curl is drawn OVER the head, so a
-// pale one lays a grey film across the whole shot — which is what the last
-// three passes of this kept producing.
-const waterSkinMat = new T.MeshBasicMaterial({ color: 0x1d86cf, transparent: true,
-  opacity: 0.88, depthWrite: false, side: T.DoubleSide });
-// The additive layers, and they are kept SMALL and FAINT on purpose. A wet
-// surface throws back a hard highlight, but at the strength the first pass
-// used, additive white swallowed the blue underneath it and the whole shot
-// came out the colour of steam. Blue is the body of this thing; white is a
-// glint on one part of it.
+// LIT, unlike the fire and blade materials, and that is the whole difference
+// between a ball and a disc. An unlit material paints one flat colour across
+// the whole shape, so an unlit sphere is a filled circle — and three nested
+// unlit spheres are concentric rings, which is exactly what the first version
+// of this looked like: a target floating in the air. A lit material lets the
+// arena's own lamps shade the curve, and the curve is what says "ball".
+const waterBodyMat = new T.MeshStandardMaterial({ color: 0x2b9ce4, transparent: true,
+  opacity: 0.72, roughness: 0.22, metalness: 0.0,
+  emissive: 0x0d3a5c, emissiveIntensity: 0.6, depthWrite: false });
+const waterSkinMat = new T.MeshStandardMaterial({ color: 0x1d86cf, transparent: true,
+  opacity: 0.82, roughness: 0.15, metalness: 0.0,
+  emissive: 0x11507e, emissiveIntensity: 0.7, depthWrite: false });
+// The one additive layer, and it is kept SMALL and FAINT on purpose. A wet
+// surface throws back a hard highlight, but at any real strength additive
+// white swallows the blue underneath it and the whole shot comes out the
+// colour of steam.
 const waterSheenMat = new T.MeshBasicMaterial({ color: 0xdff4ff, transparent: true,
-  opacity: 0.22, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide });
+  opacity: 0.30, blending: T.AdditiveBlending, depthWrite: false });
 
-
-// Droplets thrown off the stream. They go from lit water to dark water and
-// simply thin out — no smoke step, because water does not burn away, it
-// falls.
-// The stream's body. Deeper and less opaque than the spray it throws off,
-// because these segments overlap each other along the path — at the spray's
-// values the overlap stacked into a white rope.
-const waterStreamMats = [
-  new T.MeshBasicMaterial({ color: 0x51c4f4, transparent: true, opacity: 0.62, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x3fb4f0, transparent: true, opacity: 0.54, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x2f9fe0, transparent: true, opacity: 0.45, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x2a8ecb, transparent: true, opacity: 0.36, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x2478ad, transparent: true, opacity: 0.26, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x1f6390, transparent: true, opacity: 0.16, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x1a4f73, transparent: true, opacity: 0.08, depthWrite: false }),
-];
-
+// Droplets thrown off the ball — FOAM first, water second. The near end is
+// pale and additive because spray is aerated and catches every light in the
+// scene; the far end is plain blue and fades. Built the other way round, as a
+// ladder of unlit mid-blues, the whole tail disappeared into a dark arena: the
+// droplets were there, and measurable, and invisible.
 const waterTrailMats = [
-  new T.MeshBasicMaterial({ color: 0x6fd0ff, transparent: true, opacity: 0.58, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x4fbdf8, transparent: true, opacity: 0.50, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x39a6e8, transparent: true, opacity: 0.42, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x2f8fd0, transparent: true, opacity: 0.42, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x2775ae, transparent: true, opacity: 0.28, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x215f8c, transparent: true, opacity: 0.16, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x1b4a6c, transparent: true, opacity: 0.07, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0xe4f7ff, transparent: true, opacity: 0.62,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0xb6e8ff, transparent: true, opacity: 0.50,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x86d4fa, transparent: true, opacity: 0.38,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x5cbcf0, transparent: true, opacity: 0.46, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x419fd8, transparent: true, opacity: 0.34, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x2f7fb4, transparent: true, opacity: 0.20, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x24638d, transparent: true, opacity: 0.09, depthWrite: false }),
 ];
 
-function makeWaterWhip() {
+// A ball of water: three nested spheres, deepest in the middle, with one small
+// highlight riding on top. The same shape the fireball uses, for the same
+// reason — a projectile has to be legible at forty metres, and a shape with
+// nothing sticking out of it is legible at any size.
+function makeWaterBall() {
   const g = new T.Group();
-  g.add(new T.Mesh(waterDropGeo, waterBodyMat));   // 0 the head, a body of water
-  g.add(new T.Mesh(waterDropGeo, waterSheenMat));  // 1 the highlight on it
-  g.add(new T.Mesh(waterCurlGeo, waterSkinMat));   // 2 the whip curling behind
-  g.children[0].scale.setScalar(0.78);   // the head gives way to the curl
-  g.children[1].scale.setScalar(0.30);
-  g.children[2].scale.setScalar(1.22);   // ...which is the thing that reads as water
+  g.add(new T.Mesh(waterDropGeo, waterBodyMat));   // 0 the body
+  g.add(new T.Mesh(waterDropGeo, waterSkinMat));   // 1 deeper water inside it
+  g.add(new T.Mesh(waterDropGeo, waterSheenMat));  // 2 the wet highlight
+  g.children[0].scale.setScalar(1.15);
+  g.children[1].scale.setScalar(0.76);
+  g.children[2].scale.setScalar(0.40);
   return g;
 }
 
-// Water has no flame to flicker and no blade to hold rigid: it WOBBLES. The
-// head is stretched and squeezed on axes that disagree with each other, which
-// is what stops a sphere reading as a marble, and the curl breathes against
-// it rather than with it.
-function flowWater(g, t, seed, size) {
+// Round while it is being lifted, DRAWN OUT once it is thrown. The stretch is
+// along local +Z, which is where the aim points the ball, so it lengthens
+// along its line of travel and pinches across it — a ball pulled into a
+// teardrop by its own speed. `launched` is set by the flight loop, because the
+// model cannot see which phase of the cast it is in.
+function animWaterBall(g, t, seed, size) {
   const s = size || 1;
-  g.scale.setScalar(s);
   const w1 = flick(t * 4.3 + seed), w2 = flick(t * 5.9 + seed * 1.6);
-  g.children[0].scale.set(0.78 * (1 + 0.20 * w1), 0.78 * (1 - 0.13 * w2), 0.78 * (1 + 0.09 * w2));
-  g.children[1].scale.set(0.30 * (1 + 0.24 * w2), 0.30, 0.30 * (1 - 0.10 * w1));
-  g.children[2].scale.set(1.22 * (1 + 0.10 * w2), 1.22 * (1 + 0.16 * w1), 1.22);
+  const fly = g.userData.launched ? 1 : 0;
+  // Gently. At 1.95 long against 0.76 wide the ball became a flying saucer —
+  // the tail is supposed to come from the trail behind it, the way the
+  // fireball's does, and the stretch is only meant to say "this is moving".
+  const long = 1 + fly * 0.45;          // along travel
+  const thin = 1 - fly * 0.12;          // across it, so volume reads constant
+  g.scale.set(s * thin * (1 + 0.07 * w1),
+              s * thin * (1 - 0.06 * w2),
+              s * long * (1 + 0.05 * w2));
+  // The surface itself still moves: water is never quite still.
+  g.children[0].scale.setScalar(1.15 + 0.09 * w1);
+  g.children[1].scale.setScalar(0.76 - 0.05 * w2);
+  g.children[2].scale.setScalar(0.40 * (1 + 0.18 * w2));
 }
 
 // Pointed along the flow, vertical component and all — unlike the blade, a
 // stream bending downward onto a body SHOULD lean into the bend. That is what
 // makes it read as water falling on someone rather than as a dart.
 function aimWater(g, vel) {
-  if (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z < 1e-6) return;
+  // Horizontal only. While the ball is being lifted its velocity is straight
+  // up, and pointing a stretch axis at the sky would stand the teardrop on its
+  // end — it is round in that phase anyway, so the old aim simply keeps.
+  if (vel.x * vel.x + vel.z * vel.z < 1e-6) return;
   g.lookAt(g.position.x + vel.x, g.position.y + vel.y, g.position.z + vel.z);
 }
 
@@ -2086,14 +2089,19 @@ const WATER = {
   verb:     "Flow",
   kind:     "flood",
   dry:      "NO WATER LEFT — it gathers again",
-  hint:     "Tap FLOW · the water comes up out of the ground and finds them",
+  hint:     "Tap FLOW · the water rises first, then goes after them on its own",
   regen:    2.0,
   // Nothing rides the shoulders: this water does not exist until it is called,
   // and then it comes out of the ground.
   carried:  false,
   fromGround: true,
-  rise:     18,       // straight up first, before the homing bends it over
-  riseT:    0.24,     // ...and this long before the homing is allowed to look
+  // Lifted, then thrown — two separate phases rather than one upward heave.
+  // The ball rises straight up to a set height with nothing else acting on it,
+  // and only when it gets there does it turn and go. Throwing it upward and
+  // letting the homing bend it over produced a jet leaving the ground at an
+  // angle, which is a different gesture entirely.
+  riseSpeed: 7,
+  riseTo:   2.4,      // above the caster's head, and the same every time
   // Slow on purpose. The whole point of this kit is that you WATCH it rise,
   // bend and fall on someone; at the blade's speed there is nothing to watch.
   speed:    20,
@@ -2120,8 +2128,8 @@ const WATER = {
   low:      1.26,
   high:     1.96,
   hot:      WATER_BLUE,
-  make:     makeWaterWhip,
-  anim:     flowWater,
+  make:     makeWaterBall,
+  anim:     animWaterBall,
   launch:   conjureWater,
   aim:      aimWater,
   carry:    0.64,
@@ -2129,24 +2137,13 @@ const WATER = {
   // The densest of the three trails and the only one that FALLS. Water thrown
   // off a stream does not rise and it does not hang: it drops out of the air,
   // which is what separates a spray from smoke.
-  // The BODY of the stream: re-placed along the path every frame, so it flows
-  // after the head as one connected thing instead of being a line of debris
-  // left behind it. `every` is how many frames of path each segment steps
-  // back — 3 at this speed is about a metre, which reads as continuous water
-  // without paying for a segment per frame.
-  // One segment per FRAME of path. At three frames apart the segments sat a
-  // metre from each other while being barely half a metre across, and the
-  // stream rendered as three separate blobs — which is exactly the pellet this
-  // kit was rebuilt to stop being. Every frame overlaps them into one body.
-  stream:   { count: 22, every: 1, head: 1.35, tail: 0.30,
-              mats: waterStreamMats,
-              make: () => new T.Mesh(waterDropGeo, waterBodyMat) },
-  // Spray thrown OFF that body, which is a different thing from the body. Kept
-  // sparse: at half this interval the droplets stacked several deep around the
-  // head and bleached the whole shot white.
-  trail:    { geo: () => waterSprayGeo, mats: waterTrailMats, every: 0.030,
-              life: 0.52, spread: 0.12, rise: 0.02, drift: [-1.6, -0.5],
-              size: [0.7, 1.4], grow: 0.65, spin: [-4, 4] },
+  // The tail. Length is life x speed and nothing else: 0.3 seconds at 20 a
+  // second is about six metres, which trails the ball clearly without becoming
+  // a rope strung across the arena. Dense enough to read as one tail, and
+  // falling rather than rising, because water does not climb.
+  trail:    { geo: () => waterSprayGeo, mats: waterTrailMats, every: 0.014,
+              life: 0.30, spread: 0.11, rise: 0.02, drift: [-1.2, -0.3],
+              size: [1.2, 2.1], grow: 0.6, spin: [-4, 4] },
 };
 
 // The kit of whoever is playing, or the pyromancer's as a stand-in for the
@@ -2201,10 +2198,7 @@ function buildCastStack() {
 }
 
 function clearCastShots() {
-  for (const s of castState.shots) {
-    if (s.seg) for (const m of s.seg) scene.remove(m);
-    scene.remove(s.g);
-  }
+  for (const s of castState.shots) scene.remove(s.g);
   castState.shots.length = 0;
   for (const p of castState.embers) scene.remove(p.m);
   castState.embers.length = 0;
@@ -2237,26 +2231,22 @@ function castFire() {
   const shot = {
     g, seek,
     vel: aimDir.clone().multiplyScalar(spec.speed),
-    path: spec.stream ? [] : null,      // where the stream has been
-    seg:  spec.stream ? [] : null,      // ...and the body strung along it
-    riseT: spec.riseT || 0,             // seconds of climbing before it hunts
+    // A kit that is LIFTED before it is thrown holds on to the direction it
+    // will eventually take. Reading the camera again at the top of the lift
+    // would let the shot be re-aimed after the trigger, which is not what the
+    // player asked for when they pressed it.
+    rising:    !!spec.riseTo,
+    launchDir: spec.riseTo ? aimDir.clone() : null,
+    riseAt:    spec.riseTo ? g.position.y + spec.riseTo : 0,
     life: spec.life,
     seed: Math.random() * 40,
     puffT: 0,
     hit: null,        // bodies already cut by this shot, for a piercing kit
   };
-  // Thrown upward first. Homing takes the wheel within a few frames and bends
-  // it over onto the target, which is what turns a jet out of the ground into
-  // an arc that falls on someone.
-  if (spec.rise) shot.vel.y = spec.rise;
-  if (spec.stream) {
-    for (let i = 0; i < spec.stream.count; i++) {
-      const m = spec.stream.make();
-      m.visible = false;
-      scene.add(m);
-      shot.seg.push(m);
-    }
-  }
+  // Straight up, and only up, until it is high enough.
+  if (shot.rising) shot.vel.set(0, spec.riseSpeed, 0);
+  // The model reads this to know whether to be a ball or a teardrop.
+  g.userData.launched = !shot.rising;
   if (spec.launch) spec.launch(g);
   if (spec.aim) spec.aim(g, shot.vel);
   castState.shots.push(shot);
@@ -2317,13 +2307,18 @@ function stepCast(dt) {
   for (let i = castState.shots.length - 1; i >= 0; i--) {
     const s = castState.shots[i];
     s.life -= dt;
-    // A stream spends its first fraction of a second going UP, with the homing
-    // held off. Without this the pull cancels the upward throw within three or
-    // four frames — measured, the water cleared barely a metre before flying
-    // flat, which is a jet of water aimed at someone rather than water rising
-    // out of the ground.
-    if (s.riseT > 0) {
-      s.riseT -= dt;
+    // Lifted, then thrown. Nothing touches the ball while it is climbing — no
+    // homing, no turn — and the moment it reaches its height it takes the
+    // direction the cast was aimed and goes. Doing this on a TIMER instead of
+    // a height made the lift depend on the frame rate of the machine; doing it
+    // by throwing the ball upward and letting the homing bend it over made a
+    // jet leaving the ground at an angle, which is a different gesture again.
+    if (s.rising) {
+      if (s.g.position.y >= s.riseAt) {
+        s.rising = false;
+        s.vel.copy(s.launchDir).multiplyScalar(spec.speed);
+        s.g.userData.launched = true;
+      }
     } else if (s.seek && !s.seek.dead) {
       tmp.set(s.seek.pos.x - s.g.position.x,
               s.seek.pos.y + 1 - s.g.position.y,
@@ -2335,33 +2330,6 @@ function stepCast(dt) {
     s.g.position.addScaledVector(s.vel, dt);
     spec.anim(s.g, S.t, s.seed, spec.fly);
     if (spec.aim) spec.aim(s.g, s.vel);
-
-    // ---- the body of a stream, strung along where its head has BEEN.
-    // This is the difference between water flowing and a pellet with a tail:
-    // the trail behind the other two kits is dropped and then abandoned, so it
-    // hangs in the air; these segments are re-placed every frame along the
-    // stored path, so the whole body slides forward after the head and stays
-    // one connected thing from the ground to the tip.
-    if (s.seg) {
-      const st = spec.stream;
-      const keep = st.count * st.every;
-      const p = s.path.length >= keep ? s.path.pop() : { x: 0, y: 0, z: 0 };
-      p.x = s.g.position.x; p.y = s.g.position.y; p.z = s.g.position.z;
-      s.path.unshift(p);
-      for (let i = 0; i < s.seg.length; i++) {
-        const m = s.seg[i];
-        const at = s.path[Math.min(s.path.length - 1, i * st.every)];
-        if (!at || s.path.length <= i * st.every) { m.visible = false; continue; }
-        m.visible = true;
-        m.position.set(at.x, at.y, at.z);
-        const f = i / Math.max(1, s.seg.length - 1);      // 0 head, 1 tail
-        // Fattest just behind the head and drawn out toward the tail, so the
-        // stream reads as something being PULLED rather than as a row of beads.
-        const w = st.head * (1 - Math.pow(f, 0.7)) + st.tail;
-        m.scale.setScalar(w * (1 + 0.16 * flick(S.t * 5.2 + i * 0.9 + s.seed)));
-        m.material = st.mats[Math.min(st.mats.length - 1, (f * st.mats.length) | 0)];
-      }
-    }
 
     // ---- tail. Dropped at a fixed INTERVAL rather than once per frame, so
     // the trail has the same density at 30fps as at 144 instead of being
@@ -2388,7 +2356,11 @@ function stepCast(dt) {
                               size: rand(tr.size[0], tr.size[1]) });
     }
 
-    let done = s.life <= 0 || s.g.position.y < 0.2;
+    // A shot below ankle height has hit the ground — EXCEPT one that is on its
+    // way up out of it. Without that exemption a ball raised from the dirt is
+    // killed on its first frame, because it starts below the line it is being
+    // lifted through.
+    let done = s.life <= 0 || (!s.rising && s.g.position.y < 0.2);
     if (!done) {
       for (const w of walkers) {
         if (w.dead) continue;
@@ -2422,7 +2394,6 @@ function stepCast(dt) {
       } else {
         sparks(tmp3.copy(s.g.position), spec.hot, 7, 9);
       }
-      if (s.seg) for (const m of s.seg) scene.remove(m);
       scene.remove(s.g);
       castState.shots.splice(i, 1);
     }
@@ -4124,7 +4095,7 @@ const CHARS = {
     power: "water",
     props: 0,
     cast: WATER,
-    perk(lv) { return castCap(lv) + " streams to call"; },
+    perk(lv) { return castCap(lv) + " to call up"; },
   },
 };
 for (const k in CHARS) CHARS[k].key = k;

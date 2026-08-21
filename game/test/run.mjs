@@ -810,11 +810,11 @@ test("characters: the hydromancer's water finds a body it was not aimed at", asy
      " — too close for the hydromancer to read as the kit that finds its mark");
 });
 
-test("characters: the hydromancer carries nothing and calls water up out of the ground", async (pg) => {
-  // Three separate claims, and each is a thing that was true of this kit an
-  // hour ago and must not be true now: nothing rides the shoulders, the water
-  // begins at ground level and rises, and the shot is a CONNECTED body that
-  // follows its own head rather than a pellet leaving a wake behind it.
+test("characters: the hydromancer carries nothing and lifts its water before throwing it", async (pg) => {
+  // Four claims, and each one is a thing that was true of this kit earlier and
+  // must not be true now: nothing rides the shoulders, the water starts on the
+  // ground, it goes straight UP to a set height before it goes anywhere else,
+  // and it stretches into a tail only once it has been thrown.
   const r = await pg.evaluate(() => {
     const P = window.__probe;
     const stackFor = (who) => {
@@ -842,24 +842,37 @@ test("characters: the hydromancer carries nothing and calls water up out of the 
     P.S.lock = w;
     P.castFire();
     const shot = P.castState.shots[P.castState.shots.length - 1];
-    const startY = shot.g.position.y;
-    let peakY = startY, spread = 0, live = 0;
-    for (let i = 0; i < 70 && P.castState.shots.includes(shot); i++) {
+    const from = { x: shot.g.position.x, y: shot.g.position.y, z: shot.g.position.z };
+
+    // While it is being lifted: how far it wanders sideways, and how round it
+    // stays. After it is thrown: how far it stretches.
+    let driftWhileRising = 0, roundWhileRising = 0, liftedTo = from.y;
+    let stretched = 0, tail = 0, moved = 0;
+    for (let i = 0; i < 90 && P.castState.shots.includes(shot); i++) {
       P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1 / 60);
       if (!P.castState.shots.includes(shot)) break;
-      peakY = Math.max(peakY, shot.g.position.y);
-      // How far the visible body reaches back from the head: a connected
-      // stream spans real ground, a pellet's body is a point.
-      const on = (shot.seg || []).filter(m => m.visible);
-      live = Math.max(live, on.length);
-      for (const m of on) {
-        spread = Math.max(spread, Math.hypot(m.position.x - shot.g.position.x,
-                                             m.position.y - shot.g.position.y,
-                                             m.position.z - shot.g.position.z));
+      const g = shot.g;
+      if (shot.rising) {
+        driftWhileRising = Math.max(driftWhileRising,
+          Math.hypot(g.position.x - from.x, g.position.z - from.z));
+        roundWhileRising = Math.max(roundWhileRising, Math.abs(g.scale.z / g.scale.x - 1));
+        liftedTo = Math.max(liftedTo, g.position.y);
+      } else {
+        stretched = Math.max(stretched, g.scale.z / g.scale.x);
+        moved = Math.max(moved, Math.hypot(g.position.x - from.x, g.position.z - from.z));
+        // The tail: how far back the furthest live droplet sits from the ball.
+        for (const p of P.castState.embers) {
+          tail = Math.max(tail, Math.hypot(p.m.position.x - g.position.x,
+                                           p.m.position.y - g.position.y,
+                                           p.m.position.z - g.position.z));
+        }
       }
     }
-    return { worn, startY: +startY.toFixed(2), peakY: +peakY.toFixed(2),
-             live, spread: +spread.toFixed(2) };
+    return { worn, startY: +from.y.toFixed(2), liftedTo: +liftedTo.toFixed(2),
+             driftWhileRising: +driftWhileRising.toFixed(2),
+             roundWhileRising: +roundWhileRising.toFixed(2),
+             stretched: +stretched.toFixed(2), moved: +moved.toFixed(1),
+             tail: +tail.toFixed(1), riseTo: P.CHARS.hydromancer.cast.riseTo };
   });
 
   eq(r.worn.water, 0,
@@ -868,15 +881,27 @@ test("characters: the hydromancer carries nothing and calls water up out of the 
      "the other two kits lost their carried stacks as well (fire " + r.worn.fire +
      ", wind " + r.worn.wind + ") — the change was meant to be per kit");
   ok(r.startY < 0.3,
-     "the water appeared at " + r.startY + " off the deck: it is coming out of the " +
-     "hands, not out of the ground");
-  ok(r.peakY > 1.6,
-     "the stream only reached " + r.peakY + " — it never rises, so nothing reads as " +
-     "water being pulled up");
-  ok(r.live > 8, "only " + r.live + " segments of the stream were ever drawn");
-  ok(r.spread > 3,
-     "the whole body of the stream sat within " + r.spread + " of its head — that is a " +
-     "pellet, not something flowing");
+     "the water appeared " + r.startY + " off the deck: it is coming out of the hands, " +
+     "not off the ground");
+  // Lifted straight up, to the height the kit names, and not a step sideways
+  // on the way — that is what separates being raised from being thrown.
+  ok(Math.abs(r.liftedTo - (r.startY + r.riseTo)) < 0.4,
+     "the lift stopped at " + r.liftedTo + ", not the " + (r.startY + r.riseTo) + " it names");
+  ok(r.driftWhileRising < 0.4,
+     "the ball drifted " + r.driftWhileRising + " sideways while being lifted — it is " +
+     "being thrown upward at an angle, not raised");
+  ok(r.roundWhileRising < 0.15,
+     "the ball was already stretched while still rising (by " + r.roundWhileRising +
+     ") — the tail belongs to the throw, not to the lift");
+  // ...and then thrown, stretching along its travel.
+  ok(r.moved > 8, "after the lift the ball only covered " + r.moved + " — it never launched");
+  ok(r.stretched > 1.5,
+     "the thrown ball stretched by only " + r.stretched + "x along its travel: it is a " +
+     "marble, not water being pulled into a tail");
+  // A tail with a readable length: long enough to read as one, short enough
+  // not to be a rope across the arena.
+  ok(r.tail > 1.5 && r.tail < 12,
+     "the tail reached " + r.tail + " behind the ball, which is outside what reads as a tail");
 });
 
 test("characters: water shoves a body, fire and blades do not", async (pg) => {
