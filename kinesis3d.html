@@ -589,16 +589,17 @@
          is worth nothing at all. Beat a <b>boss</b> to raise your level for good — it
          is kept between runs, and it is the only thing here that is.</p>
 
-      <p class="water"><b>FLOW</b> draws a stream out of the air and sends it
-         after one of them. It <b>bends onto its target</b> rather than flying where
-         you pointed, so it is the one shot here that does not need to be led — and
-         it lands hard enough to take a body off its feet and put it somewhere
-         else. Aim is a suggestion; the shove is the point.</p>
+      <p class="water"><b>FLOW</b> calls a stream up out of the ground and sends it
+         after one of them. It <b>bends onto its target</b> rather than flying where you
+         pointed, so it is the one attack here that does not need to be led — and it
+         lands hard enough to take a body off its feet and put it somewhere else. Aim
+         is a suggestion; the shove is the point.</p>
 
-      <p class="water"><b>There is nothing on the ground to pick up.</b> The water
-         comes from nowhere and grows back on its own, up to the number your level
-         allows. Beat a <b>boss</b> to raise that level for good — it is kept
-         between runs, and it is the only thing here that is.</p>
+      <p class="water"><b>You carry nothing.</b> There is nothing on the ground to pick
+         up and nothing riding your back — the water is not there until you call it, and
+         what you have is a <b>number of times you can call it</b>, which refills on its
+         own. Beat a <b>boss</b> to raise that number for good: it is kept between runs,
+         and it is the only thing here that is.</p>
 
       <p>Every attack has a <b>wind-up</b> — a flaring ring and a sound. Step, dash or jump out
          of it and it whiffs. <em>Grabbers</em> root you; <b>DASH</b> always breaks it.
@@ -7654,6 +7655,19 @@ const waterSheenMat = new T.MeshBasicMaterial({ color: 0xdff4ff, transparent: tr
 // Droplets thrown off the stream. They go from lit water to dark water and
 // simply thin out — no smoke step, because water does not burn away, it
 // falls.
+// The stream's body. Deeper and less opaque than the spray it throws off,
+// because these segments overlap each other along the path — at the spray's
+// values the overlap stacked into a white rope.
+const waterStreamMats = [
+  new T.MeshBasicMaterial({ color: 0x51c4f4, transparent: true, opacity: 0.62, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x3fb4f0, transparent: true, opacity: 0.54, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x2f9fe0, transparent: true, opacity: 0.45, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x2a8ecb, transparent: true, opacity: 0.36, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x2478ad, transparent: true, opacity: 0.26, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x1f6390, transparent: true, opacity: 0.16, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x1a4f73, transparent: true, opacity: 0.08, depthWrite: false }),
+];
+
 const waterTrailMats = [
   new T.MeshBasicMaterial({ color: 0x6fd0ff, transparent: true, opacity: 0.58, depthWrite: false }),
   new T.MeshBasicMaterial({ color: 0x4fbdf8, transparent: true, opacity: 0.50, depthWrite: false }),
@@ -7702,7 +7716,11 @@ function aimWater(g, vel) {
 const waterConjurePos = new T.Vector3();
 function conjureWater(g) {
   waterConjurePos.copy(g.position);
-  sparks(waterConjurePos, 0x9fdcff, 7, 5);
+  // A ring on the dirt and a burst of droplets, at the point the water comes
+  // UP. Without the ring the stream simply exists at ankle height; with it,
+  // something happened to the ground.
+  shell(waterConjurePos, 0.7, 0x63c6f0);
+  sparks(waterConjurePos, 0x9fdcff, 9, 6);
 }
 
 // ── the two kits ──────────────────────────────────────────────────────────
@@ -7788,11 +7806,17 @@ const WATER = {
   verb:     "Flow",
   kind:     "flood",
   dry:      "NO WATER LEFT — it gathers again",
-  hint:     "Tap FLOW to throw · the water finds them on its own",
+  hint:     "Tap FLOW · the water comes up out of the ground and finds them",
   regen:    2.0,
-  // Slow on purpose. The whole point of this kit is that you WATCH the shot
-  // bend around and land, and at the blade's speed there is nothing to watch.
-  speed:    24,
+  // Nothing rides the shoulders: this water does not exist until it is called,
+  // and then it comes out of the ground.
+  carried:  false,
+  fromGround: true,
+  rise:     18,       // straight up first, before the homing bends it over
+  riseT:    0.24,     // ...and this long before the homing is allowed to look
+  // Slow on purpose. The whole point of this kit is that you WATCH it rise,
+  // bend and fall on someone; at the blade's speed there is nothing to watch.
+  speed:    20,
   dmg:      130,
   pierce:   0,
   blastR:   0,
@@ -7825,12 +7849,24 @@ const WATER = {
   // The densest of the three trails and the only one that FALLS. Water thrown
   // off a stream does not rise and it does not hang: it drops out of the air,
   // which is what separates a spray from smoke.
-  // Spaced out rather than packed. At half this interval and full opacity the
-  // droplets stacked several deep around the head and bleached the whole shot
-  // white — the spray has to read as separate water, not as a fog bank.
-  trail:    { geo: () => waterSprayGeo, mats: waterTrailMats, every: 0.022,
+  // The BODY of the stream: re-placed along the path every frame, so it flows
+  // after the head as one connected thing instead of being a line of debris
+  // left behind it. `every` is how many frames of path each segment steps
+  // back — 3 at this speed is about a metre, which reads as continuous water
+  // without paying for a segment per frame.
+  // One segment per FRAME of path. At three frames apart the segments sat a
+  // metre from each other while being barely half a metre across, and the
+  // stream rendered as three separate blobs — which is exactly the pellet this
+  // kit was rebuilt to stop being. Every frame overlaps them into one body.
+  stream:   { count: 22, every: 1, head: 1.35, tail: 0.30,
+              mats: waterStreamMats,
+              make: () => new T.Mesh(waterDropGeo, waterBodyMat) },
+  // Spray thrown OFF that body, which is a different thing from the body. Kept
+  // sparse: at half this interval the droplets stacked several deep around the
+  // head and bleached the whole shot white.
+  trail:    { geo: () => waterSprayGeo, mats: waterTrailMats, every: 0.030,
               life: 0.52, spread: 0.12, rise: 0.02, drift: [-1.6, -0.5],
-              size: [0.8, 1.6], grow: 0.65, spin: [-4, 4] },
+              size: [0.7, 1.4], grow: 0.65, spin: [-4, 4] },
 };
 
 // The kit of whoever is playing, or the pyromancer's as a stand-in for the
@@ -7847,8 +7883,12 @@ function buildCastStack() {
   for (const o of castState.orbs) g.remove(o);
   castState.orbs.length = 0;
   if (!isCaster()) { g.visible = false; return; }
-  g.visible = true;
   const spec = castSpec();
+  // A kit can hold a resource without WEARING it. The hydromancer's water is
+  // drawn out of the ground at the moment it is used, so there is nothing to
+  // ride the shoulders — the count lives in the HUD and nowhere else.
+  if (spec.carried === false) { g.visible = false; return; }
+  g.visible = true;
   const cap = castCap(charLv());
   // Height bands, one per slot, handed out in shuffled order. A plain uniform
   // draw can deal three of them the same height by luck, and taking band i for
@@ -7881,7 +7921,10 @@ function buildCastStack() {
 }
 
 function clearCastShots() {
-  for (const s of castState.shots) scene.remove(s.g);
+  for (const s of castState.shots) {
+    if (s.seg) for (const m of s.seg) scene.remove(m);
+    scene.remove(s.g);
+  }
   castState.shots.length = 0;
   for (const p of castState.embers) scene.remove(p.m);
   castState.embers.length = 0;
@@ -7895,21 +7938,45 @@ function castFire() {
   if (castState.held <= 0) { toast(spec.dry); SFX.dry(); return; }
   castState.held--;
 
+  aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
+
   const g = spec.make();
   g.scale.setScalar(spec.fly);
-  g.position.set(hero.pos.x, hero.pos.y + 1.5, hero.pos.z);
+  // Out of the GROUND for a kit that pulls its water from underfoot, rather
+  // than out of the hands. Starting it at chest height and calling it "rising"
+  // fools nobody: the eye reads where a thing STARTS, so it starts in the dirt.
+  // A pace IN FRONT of the caster, too — raised on the spot, the column comes
+  // up through the player's own body and wears them like a costume.
+  if (spec.fromGround) {
+    g.position.set(hero.pos.x + aimDir.x * 1.3, 0.06, hero.pos.z + aimDir.z * 1.3);
+  } else {
+    g.position.set(hero.pos.x, hero.pos.y + 1.5, hero.pos.z);
+  }
   scene.add(g);
-
-  aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
   const seek = S.lock && !S.lock.dead ? S.lock : nearestInCone();
   const shot = {
     g, seek,
     vel: aimDir.clone().multiplyScalar(spec.speed),
+    path: spec.stream ? [] : null,      // where the stream has been
+    seg:  spec.stream ? [] : null,      // ...and the body strung along it
+    riseT: spec.riseT || 0,             // seconds of climbing before it hunts
     life: spec.life,
     seed: Math.random() * 40,
     puffT: 0,
     hit: null,        // bodies already cut by this shot, for a piercing kit
   };
+  // Thrown upward first. Homing takes the wheel within a few frames and bends
+  // it over onto the target, which is what turns a jet out of the ground into
+  // an arc that falls on someone.
+  if (spec.rise) shot.vel.y = spec.rise;
+  if (spec.stream) {
+    for (let i = 0; i < spec.stream.count; i++) {
+      const m = spec.stream.make();
+      m.visible = false;
+      scene.add(m);
+      shot.seg.push(m);
+    }
+  }
   if (spec.launch) spec.launch(g);
   if (spec.aim) spec.aim(g, shot.vel);
   castState.shots.push(shot);
@@ -7970,8 +8037,14 @@ function stepCast(dt) {
   for (let i = castState.shots.length - 1; i >= 0; i--) {
     const s = castState.shots[i];
     s.life -= dt;
-    // Light homing, matching the guided stone the telekinetic already throws.
-    if (s.seek && !s.seek.dead) {
+    // A stream spends its first fraction of a second going UP, with the homing
+    // held off. Without this the pull cancels the upward throw within three or
+    // four frames — measured, the water cleared barely a metre before flying
+    // flat, which is a jet of water aimed at someone rather than water rising
+    // out of the ground.
+    if (s.riseT > 0) {
+      s.riseT -= dt;
+    } else if (s.seek && !s.seek.dead) {
       tmp.set(s.seek.pos.x - s.g.position.x,
               s.seek.pos.y + 1 - s.g.position.y,
               s.seek.pos.z - s.g.position.z);
@@ -7982,6 +8055,33 @@ function stepCast(dt) {
     s.g.position.addScaledVector(s.vel, dt);
     spec.anim(s.g, S.t, s.seed, spec.fly);
     if (spec.aim) spec.aim(s.g, s.vel);
+
+    // ---- the body of a stream, strung along where its head has BEEN.
+    // This is the difference between water flowing and a pellet with a tail:
+    // the trail behind the other two kits is dropped and then abandoned, so it
+    // hangs in the air; these segments are re-placed every frame along the
+    // stored path, so the whole body slides forward after the head and stays
+    // one connected thing from the ground to the tip.
+    if (s.seg) {
+      const st = spec.stream;
+      const keep = st.count * st.every;
+      const p = s.path.length >= keep ? s.path.pop() : { x: 0, y: 0, z: 0 };
+      p.x = s.g.position.x; p.y = s.g.position.y; p.z = s.g.position.z;
+      s.path.unshift(p);
+      for (let i = 0; i < s.seg.length; i++) {
+        const m = s.seg[i];
+        const at = s.path[Math.min(s.path.length - 1, i * st.every)];
+        if (!at || s.path.length <= i * st.every) { m.visible = false; continue; }
+        m.visible = true;
+        m.position.set(at.x, at.y, at.z);
+        const f = i / Math.max(1, s.seg.length - 1);      // 0 head, 1 tail
+        // Fattest just behind the head and drawn out toward the tail, so the
+        // stream reads as something being PULLED rather than as a row of beads.
+        const w = st.head * (1 - Math.pow(f, 0.7)) + st.tail;
+        m.scale.setScalar(w * (1 + 0.16 * flick(S.t * 5.2 + i * 0.9 + s.seed)));
+        m.material = st.mats[Math.min(st.mats.length - 1, (f * st.mats.length) | 0)];
+      }
+    }
 
     // ---- tail. Dropped at a fixed INTERVAL rather than once per frame, so
     // the trail has the same density at 30fps as at 144 instead of being
@@ -8042,6 +8142,7 @@ function stepCast(dt) {
       } else {
         sparks(tmp3.copy(s.g.position), spec.hot, 7, 9);
       }
+      if (s.seg) for (const m of s.seg) scene.remove(m);
       scene.remove(s.g);
       castState.shots.splice(i, 1);
     }
@@ -9739,11 +9840,11 @@ const CHARS = {
   // damage.
   hydromancer: {
     name: "HYDROMANCER",
-    desc: "Nothing to lift. Water out of thin air.",
+    desc: "Nothing to lift, nothing carried. The ground answers.",
     power: "water",
     props: 0,
     cast: WATER,
-    perk(lv) { return castCap(lv) + " streams held"; },
+    perk(lv) { return castCap(lv) + " streams to call"; },
   },
 };
 for (const k in CHARS) CHARS[k].key = k;

@@ -588,9 +588,14 @@ test("characters: a boss kill levels the one you are playing, permanently", asyn
 });
 
 test("characters: every caster's stack is capped by level and grows back", async (pg) => {
-  // Runs for each carried-stack character in turn. The machinery is shared, so
-  // what this really guards is that a new kit's own numbers — its regen clock
-  // above all — still fill the stack inside a reasonable stretch of play.
+  // Runs for each casting character in turn. The machinery is shared, so what
+  // this really guards is that a new kit's own numbers — its regen clock above
+  // all — still fill the stack inside a reasonable stretch of play.
+  //
+  // The COUNT is checked for every kit; the WORN stack only for kits that wear
+  // one. The hydromancer holds the same resource and spends it the same way,
+  // but its water is called up out of the ground when it is used, so there is
+  // nothing on its shoulders to count.
   const casters = await pg.evaluate(() =>
     Object.keys(window.__probe.CHARS).filter(k => !!window.__probe.CHARS[k].cast));
   ok(casters.length >= 2, "expected at least two casters, found " + casters.join(", "));
@@ -619,7 +624,7 @@ test("characters: every caster's stack is capped by level and grows back", async
     P.castFire();
     return { cap1, filled, cap4: P.castCap(4), filled4,
              spent: before - P.castState.held, inFlight: P.castState.shots.length,
-             orbs: P.castState.orbs.length };
+             orbs: P.castState.orbs.length, worn: P.CHARS[who].cast.carried !== false };
     }, who);
 
     eq(r.filled, r.cap1, who + ": at level 1 the stack settled at " + r.filled +
@@ -627,8 +632,12 @@ test("characters: every caster's stack is capped by level and grows back", async
     eq(r.filled4, r.cap4, who + ": at level 4 the stack settled at " + r.filled4 +
        ", not the cap " + r.cap4);
     ok(r.cap4 > r.cap1, who + ": levelling did not raise the cap");
-    eq(r.orbs, r.cap4, who + ": the visible stack (" + r.orbs + ") does not match the cap " +
-       r.cap4);
+    if (r.worn) {
+      eq(r.orbs, r.cap4, who + ": the visible stack (" + r.orbs + ") does not match the cap " +
+         r.cap4);
+    } else {
+      eq(r.orbs, 0, who + ": carries nothing, yet " + r.orbs + " are riding its back");
+    }
     eq(r.spent, 1, who + ": firing did not spend exactly one");
     eq(r.inFlight, 1, who + ": firing put nothing in the air");
   }
@@ -640,8 +649,15 @@ test("characters: the carried stack scatters behind the player", async (pg) => {
   // spread in depth as well as sideways, a spread in height, every ball clear
   // of the ground and none of them up at the crown — and fixed per ball, so
   // the cloud rides with the player instead of boiling around them.
+  //
+  // Only kits that WEAR their stack. A kit that carries nothing has no scatter
+  // to check, and asserting one against it would be asserting that every kit
+  // must wear its ammunition — which is the thing the hydromancer exists to
+  // not do. That it carries nothing is covered by its own case.
   const casters = await pg.evaluate(() =>
-    Object.keys(window.__probe.CHARS).filter(k => !!window.__probe.CHARS[k].cast));
+    Object.keys(window.__probe.CHARS)
+      .filter(k => !!window.__probe.CHARS[k].cast &&
+                   window.__probe.CHARS[k].cast.carried !== false));
 
   for (const who of casters) {
   const r = await pg.evaluate((who) => {
@@ -731,13 +747,19 @@ test("characters: telekinesis-only drafts are withheld from the pyromancer", asy
      r.tele.join(", "));
 });
 
-test("characters: the hydromancer's water bends onto a body it was not aimed at", async (pg) => {
-  // The kit's whole claim is in the briefing: the stream FINDS them. Measured
-  // as how fast the shot comes to POINT AT its target after being fired 60
-  // degrees away from it — not as how far it turns in total. Total turning
-  // was the first metric here and it was worthless: a fireball that sails
-  // past and loops back racks up 177 degrees while being much worse at
-  // arriving, which is the opposite of what the number was supposed to say.
+test("characters: the hydromancer's water finds a body it was not aimed at", async (pg) => {
+  // The kit's claim, from its own briefing: the stream FINDS them. Measured as
+  // ARRIVAL — fire 60 degrees away from a body and see whether the shot gets
+  // there, and how long it takes — with the pyromancer's weaker pull as the
+  // control, because every kit homes a little.
+  //
+  // Two earlier metrics were wrong and the numbers said so. Total turning
+  // rewarded a fireball that sailed past and looped back: 177 degrees of
+  // "bending" while being worse at arriving. Angle-to-target then broke on
+  // this kit's own arc — water that climbs out of the ground and falls on
+  // someone points well above them while being exactly on course, and read 19
+  // degrees off a moment before it landed. Whether it arrives cannot be
+  // gamed by either.
   const r = await pg.evaluate(() => {
     const P = window.__probe;
     const runFor = (who) => {
@@ -747,36 +769,26 @@ test("characters: the hydromancer's water bends onto a body it was not aimed at"
       P.castState.held = 0; P.buildCastStack();
       for (let i = 0; i < 60 * 30; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1 / 60); }
       P.parkWalkers();
+      P.MOD.allDmg = 1; P.MOD.blastR = 1; P.MOD.blastDmg = 1; P.WMOD.blastR = 1;
 
-      // Well off the line — about 60 degrees of it.
+      // Well off the line — about 60 degrees of it — and tough enough to
+      // survive, so "did it arrive" cannot be confused with "did it kill".
       const w = P.walkers.find(x => !x.dead);
       const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
       const side = { x: f.z, z: -f.x };
       w.pos.set(f.x * 10 + side.x * 18, 0, f.z * 10 + side.z * 18);
-      w.aggro = false; w.cool = 999; w.hp = 4000;   // survives, so the shot has to arrive
+      w.aggro = false; w.cool = 999; w.hp = 4000;
       const hp0 = w.hp;
+      const off0 = Math.atan2(18, 10) * 180 / Math.PI;
 
       P.S.lock = w;                       // fired straight ahead, locked to the side
       P.castFire();
-      const shot = P.castState.shots[P.castState.shots.length - 1];
-      const off0 = Math.acos(Math.max(-1, Math.min(1,
-        shot.vel.clone().normalize().dot(
-          new (shot.vel.constructor)(w.pos.x - shot.g.position.x, 0, w.pos.z - shot.g.position.z)
-            .normalize())))) * 180 / Math.PI;
-
-      let after = off0, frames = 0, hurt = false;
-      for (let i = 0; i < 60 * 3; i++) {
+      let frames = -1;
+      for (let i = 0; i < 60 * 4; i++) {
         P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1 / 60);
-        if (!P.castState.shots.includes(shot)) { hurt = w.hp < hp0; break; }
-        frames++;
-        if (frames === 24) {                       // 0.4s in
-          after = Math.acos(Math.max(-1, Math.min(1,
-            shot.vel.clone().normalize().dot(
-              new (shot.vel.constructor)(w.pos.x - shot.g.position.x, 0, w.pos.z - shot.g.position.z)
-                .normalize())))) * 180 / Math.PI;
-        }
+        if (w.hp < hp0) { frames = i; break; }
       }
-      return { off0: +off0.toFixed(1), after: +after.toFixed(1), hurt: hurt || w.hp < hp0 };
+      return { off0: +off0.toFixed(1), hit: frames >= 0, frames };
     };
     const water = runFor("hydromancer");
     const fire  = runFor("pyromancer");
@@ -786,16 +798,85 @@ test("characters: the hydromancer's water bends onto a body it was not aimed at"
 
   ok(r.water.off0 > 45,
      "the test fired only " + r.water.off0 + "° off the target — too little to ask " +
-     "whether anything bends");
-  ok(r.water.hurt,
-     "the water never reached a body 60° off the line it was fired down, so the " +
-     "kit's one promise is not kept");
-  ok(r.water.after < 12,
-     "0.4s in, the stream was still pointing " + r.water.after + "° away from its " +
-     "target: it is being thrown, not flowing onto them");
-  ok(r.water.after < r.fire.after - 10,
-     "water was " + r.water.after + "° off target and fire " + r.fire.after + "° — too " +
-     "close for the hydromancer to read as the kit that finds its mark");
+     "whether anything finds anything");
+  ok(r.water.hit,
+     "the water never reached a body 60° off the line it was fired down, in four " +
+     "seconds — the kit's one promise is not kept");
+  ok(r.water.frames < 120,
+     "the water took " + r.water.frames + " frames to arrive; at that pace it is " +
+     "wandering there, not hunting");
+  ok(!r.fire.hit || r.fire.frames > r.water.frames + 20,
+     "fire arrived in " + r.fire.frames + " frames and water in " + r.water.frames +
+     " — too close for the hydromancer to read as the kit that finds its mark");
+});
+
+test("characters: the hydromancer carries nothing and calls water up out of the ground", async (pg) => {
+  // Three separate claims, and each is a thing that was true of this kit an
+  // hour ago and must not be true now: nothing rides the shoulders, the water
+  // begins at ground level and rises, and the shot is a CONNECTED body that
+  // follows its own head rather than a pellet leaving a wake behind it.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const stackFor = (who) => {
+      P.setCharacter(who);
+      P.PROFILE.charLv[who] = 6;
+      P.castState.held = 0; P.buildCastStack();
+      return P.castState.orbs.length;
+    };
+    const worn = { water: stackFor("hydromancer"),
+                   fire:  stackFor("pyromancer"),
+                   wind:  stackFor("windmage") };
+
+    P.setCharacter("hydromancer");
+    P.PROFILE.charLv.hydromancer = 6;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.castState.held = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 30; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1 / 60); }
+    P.parkWalkers();
+
+    const w = P.walkers.find(x => !x.dead);
+    const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+    w.pos.set(f.x * 26, 0, f.z * 26);
+    w.aggro = false; w.cool = 999; w.hp = 4000;
+
+    P.S.lock = w;
+    P.castFire();
+    const shot = P.castState.shots[P.castState.shots.length - 1];
+    const startY = shot.g.position.y;
+    let peakY = startY, spread = 0, live = 0;
+    for (let i = 0; i < 70 && P.castState.shots.includes(shot); i++) {
+      P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1 / 60);
+      if (!P.castState.shots.includes(shot)) break;
+      peakY = Math.max(peakY, shot.g.position.y);
+      // How far the visible body reaches back from the head: a connected
+      // stream spans real ground, a pellet's body is a point.
+      const on = (shot.seg || []).filter(m => m.visible);
+      live = Math.max(live, on.length);
+      for (const m of on) {
+        spread = Math.max(spread, Math.hypot(m.position.x - shot.g.position.x,
+                                             m.position.y - shot.g.position.y,
+                                             m.position.z - shot.g.position.z));
+      }
+    }
+    return { worn, startY: +startY.toFixed(2), peakY: +peakY.toFixed(2),
+             live, spread: +spread.toFixed(2) };
+  });
+
+  eq(r.worn.water, 0,
+     "the hydromancer is wearing " + r.worn.water + " on their back; this kit carries nothing");
+  ok(r.worn.fire > 0 && r.worn.wind > 0,
+     "the other two kits lost their carried stacks as well (fire " + r.worn.fire +
+     ", wind " + r.worn.wind + ") — the change was meant to be per kit");
+  ok(r.startY < 0.3,
+     "the water appeared at " + r.startY + " off the deck: it is coming out of the " +
+     "hands, not out of the ground");
+  ok(r.peakY > 1.6,
+     "the stream only reached " + r.peakY + " — it never rises, so nothing reads as " +
+     "water being pulled up");
+  ok(r.live > 8, "only " + r.live + " segments of the stream were ever drawn");
+  ok(r.spread > 3,
+     "the whole body of the stream sat within " + r.spread + " of its head — that is a " +
+     "pellet, not something flowing");
 });
 
 test("characters: water shoves a body, fire and blades do not", async (pg) => {
