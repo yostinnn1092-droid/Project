@@ -7338,7 +7338,10 @@ function stepCrown(dt) {
 // character (PYRO and WIND at the foot of this section), and the machinery
 // below reads the spec rather than knowing which character is playing.
 const FIRE_HOT = 0xff8a2e;
-const WIND_PALE = 0x9fe8ff;
+// Mint rather than the cyan this started as: the blade is a living gust, and
+// green reads as that where blue reads as ice — which the Ice Crown already
+// owns two colours' worth of.
+const WIND_PALE = 0x8ef0a8;
 
 const castState = { held: 0, t: 0, group: null, orbs: [], shots: [], embers: [] };
 
@@ -7435,87 +7438,112 @@ function burnFireball(g, t, seed, size) {
 // The arcs are open rather than closed rings on purpose: a closed ring is a
 // hoop, and a hoop reads as something to pass through. A crescent has a
 // leading point, and a leading point reads as something that cuts.
-// Squashed into an ellipse rather than left as a circle, and the openings of
-// all three arcs pointed the SAME way. Both matter: a true circle with its
-// gaps spread around it closes up into a hoop, and a hoop is something you
-// pass through. An ellipse with one open side has two points and a belly —
-// which is a blade.
-const squash = (g) => { g.scale(1, 0.62, 1); return g; };
-const bladeRimGeo   = squash(new T.TorusGeometry(0.46, 0.026, 5, 20, Math.PI * 1.28));
-const bladeBodyGeo  = squash(new T.TorusGeometry(0.38, 0.052, 6, 22, Math.PI * 1.22));
-const bladeEdgeGeo  = squash(new T.TorusGeometry(0.30, 0.028, 5, 18, Math.PI * 1.16));
-// A short, thick, bright section riding at the leading point. Real blades are
-// read by their glint, not by their outline.
-const bladeGlintGeo = squash(new T.TorusGeometry(0.43, 0.055, 6, 10, Math.PI * 0.26));
-const bladeWashGeo  = squash(new T.RingGeometry(0.10, 0.34, 22, 1, 0, Math.PI * 1.22));
-// The trail is a shed SLIVER, not a puff: wind leaves streaks. Each one is
-// dropped at a random angle, so the wake behind a blade reads as air coming
-// apart rather than as a dotted line of smaller blades.
-const bladeWispGeo  = new T.BoxGeometry(0.028, 0.028, 0.52);
-
-const bladeEdgeMat = new T.MeshBasicMaterial({ color: 0xf4feff, transparent: true,
-  opacity: 0.85, blending: T.AdditiveBlending, depthWrite: false });
-const bladeBodyMat = new T.MeshBasicMaterial({ color: WIND_PALE, transparent: true,
-  opacity: 0.5, blending: T.AdditiveBlending, depthWrite: false });
-const bladeRimMat = new T.MeshBasicMaterial({ color: 0x5fc8f0, transparent: true,
-  opacity: 0.30, blending: T.AdditiveBlending, depthWrite: false });
-const bladeWashMat = new T.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true,
-  opacity: 0.09, blending: T.AdditiveBlending, depthWrite: false,
-  side: T.DoubleSide });
-
-// Pale to nothing rather than pale to smoke: a fireball leaves soot behind,
-// a blade leaves disturbed air that simply stops being visible.
-const bladeTrailMats = [
-  new T.MeshBasicMaterial({ color: 0xf0fdff, transparent: true, opacity: 0.42,
-    blending: T.AdditiveBlending, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0xd6f6ff, transparent: true, opacity: 0.30,
-    blending: T.AdditiveBlending, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0xa8e6ff, transparent: true, opacity: 0.21,
-    blending: T.AdditiveBlending, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x86d2f6, transparent: true, opacity: 0.14,
-    blending: T.AdditiveBlending, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x6ab6e0, transparent: true, opacity: 0.09,
-    blending: T.AdditiveBlending, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x5aa0c8, transparent: true, opacity: 0.05,
-    blending: T.AdditiveBlending, depthWrite: false }),
-  new T.MeshBasicMaterial({ color: 0x4e8aad, transparent: true, opacity: 0.02,
-    blending: T.AdditiveBlending, depthWrite: false }),
-];
-
-function makeAirBlade() {
-  const g = new T.Group();
-  g.add(new T.Mesh(bladeWashGeo,  bladeWashMat));  // 0 compressed air inside
-  g.add(new T.Mesh(bladeRimGeo,   bladeRimMat));   // 1 wide outer curve
-  g.add(new T.Mesh(bladeBodyGeo,  bladeBodyMat));  // 2 the blade itself
-  g.add(new T.Mesh(bladeEdgeGeo,  bladeEdgeMat));  // 3 bright inner edge
-  g.add(new T.Mesh(bladeGlintGeo, bladeEdgeMat));  // 4 glint at the leading point
-  // Barely offset from each other: the three curves have to stack into ONE
-  // shape with one opening. Spreading them around the circle is what turned
-  // the first version into a hoop.
-  g.children[1].rotation.z = 0.10;
-  g.children[2].rotation.z = 0.00;
-  g.children[3].rotation.z = -0.08;
-  g.children[4].rotation.z = 1.02;
+// A blade is a RIBBON, not a hoop: thick through the belly and drawn out to a
+// point at each end, sweeping round and opening outward as it goes. No stock
+// geometry does that — a torus arc has one tube radius from end to end, which
+// is exactly why the first version of this read as a bracelet — so the curve
+// is built by hand: walk the arc, and at each step emit an inner and an outer
+// vertex whose separation is the width AT THAT POINT.
+//
+// `spiral` is what stops it closing into a circle: the radius grows along the
+// sweep, so the two tips pass each other at different distances from the
+// centre and the shape stays open.
+function crescentGeo({ r = 0.34, start = -0.35, span = Math.PI * 1.7, w = 0.10,
+                       spiral = 0.30, squash = 0.78, seg = 56 } = {}) {
+  const pos = [], idx = [];
+  for (let i = 0; i <= seg; i++) {
+    const t = i / seg;
+    const a = start + span * t;
+    const rr = r * (1 + spiral * t);
+    // Fine at both tips, fattest a little past the middle. The exponent is
+    // what keeps the points SHARP: a plain sine tapers too politely and the
+    // ends read as rounded caps.
+    const half = w * Math.pow(Math.sin(Math.PI * t), 0.55);
+    const c = Math.cos(a), s2 = Math.sin(a);
+    pos.push(c * (rr - half), s2 * (rr - half), 0);
+    pos.push(c * (rr + half), s2 * (rr + half), 0);
+    if (i < seg) {
+      const k = i * 2;
+      idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
+    }
+  }
+  const g = new T.BufferGeometry();
+  g.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  // Squashed after the fact, so the width tapers in the same proportion the
+  // sweep does and the whole thing reads as one curve seen at an angle.
+  g.scale(1, squash, 1);
   return g;
 }
 
-// All one way round, at slightly different rates. Counter-rotating them was
-// the first attempt and it churned the gaps closed; turning together keeps the
-// crescent readable while the small rate differences keep the edges alive.
+// Three passes of the same curve at three widths: a broad green haze, the
+// green body inside it, and a near-white core down the middle. That stack is
+// what makes a flat ribbon look lit from within rather than painted on.
+// The glow is DELIBERATELY much wider than the body — nearly three times.
+// Stacked additively, the core and body sum to white wherever they overlap,
+// so the only place the colour can live is the fringe outside them. A narrow
+// glow makes a white blade with a green hint; a broad one makes the green
+// blade with a white heart the reference actually shows.
+const bladeGlowGeo = crescentGeo({ w: 0.240 });
+const bladeBodyGeo = crescentGeo({ w: 0.090 });
+const bladeCoreGeo = crescentGeo({ w: 0.026 });
+// Smoke is torn ribbon, not dust: the same shape, shorter and fatter, thrown
+// at a random angle so the wake reads as air coming apart in sheets.
+const bladeWispGeo = crescentGeo({ r: 0.26, span: Math.PI * 0.95, w: 0.085,
+                                   spiral: 0.55, squash: 0.85, seg: 16 });
+
+const bladeGlowMat = new T.MeshBasicMaterial({ color: 0x4ed07c, transparent: true,
+  opacity: 0.32, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide });
+const bladeBodyMat = new T.MeshBasicMaterial({ color: WIND_PALE, transparent: true,
+  opacity: 0.72, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide });
+const bladeCoreMat = new T.MeshBasicMaterial({ color: 0xf4fff2, transparent: true,
+  opacity: 0.85, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide });
+
+// Green while it is still energy, then grey-green as it becomes only disturbed
+// air. The last two steps drop additive blending: smoke that keeps glowing is
+// not smoke, it is more blade.
+const bladeTrailMats = [
+  new T.MeshBasicMaterial({ color: 0xd8ffe2, transparent: true, opacity: 0.34,
+    blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide }),
+  new T.MeshBasicMaterial({ color: 0xa6f0b8, transparent: true, opacity: 0.26,
+    blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide }),
+  new T.MeshBasicMaterial({ color: 0x7fd499, transparent: true, opacity: 0.18,
+    blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide }),
+  new T.MeshBasicMaterial({ color: 0x6fae86, transparent: true, opacity: 0.12,
+    blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide }),
+  new T.MeshBasicMaterial({ color: 0x8d9d90, transparent: true, opacity: 0.20,
+    depthWrite: false, side: T.DoubleSide }),
+  new T.MeshBasicMaterial({ color: 0x79877c, transparent: true, opacity: 0.13,
+    depthWrite: false, side: T.DoubleSide }),
+  new T.MeshBasicMaterial({ color: 0x66736a, transparent: true, opacity: 0.06,
+    depthWrite: false, side: T.DoubleSide }),
+];
+
+// Two nested groups on purpose. The outer one is AIMED every frame — pointed
+// down the line of flight — and the inner one SPINS. Spinning the outer group
+// would be undone by the next aim, and spinning the three passes separately
+// would slide them off each other and lose the core.
+function makeAirBlade() {
+  const g = new T.Group();
+  const spin = new T.Group();
+  spin.add(new T.Mesh(bladeGlowGeo, bladeGlowMat));
+  spin.add(new T.Mesh(bladeBodyGeo, bladeBodyMat));
+  spin.add(new T.Mesh(bladeCoreGeo, bladeCoreMat));
+  g.add(spin);
+  spin.rotation.z = Math.random() * Math.PI * 2;
+  return g;
+}
+
 function spinAirBlade(g, t, seed, size) {
   const s = size || 1;
   g.scale.setScalar(s);
-  g.children[0].rotation.z -= 0.014;
-  g.children[1].rotation.z += 0.101;
-  g.children[2].rotation.z += 0.115;
-  g.children[3].rotation.z += 0.128;
-  g.children[4].rotation.z += 0.115;
-  // Breathing on the shared irregular flicker, so a blade never pulses in
-  // time with the ring of fire or with the blade beside it.
-  g.children[1].scale.setScalar(1 + 0.09 * flick(t * 3.4 + seed));
-  g.children[2].scale.setScalar(1 + 0.05 * flick(t * 4.9 + seed * 1.7));
-  g.children[3].scale.setScalar(1 + 0.07 * flick(t * 6.2 + seed * 2.3));
-  g.children[4].scale.setScalar(1 + 0.13 * flick(t * 7.1 + seed * 3.1));
+  const spin = g.children[0];
+  spin.rotation.z += 0.115;
+  // The haze breathes wider than the body and the core barely at all, so the
+  // edge of the light moves while the blade itself stays a solid shape.
+  spin.children[0].scale.setScalar(1 + 0.10 * flick(t * 3.4 + seed));
+  spin.children[1].scale.setScalar(1 + 0.05 * flick(t * 4.9 + seed * 1.7));
+  spin.children[2].scale.setScalar(1 + 0.02 * flick(t * 6.2 + seed * 2.3));
 }
 
 // A disc travelling edge-on is a line, and a line is invisible from behind the
@@ -7602,9 +7630,9 @@ const WIND = {
   fly:      1.62,
   // Denser and shorter-lived than fire's: the blade covers a metre and a half
   // in the time a fireball covers one, so the same interval would leave gaps.
-  trail:    { geo: () => bladeWispGeo, mats: bladeTrailMats, every: 0.011,
-              life: 0.30, spread: 0.10, rise: 0.05, drift: [-0.1, 0.35],
-              size: [0.7, 1.35], grow: 1.15, spin: [-7, 7] },
+  trail:    { geo: () => bladeWispGeo, mats: bladeTrailMats, every: 0.021,
+              life: 0.34, spread: 0.11, rise: 0.06, drift: [-0.1, 0.35],
+              size: [1.0, 2.2], grow: 1.9, spin: [-5, 5] },
 };
 
 // The kit of whoever is playing, or the pyromancer's as a stand-in for the
