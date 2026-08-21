@@ -731,6 +731,127 @@ test("characters: telekinesis-only drafts are withheld from the pyromancer", asy
      r.tele.join(", "));
 });
 
+test("characters: the hydromancer's water bends onto a body it was not aimed at", async (pg) => {
+  // The kit's whole claim is in the briefing: the stream FINDS them. Measured
+  // as how fast the shot comes to POINT AT its target after being fired 60
+  // degrees away from it — not as how far it turns in total. Total turning
+  // was the first metric here and it was worthless: a fireball that sails
+  // past and loops back racks up 177 degrees while being much worse at
+  // arriving, which is the opposite of what the number was supposed to say.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const runFor = (who) => {
+      P.setCharacter(who);
+      P.PROFILE.charLv[who] = 6;
+      P.buildWave(3); P.parkWalkers(); P.stripProps();
+      P.castState.held = 0; P.buildCastStack();
+      for (let i = 0; i < 60 * 30; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1 / 60); }
+      P.parkWalkers();
+
+      // Well off the line — about 60 degrees of it.
+      const w = P.walkers.find(x => !x.dead);
+      const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+      const side = { x: f.z, z: -f.x };
+      w.pos.set(f.x * 10 + side.x * 18, 0, f.z * 10 + side.z * 18);
+      w.aggro = false; w.cool = 999; w.hp = 4000;   // survives, so the shot has to arrive
+      const hp0 = w.hp;
+
+      P.S.lock = w;                       // fired straight ahead, locked to the side
+      P.castFire();
+      const shot = P.castState.shots[P.castState.shots.length - 1];
+      const off0 = Math.acos(Math.max(-1, Math.min(1,
+        shot.vel.clone().normalize().dot(
+          new (shot.vel.constructor)(w.pos.x - shot.g.position.x, 0, w.pos.z - shot.g.position.z)
+            .normalize())))) * 180 / Math.PI;
+
+      let after = off0, frames = 0, hurt = false;
+      for (let i = 0; i < 60 * 3; i++) {
+        P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1 / 60);
+        if (!P.castState.shots.includes(shot)) { hurt = w.hp < hp0; break; }
+        frames++;
+        if (frames === 24) {                       // 0.4s in
+          after = Math.acos(Math.max(-1, Math.min(1,
+            shot.vel.clone().normalize().dot(
+              new (shot.vel.constructor)(w.pos.x - shot.g.position.x, 0, w.pos.z - shot.g.position.z)
+                .normalize())))) * 180 / Math.PI;
+        }
+      }
+      return { off0: +off0.toFixed(1), after: +after.toFixed(1), hurt: hurt || w.hp < hp0 };
+    };
+    const water = runFor("hydromancer");
+    const fire  = runFor("pyromancer");
+    P.setCharacter("telekinetic");
+    return { water, fire };
+  });
+
+  ok(r.water.off0 > 45,
+     "the test fired only " + r.water.off0 + "° off the target — too little to ask " +
+     "whether anything bends");
+  ok(r.water.hurt,
+     "the water never reached a body 60° off the line it was fired down, so the " +
+     "kit's one promise is not kept");
+  ok(r.water.after < 12,
+     "0.4s in, the stream was still pointing " + r.water.after + "° away from its " +
+     "target: it is being thrown, not flowing onto them");
+  ok(r.water.after < r.fire.after - 10,
+     "water was " + r.water.after + "° off target and fire " + r.fire.after + "° — too " +
+     "close for the hydromancer to read as the kit that finds its mark");
+});
+
+test("characters: water shoves a body, fire and blades do not", async (pg) => {
+  // Control rather than damage is the trade this kit makes, and the shove is
+  // where that trade is visible.
+  //
+  // Measured as the knockback IMPULSE the hit imparts, not as ground the body
+  // covers. Two earlier metrics both failed on the same thing: a body runs its
+  // own AI while it is being pushed, and walks back against the shove at a
+  // speed that depends on which archetype the wave dealt — a Runner at 4.7
+  // cancels most of it, a Tank at 1.25 almost none. Distance-from-where-it-
+  // stood measured that argument rather than the shove, and read anywhere from
+  // 3.3 to 8 for the same shot. The impulse is what the kit actually applies.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const shoveFor = (who) => {
+      P.setCharacter(who);
+      P.PROFILE.charLv[who] = 6;
+      P.buildWave(3); P.parkWalkers(); P.stripProps();
+      P.castState.held = 0; P.buildCastStack();
+      for (let i = 0; i < 60 * 30; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1 / 60); }
+      P.parkWalkers();
+      P.MOD.allDmg = 1; P.MOD.blastR = 1; P.MOD.blastDmg = 1; P.WMOD.blastR = 1;
+
+      // Health to spare, so it is shoved rather than killed.
+      const w = P.walkers.find(x => !x.dead);
+      const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+      w.pos.set(f.x * 16, 0, f.z * 16);
+      w.aggro = false; w.cool = 999; w.hp = 4000;
+
+      P.S.lock = w;
+      P.castFire();
+      let peak = 0;
+      for (let i = 0; i < 110; i++) {
+        P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1 / 60);
+        peak = Math.max(peak, Math.hypot(w.kb.x, w.kb.z));
+      }
+      return +peak.toFixed(2);
+    };
+    const water = shoveFor("hydromancer");
+    const wind  = shoveFor("windmage");
+    const fire  = shoveFor("pyromancer");
+    P.setCharacter("telekinetic");
+    return { water, wind, fire };
+  });
+
+  ok(r.water > 30, "the water hit with an impulse of " + r.water + " — that is not a shove");
+  // Against the blade, which is the like-for-like case: both land a hit and
+  // nothing else. A fireball ends in a blast, and a blast throws whatever
+  // stands near it — an area effect doing an area effect's job, which is a
+  // different question from this one.
+  ok(r.water > r.wind * 3,
+     "water hit for " + r.water + " and the blade for " + r.wind + " — for the kit whose " +
+     "whole trade is control over damage, that is not a difference anyone will feel");
+});
+
 test("characters: a launched blade holds its angle instead of rolling", async (pg) => {
   // A crescent that turns on its way out reads as a thrown wheel. This one is
   // a held shape driven forward, so the roll has to be FIXED — the same on
@@ -869,15 +990,33 @@ test("characters: the wind mage's blade cuts a line and spares the bystanders", 
       // own AI, and a Runner crossing 4 units mid-flight would quietly rewrite
       // the layout the measurement depends on.
       const place = () => {
-        const step = gap || 6;
+        // NINE, not the six this started with. The fire control asserts that a
+        // fireball stops at the first body, and its blast reaches 4.4 — but a
+        // blast chains from the body's SURFACE, and body radii run to about
+        // 1.6 depending on which archetypes the wave happened to spawn. At a
+        // six-unit gap that leaves no margin at all, so the control passed or
+        // failed on which bodies the run dealt it: measured, roughly one run
+        // in three. Nine clears 4.4 + 1.6 outright.
+        const step = gap || 9;
         line.forEach((w, i) => { w.pos.set(6 + i * step, 0, 0); w.aggro = false; w.cool = 999; });
-        // Off the line by 3: further than any hit radius, well inside a
-        // fireball's blast. `near` sits by the first body, where the fireball
-        // stops; `far` by the third, where the blade's budget runs out.
-        near.pos.set(6, 0, 3);              near.aggro = false; near.cool = 999;
-        far.pos.set(6 + 2 * step, 0, 3);    far.aggro = false;  far.cool = 999;
+        // Off the line by 3.4, which is a WINDOW rather than a guess. A body's
+        // radius is 0.75 x its archetype's scale, so the widest normal body is
+        // a Tank at 1.065, and a blade reaches hitR + r = 2.37 at most. A
+        // blast reaches 4.4, measured centre to centre with no radius term.
+        // 3.4 sits a clear unit outside the first and a clear unit inside the
+        // second, whichever archetypes the wave happens to deal. At 3 it sat
+        // 0.1 outside the blade's reach and flipped with the roster.
+        near.pos.set(6, 0, 3.4);            near.aggro = false; near.cool = 999;
+        far.pos.set(6 + 2 * step, 0, 3.4);  far.aggro = false;  far.cool = 999;
       };
       place();
+
+      // Neutralise the wave's modifiers. Blast radius is multiplied by
+      // MOD.blastR * WMOD.blastR, and which modifier a wave draws is random —
+      // so without this the control's geometry is not the geometry the
+      // comments above reason about.
+      P.MOD.blastR = 1; P.MOD.blastDmg = 1; P.MOD.allDmg = 1;
+      P.WMOD.blastR = 1;
 
       const hp0 = live.map(w => w.hp);
       P.S.lock = null;
@@ -906,9 +1045,9 @@ test("characters: the wind mage's blade cuts a line and spares the bystanders", 
   eq(r.wind.fourth, false,
      "the blade cut a fourth body: its pierce budget is not being spent down");
   eq(r.wind.far, false,
-     "a body 3 off the line WHERE THE BLADE STOPPED was hurt — it is detonating, and " +
+     "a body 3.4 off the line WHERE THE BLADE STOPPED was hurt — it is detonating, and " +
      "the pierce it trades that blast for is being handed out for free");
-  eq(r.wind.near, false, "the blade hurt a body 3 off the line at the near end");
+  eq(r.wind.near, false, "the blade hurt a body 3.4 off the line at the near end");
 
   // Through a body that is still standing afterwards. Without releasing its
   // homing target on the way through, the blade turns straight back onto the
@@ -925,14 +1064,15 @@ test("characters: the wind mage's blade cuts a line and spares the bystanders", 
 
   // The control. Same layout, same shot, the other kit: the blast is exactly
   // what reaches the near bystander, and exactly what stops the shot at the
-  // first body — 6 short of the second.
+  // first body — nine short of the second, which is past anything the blast
+  // can chain to.
   eq(r.fire.near, true,
      "the fireball left the bystander beside its impact untouched — the blast is what " +
      "makes a shot into a crowd worth taking, and it is not landing");
   eq(r.fire.line, 1,
      "the fireball reached " + r.fire.line + " bodies in the line; it is meant to stop " +
      "at the first, and the next is further away than its blast can chain");
-  eq(r.fire.far, false, "the fireball reached a body 18 downrange without travelling there");
+  eq(r.fire.far, false, "the fireball reached a body 24 downrange without travelling there");
 });
 
 test("characters: the telekinetic's level buys carry capacity", async (pg) => {

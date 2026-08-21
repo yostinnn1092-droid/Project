@@ -224,10 +224,11 @@
   /* The brief IS per character: half of it is telekinesis-only, and each
      caster has to have their own resource explained rather than a shared
      paragraph that fits neither. */
-  .brief .pyro, .brief .wind { display: none; }
+  .brief .pyro, .brief .wind, .brief .water { display: none; }
   body.casterChar .brief .kin { display: none; }
   body.pyromancerChar .brief .pyro { display: block; }
   body.windmageChar .brief .wind { display: block; }
+  body.hydromancerChar .brief .water { display: block; }
   #diffTag { display: block; font-family: var(--mono); font-size: 8px;
              letter-spacing: .16em; color: var(--dim); margin-top: 2px; }
   #menuBest { display: none; margin-top: 10px; font-size: 11px; color: var(--force); opacity: .85; }
@@ -587,6 +588,17 @@
          trade: you never have to go and fetch ammunition, and a shot into empty air
          is worth nothing at all. Beat a <b>boss</b> to raise your level for good — it
          is kept between runs, and it is the only thing here that is.</p>
+
+      <p class="water"><b>FLOW</b> draws a stream out of the air and sends it
+         after one of them. It <b>bends onto its target</b> rather than flying where
+         you pointed, so it is the one shot here that does not need to be led — and
+         it lands hard enough to take a body off its feet and put it somewhere
+         else. Aim is a suggestion; the shove is the point.</p>
+
+      <p class="water"><b>There is nothing on the ground to pick up.</b> The water
+         comes from nowhere and grows back on its own, up to the number your level
+         allows. Beat a <b>boss</b> to raise that level for good — it is kept
+         between runs, and it is the only thing here that is.</p>
 
       <p>Every attack has a <b>wind-up</b> — a flaring ring and a sound. Step, dash or jump out
          of it and it whiffs. <em>Grabbers</em> root you; <b>DASH</b> always breaks it.
@@ -7343,6 +7355,11 @@ const FIRE_HOT = 0xff8a2e;
 // owns two colours' worth of.
 const WIND_PALE = 0x8ef0a8;
 
+// Water is not a light source, so it does not get one of the hot colours the
+// other two use. It is a body the scene lights: a mid blue you can see the
+// ground through, with a pale sheen riding on top of it.
+const WATER_BLUE = 0x3aa8e8;
+
 const castState = { held: 0, t: 0, group: null, orbs: [], shots: [], embers: [] };
 
 // ── the fireball ──────────────────────────────────────────────────────────
@@ -7599,6 +7616,95 @@ function faceAirBlade(g, vel) {
 // roll it was carrying and takes the one every launched blade shares.
 function launchAirBlade(g) { g.children[0].rotation.z = BLADE_ROLL; }
 
+// ═══════════════════════════════════════════════════════════════ hydromancer
+// Water is drawn out of the air rather than carried as a solid, and the model
+// has to say so: where fire and the blade GLOW — additive, brightest where
+// they stack — water is TRANSLUCENT. Its body is an ordinary blended blue you
+// can see the ground through, and only the sheen on top of it is additive.
+// Building water additively makes a blue lamp, which is what the first pass
+// of this looked like.
+const waterDropGeo = new T.IcosahedronGeometry(0.24, 1);
+// The whip from the reference: a tapered ribbon curling around the head, so
+// the shot reads as water being PULLED along rather than as a pellet. Barely
+// any spiral — water follows the arm, it does not fly off into a coil.
+const waterCurlGeo = crescentGeo({ r: 0.34, span: Math.PI * 1.25, w: 0.115,
+                                   spiral: 0.12, squash: 0.92, seg: 40 });
+const waterSprayGeo = new T.IcosahedronGeometry(0.14, 0);
+
+// These are unlit materials, so what you see is simply colour x opacity —
+// there is no lamp to make a dim blue read as a bright one. Both are pushed
+// high for that reason: the pass before this used half these numbers and the
+// water came out the grey of dishwater against a night arena.
+const waterBodyMat = new T.MeshBasicMaterial({ color: 0x2b9ce4, transparent: true,
+  opacity: 0.86, depthWrite: false, side: T.DoubleSide });
+// Deeper than the head, not lighter. The curl is drawn OVER the head, so a
+// pale one lays a grey film across the whole shot — which is what the last
+// three passes of this kept producing.
+const waterSkinMat = new T.MeshBasicMaterial({ color: 0x1d86cf, transparent: true,
+  opacity: 0.88, depthWrite: false, side: T.DoubleSide });
+// The additive layers, and they are kept SMALL and FAINT on purpose. A wet
+// surface throws back a hard highlight, but at the strength the first pass
+// used, additive white swallowed the blue underneath it and the whole shot
+// came out the colour of steam. Blue is the body of this thing; white is a
+// glint on one part of it.
+const waterSheenMat = new T.MeshBasicMaterial({ color: 0xdff4ff, transparent: true,
+  opacity: 0.22, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide });
+
+
+// Droplets thrown off the stream. They go from lit water to dark water and
+// simply thin out — no smoke step, because water does not burn away, it
+// falls.
+const waterTrailMats = [
+  new T.MeshBasicMaterial({ color: 0x6fd0ff, transparent: true, opacity: 0.58, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x4fbdf8, transparent: true, opacity: 0.50, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x39a6e8, transparent: true, opacity: 0.42, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x2f8fd0, transparent: true, opacity: 0.42, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x2775ae, transparent: true, opacity: 0.28, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x215f8c, transparent: true, opacity: 0.16, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x1b4a6c, transparent: true, opacity: 0.07, depthWrite: false }),
+];
+
+function makeWaterWhip() {
+  const g = new T.Group();
+  g.add(new T.Mesh(waterDropGeo, waterBodyMat));   // 0 the head, a body of water
+  g.add(new T.Mesh(waterDropGeo, waterSheenMat));  // 1 the highlight on it
+  g.add(new T.Mesh(waterCurlGeo, waterSkinMat));   // 2 the whip curling behind
+  g.children[0].scale.setScalar(0.78);   // the head gives way to the curl
+  g.children[1].scale.setScalar(0.30);
+  g.children[2].scale.setScalar(1.22);   // ...which is the thing that reads as water
+  return g;
+}
+
+// Water has no flame to flicker and no blade to hold rigid: it WOBBLES. The
+// head is stretched and squeezed on axes that disagree with each other, which
+// is what stops a sphere reading as a marble, and the curl breathes against
+// it rather than with it.
+function flowWater(g, t, seed, size) {
+  const s = size || 1;
+  g.scale.setScalar(s);
+  const w1 = flick(t * 4.3 + seed), w2 = flick(t * 5.9 + seed * 1.6);
+  g.children[0].scale.set(0.78 * (1 + 0.20 * w1), 0.78 * (1 - 0.13 * w2), 0.78 * (1 + 0.09 * w2));
+  g.children[1].scale.set(0.30 * (1 + 0.24 * w2), 0.30, 0.30 * (1 - 0.10 * w1));
+  g.children[2].scale.set(1.22 * (1 + 0.10 * w2), 1.22 * (1 + 0.16 * w1), 1.22);
+}
+
+// Pointed along the flow, vertical component and all — unlike the blade, a
+// stream bending downward onto a body SHOULD lean into the bend. That is what
+// makes it read as water falling on someone rather than as a dart.
+function aimWater(g, vel) {
+  if (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z < 1e-6) return;
+  g.lookAt(g.position.x + vel.x, g.position.y + vel.y, g.position.z + vel.z);
+}
+
+// Drawn out of the air at the moment of the throw: a handful of droplets
+// gathering where the shot begins. Takes its own vector rather than a shared
+// temp — castFire is holding the aim in one of those.
+const waterConjurePos = new T.Vector3();
+function conjureWater(g) {
+  waterConjurePos.copy(g.position);
+  sparks(waterConjurePos, 0x9fdcff, 7, 5);
+}
+
 // ── the two kits ──────────────────────────────────────────────────────────
 // Read by the machinery below. Anything a character does differently lives
 // here; anything they share does not.
@@ -7675,6 +7781,56 @@ const WIND = {
   trail:    { geo: () => bladeWispGeo, mats: bladeTrailMats, every: 0.021,
               life: 0.34, spread: 0.11, rise: 0.06, drift: [-0.1, 0.35],
               size: [1.0, 2.2], grow: 1.9, spin: [-5, 5] },
+};
+
+const WATER = {
+  label:    "Water",
+  verb:     "Flow",
+  kind:     "flood",
+  dry:      "NO WATER LEFT — it gathers again",
+  hint:     "Tap FLOW to throw · the water finds them on its own",
+  regen:    2.0,
+  // Slow on purpose. The whole point of this kit is that you WATCH the shot
+  // bend around and land, and at the blade's speed there is nothing to watch.
+  speed:    24,
+  dmg:      130,
+  pierce:   0,
+  blastR:   0,
+  blastDmg: 0,
+  hitR:     1.2,
+  // Long-lived, because a shot that curves covers far more ground than the
+  // distance to its target, and one that expires mid-bend looks like a bug.
+  life:     3.8,
+  // What water is FOR. Fire clears a footprint, a blade clears a line, water
+  // takes one body off its feet. Knockback is a velocity that decays at 7 a
+  // second, so a body slides roughly knock/7 before it stops: this is about
+  // eight metres, against the fireball's one and the blade's half. It does
+  // NOT out-throw a fireball's BLAST, which is an area effect and moves a
+  // crowd further than this moves its one target — different jobs.
+  knock:    55,
+  // Nearly four times the pull the other two use. This is the "flowing to the
+  // target" in the brief made mechanical: the stream visibly bends onto them
+  // instead of being thrown at where they were standing.
+  home:     230,
+  orbitR:   0.64,
+  low:      1.26,
+  high:     1.96,
+  hot:      WATER_BLUE,
+  make:     makeWaterWhip,
+  anim:     flowWater,
+  launch:   conjureWater,
+  aim:      aimWater,
+  carry:    0.64,
+  fly:      1.70,
+  // The densest of the three trails and the only one that FALLS. Water thrown
+  // off a stream does not rise and it does not hang: it drops out of the air,
+  // which is what separates a spray from smoke.
+  // Spaced out rather than packed. At half this interval and full opacity the
+  // droplets stacked several deep around the head and bleached the whole shot
+  // white — the spray has to read as separate water, not as a fog bank.
+  trail:    { geo: () => waterSprayGeo, mats: waterTrailMats, every: 0.022,
+              life: 0.52, spread: 0.12, rise: 0.02, drift: [-1.6, -0.5],
+              size: [0.8, 1.6], grow: 0.65, spin: [-4, 4] },
 };
 
 // The kit of whoever is playing, or the pyromancer's as a stand-in for the
@@ -7820,7 +7976,7 @@ function stepCast(dt) {
               s.seek.pos.y + 1 - s.g.position.y,
               s.seek.pos.z - s.g.position.z);
       const d = tmp.length() || 1;
-      s.vel.addScaledVector(tmp.divideScalar(d), 62 * dt);
+      s.vel.addScaledVector(tmp.divideScalar(d), (spec.home || 62) * dt);
       s.vel.setLength(spec.speed);
     }
     s.g.position.addScaledVector(s.vel, dt);
@@ -9576,6 +9732,18 @@ const CHARS = {
     props: 0,
     cast: WIND,
     perk(lv) { return castCap(lv) + " air blades held"; },
+  },
+  // The third answer to the same question. Fire clears a footprint, a blade
+  // clears a line, and water takes one body off its feet and puts it where
+  // you want it — the only kit here whose point is control rather than
+  // damage.
+  hydromancer: {
+    name: "HYDROMANCER",
+    desc: "Nothing to lift. Water out of thin air.",
+    power: "water",
+    props: 0,
+    cast: WATER,
+    perk(lv) { return castCap(lv) + " streams held"; },
   },
 };
 for (const k in CHARS) CHARS[k].key = k;

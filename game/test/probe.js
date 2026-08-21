@@ -5,6 +5,7 @@
 window.__probe = {
   // state
   S, CFG, RING, ringState, MAW, ENEMIES, UPGRADES, OBJECTS, WAVES,
+  MOD, WMOD,
   hero, walkers, rocks, arrows, shocks, taken, renderer, camera, scene, cam,
   spawnQ, obstacles,
 
