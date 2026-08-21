@@ -1631,6 +1631,13 @@ const PYRO = {
   hitR:     1.15,
   life:     3.4,
   orbitR:   0.62,     // how far behind the shoulders they ride
+  // The height band the carried balls scatter through, measured from the
+  // hero's feet. Both ends are load-bearing: at `low` the bottom of a ball
+  // (radius ~0.24 once scaled, plus its bob) still clears the ground by most
+  // of a metre, and `high` stays under the Ice Crown at CROWN_Y so the stack
+  // reads as carried on the back rather than orbiting the head.
+  low:      1.28,
+  high:     1.95,
   hot:      0xff8a2e,
 };
 
@@ -1729,9 +1736,30 @@ function buildPyroStack() {
   if (!isPyro()) { g.visible = false; return; }
   g.visible = true;
   const cap = pyroCap(charLv());
+  // Height bands, one per slot, handed out in shuffled order. A plain uniform
+  // draw can deal three balls the same height by luck, and taking band i for
+  // slot i would tilt the cloud into a diagonal — the ordered layout this
+  // scatter exists to break. Shuffling gives a guaranteed spread with no
+  // relationship between a ball's slot and where it rides.
+  const bands = [];
+  for (let i = 0; i < cap; i++) bands.push(i);
+  for (let i = cap - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = bands[i]; bands[i] = bands[j]; bands[j] = t;
+  }
   for (let i = 0; i < cap; i++) {
     const m = makeFireball();
     m.userData.slot = i;
+    // Drawn once, here, and then carried for the life of the stack. Re-rolling
+    // per frame would make the cloud boil around the player instead of riding
+    // with them.
+    m.userData.off = {
+      side: (i % 2 ? 1 : -1) * (0.18 + Math.floor(i / 2) * 0.28 + Math.random() * 0.15),
+      back: PYRO.orbitR + (Math.random() - 0.5) * 0.36,
+      y:    PYRO.low + (bands[i] + Math.random()) / cap * (PYRO.high - PYRO.low),
+      phase: Math.random() * Math.PI * 2,
+      rate:  2.0 + Math.random() * 1.3,
+    };
     g.add(m);
     pyroState.orbs.push(m);
   }
@@ -1790,21 +1818,22 @@ function stepPyro(dt) {
       pyroState.t = PYRO.regen;
     }
 
-    // Ride behind the shoulders in a shallow fan, so they read as carried
-    // rather than orbiting — an orbit would be a second ring of fire.
+    // Ride behind the shoulders as a loose cloud, so they read as carried
+    // rather than orbiting — an orbit would be a second ring of fire. Each
+    // ball keeps the offset it was dealt when the stack was built, so the
+    // scatter travels with the player and turns with the camera.
     const back = tmp.set(-Math.sin(cam.yaw), 0, -Math.cos(cam.yaw)).normalize();
     const side = tmp2.set(back.z, 0, -back.x);
     for (let i = 0; i < pyroState.orbs.length; i++) {
       const orb = pyroState.orbs[i];
       orb.visible = i < pyroState.held;
       if (!orb.visible) continue;
-      const n = Math.max(1, pyroState.held);
-      const spread = (i - (n - 1) / 2) * 0.46;
-      const bob = Math.sin(S.t * 2.4 + i * 1.7) * 0.07;
+      const off = orb.userData.off;
+      const bob = Math.sin(S.t * off.rate + off.phase) * 0.07;
       orb.position.set(
-        hero.pos.x + back.x * PYRO.orbitR + side.x * spread,
-        hero.pos.y + 1.62 + bob,
-        hero.pos.z + back.z * PYRO.orbitR + side.z * spread);
+        hero.pos.x + back.x * off.back + side.x * off.side,
+        hero.pos.y + off.y + bob,
+        hero.pos.z + back.z * off.back + side.z * off.side);
       // Each one burns on its own phase, the same reason the ring's curtains
       // do: a stack pulsing in unison reads as one object.
       burnFireball(orb, S.t, i * 2.1, 0.66);

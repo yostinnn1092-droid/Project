@@ -614,6 +614,68 @@ test("characters: the pyromancer's stack is capped by level and grows back", asy
   eq(r.inFlight, 1, "firing put nothing in the air");
 });
 
+test("characters: the carried fireballs scatter behind the player", async (pg) => {
+  // They used to sit in one evenly spaced line at a single height, which reads
+  // as a rack rather than fire being carried. What the scatter has to be: a
+  // spread in depth as well as sideways, a spread in height, every ball clear
+  // of the ground and none of them up at the crown — and fixed per ball, so
+  // the cloud rides with the player instead of boiling around them.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("pyromancer");
+    P.PROFILE.charLv.pyromancer = 7;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.pyroState.held = 0; P.buildPyroStack();
+    for (let i = 0; i < 60 * 40; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1 / 60); }
+
+    // Depth is measured along the axis the stack rides on, not as a raw
+    // distance: a straight sideways line puts every ball at the same depth
+    // but at different distances, so distance alone would call it scattered.
+    const bx = -Math.sin(P.cam.yaw), bz = -Math.cos(P.cam.yaw);
+    const rel = () => P.pyroState.orbs.filter(o => o.visible).map(o => ({
+      back: (o.position.x - P.hero.pos.x) * bx + (o.position.z - P.hero.pos.z) * bz,
+      side: (o.position.x - P.hero.pos.x) * bz - (o.position.z - P.hero.pos.z) * bx,
+      y:     o.position.y - P.hero.pos.y,
+    }));
+    const a = rel();
+    const span = (k) => Math.max(...a.map(o => o[k])) - Math.min(...a.map(o => o[k]));
+
+    // Same hero, one frame later: the offsets must not have been re-rolled.
+    P.hero.hp = 99; P.step(1 / 60);
+    const b = rel();
+    let drift = 0;
+    for (let i = 0; i < a.length; i++)
+      drift = Math.max(drift, Math.abs(a[i].back - b[i].back), Math.abs(a[i].side - b[i].side));
+
+    // And they travel with the player rather than staying put.
+    P.hero.pos.set(12, 0, 0); P.hero.hp = 99; P.step(1 / 60);
+    const c = rel();
+    let carried = 0;
+    for (let i = 0; i < a.length; i++)
+      carried = Math.max(carried, Math.abs(a[i].back - c[i].back), Math.abs(a[i].side - c[i].side));
+
+    return { n: a.length, backSpan: span("back"), sideSpan: span("side"), ySpan: span("y"),
+             lowest: Math.min(...a.map(o => o.y)), highest: Math.max(...a.map(o => o.y)),
+             drift, carried, crownY: P.CROWN_Y };
+  });
+
+  ok(r.n >= 5, "only " + r.n + " fireballs were carried, too few to judge the spread");
+  ok(r.backSpan > 0.12,
+     "the fireballs all ride at the same depth (span " + r.backSpan.toFixed(3) + ") — still a line");
+  ok(r.sideSpan > 0.5, "the fireballs barely spread sideways: " + r.sideSpan.toFixed(3));
+  ok(r.ySpan > 0.35, "the fireballs sit at nearly one height: span " + r.ySpan.toFixed(3));
+  // A ball is ~0.24 across at this scale, so its underside is that much below
+  // the centre the test can see.
+  ok(r.lowest - 0.25 > 0.6,
+     "the lowest fireball hangs at " + r.lowest.toFixed(2) + ", close enough to scrape the ground");
+  ok(r.highest < r.crownY,
+     "a fireball rode up to " + r.highest.toFixed(2) + ", at or above the crown (" + r.crownY + ")");
+  ok(r.drift < 1e-6,
+     "the offsets are re-rolled every frame (drift " + r.drift.toFixed(4) + ") — the cloud boils");
+  ok(r.carried < 1e-6,
+     "the fireballs did not follow the player (offset moved " + r.carried.toFixed(3) + ")");
+});
+
 test("characters: telekinesis-only drafts are withheld from the pyromancer", async (pg) => {
   // Offering "carry 3 more objects" to a character with no objects is a dead
   // pick, and the draft only ever shows three — one wasted slot is a third of

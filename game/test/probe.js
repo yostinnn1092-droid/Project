@@ -5,7 +5,7 @@
 window.__probe = {
   // state
   S, CFG, RING, ringState, MAW, ENEMIES, UPGRADES, OBJECTS, WAVES,
-  hero, walkers, rocks, arrows, shocks, taken, renderer, camera, scene,
+  hero, walkers, rocks, arrows, shocks, taken, renderer, camera, scene, cam,
   spawnQ, obstacles,
 
   // systems under test
@@ -14,7 +14,7 @@ window.__probe = {
   CHARS, PROFILE, PYRO, pyroState, setCharacter, charLevel, pyroCap,
   pyroFire, buildPyroStack, levelCharacter, carryCap,
   charNow() { return CHAR.key; },
-  CROWN, crownState, crownUpgrade, buildCrown, stepCrown,
+  CROWN, CROWN_Y, crownState, crownUpgrade, buildCrown, stepCrown,
   judgeFrame, setQuality,
 
   // observers
