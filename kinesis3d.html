@@ -7563,15 +7563,34 @@ function pulseAirBlade(g, t, seed, size) {
   spin.children[2].scale.setScalar(1 + 0.02 * flick(t * 6.2 + seed * 2.3));
 }
 
-// A disc travelling edge-on is a line, and a line is invisible from behind the
-// player — which is where the player is. So the blade flies FACE-ON, spinning
-// about the axis it travels along. It costs a little physical plausibility and
-// buys the entire read of the projectile.
+// In flight the blade goes EDGE FIRST: it stands upright with its plane along
+// the line of travel, so it cuts into the air like a thrown knife rather than
+// pushing its face through it.
+//
+// Know what this costs. A plane that contains the direction of travel is seen
+// EDGE-ON from anywhere on that line — and the player is on that line, behind
+// it. Fired straight ahead the blade is a bright vertical stroke, not a
+// crescent; the shape only opens up as the shot crosses the view or the player
+// turns. That is the trade this orientation makes.
+//
+// Yaw only, never pitch: the blade stays upright even when homing pulls it
+// down toward a body's chest, so it can never tip onto its face.
+function aimAirBlade(g, vel) {
+  if (vel.x * vel.x + vel.z * vel.z < 1e-8) return;
+  // A quarter turn off the heading puts the face SIDEWAYS, which is the same
+  // thing as putting the plane along the line of flight.
+  g.rotation.set(0, Math.atan2(vel.x, vel.z) + Math.PI / 2, 0, "YXZ");
+}
+
+// On the back it is the opposite problem: a blade held edge-on to the player
+// is a line, and a line is invisible. So the carried ones turn their face to
+// the camera — the stack has to be legible sitting still, and it is the only
+// place the player ever looks at one closely.
 // Takes no scratch vector of its own on purpose. It is called from inside the
 // placement loop, which is holding the side axis in one of the shared temps —
 // borrowing that temp here silently re-aimed the axis and stacked the whole
 // carried set into a single narrow line.
-function aimAirBlade(g, vel) {
+function faceAirBlade(g, vel) {
   if (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z < 1e-6) return;
   g.lookAt(g.position.x + vel.x, g.position.y + vel.y, g.position.z + vel.z);
 }
@@ -7645,7 +7664,8 @@ const WIND = {
   make:     makeAirBlade,
   anim:     pulseAirBlade,
   launch:   launchAirBlade,
-  aim:      aimAirBlade,
+  aim:      aimAirBlade,      // in flight: upright, edge into the wind
+  carryAim: faceAirBlade,     // on the back: turned to face the player
   carry:    0.62,
   // Bigger in the air than the carried ones by more than fire is, because a
   // crescent seen at 40 metres is mostly empty space where a ball is not.
@@ -7780,7 +7800,8 @@ function stepCast(dt) {
         hero.pos.z + back.z * off.back + side.z * off.side);
       // A carried blade faces the way the player does, so the crescents read
       // face-on over the shoulders instead of edge-on as three thin lines.
-      if (spec.aim) spec.aim(orb, tmp3.set(-back.x, 0, -back.z));
+      const orbAim = spec.carryAim || spec.aim;
+      if (orbAim) orbAim(orb, tmp3.set(-back.x, 0, -back.z));
       // Each one animates on its own phase, the same reason the ring's
       // curtains do: a stack pulsing in unison reads as one object.
       spec.anim(orb, S.t, i * 2.1, spec.carry);

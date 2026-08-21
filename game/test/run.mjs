@@ -769,9 +769,32 @@ test("characters: a launched blade holds its angle instead of rolling", async (p
     const before = orb.children[0].rotation.z;
     for (let i = 0; i < 30; i++) { P.hero.hp = 99; P.step(1 / 60); }
 
+    // Which PLANE the blade occupies. The columns of the world matrix are the
+    // object's own axes, so the third column is the face normal.
+    first.g.updateMatrixWorld(true);
+    const e = first.g.matrixWorld.elements;
+    const nl = Math.hypot(e[8], e[9], e[10]) || 1;
+    const n = [e[8] / nl, e[9] / nl, e[10] / nl];
+    const v = first.vel.clone().normalize();
+    const orbN = (() => {
+      const o = P.castState.orbs[0];
+      o.updateMatrixWorld(true);
+      const q = o.matrixWorld.elements;
+      const l = Math.hypot(q[8], q[9], q[10]) || 1;
+      return [q[8] / l, q[9] / l, q[10] / l];
+    })();
+
     return {
       roll0, drift: Math.max(...rolls.map(z => Math.abs(z - roll0))), frames: rolls.length,
       matched: Math.abs(rollOf(second) - roll0) < 1e-9,
+      faceAlongTravel: Math.abs(n[0] * v.x + n[1] * v.y + n[2] * v.z),
+      facePitch: Math.abs(n[1]),
+      // Compared against the BACK axis, not against up: an edge-first carried
+      // blade and a player-facing one both have a horizontal normal, so up
+      // cannot tell them apart. Facing the player means the normal lies ALONG
+      // the axis the stack rides on.
+      carriedFacesPlayer: Math.abs(orbN[0] * -Math.sin(P.cam.yaw) +
+                                   orbN[2] * -Math.cos(P.cam.yaw)),
       carried: Math.abs(orb.children[0].rotation.z - before),
       spread: new Set(P.castState.orbs.map(o => o.children[0].rotation.z.toFixed(4))).size,
       orbs: P.castState.orbs.length,
@@ -788,6 +811,18 @@ test("characters: a launched blade holds its angle instead of rolling", async (p
   // of what stops the stack looking like one shape stamped out eight times.
   ok(r.spread >= r.orbs - 1,
      "the carried blades share angles: " + r.spread + " distinct across " + r.orbs);
+  // Edge first: the blade's plane CONTAINS the line of flight, so its face
+  // points across that line rather than down it.
+  ok(r.faceAlongTravel < 0.01,
+     "the blade is pushing its face through the air (face·travel " +
+     r.faceAlongTravel.toFixed(3) + "), not cutting edge first");
+  ok(r.facePitch < 0.01,
+     "the blade has tipped out of the upright (face·up " + r.facePitch.toFixed(3) + ")");
+  // ...and the ones on the back must NOT do that, or the stack turns into a
+  // row of invisible lines.
+  ok(r.carriedFacesPlayer > 0.9,
+     "a carried blade is no longer facing the player (face·back " +
+     r.carriedFacesPlayer.toFixed(3) + ") — the stack reads as a row of lines");
 });
 
 test("characters: the wind mage's blade cuts a line and spares the bystanders", async (pg) => {
