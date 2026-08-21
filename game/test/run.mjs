@@ -493,15 +493,17 @@ test("aura: the plume licks like flame, it does not scroll like a belt", async (
      "the flame never leans both ways, so it is not licking");
 });
 
-test("characters: the pyromancer's arena has nothing to pick up", async (pg) => {
-  // The two characters are meant to be different LEVELS, not different
-  // buttons. The telekinetic's magazine is the ground, so it is covered; the
-  // pyromancer carries their own, so the ground is bare. If both fields look
-  // the same, the second character is the first one wearing a hat.
+test("characters: only the character who lifts things gets things to lift", async (pg) => {
+  // The characters are meant to be different LEVELS, not different buttons.
+  // The telekinetic's magazine is the ground, so it is covered; everyone who
+  // carries their own ammunition gets a bare field. If the arenas look the
+  // same, the extra characters are the first one wearing a hat.
   //
-  // The trap here is the `Math.max(1, ...)` floor on the per-type count: it
-  // exists so a wave never opens with nothing to throw, and it will happily
-  // floor a density of zero back up to one prop of every type.
+  // Every character in the table, not just the ones that existed when this was
+  // written: the trap here is the `Math.max(1, ...)` floor on the per-type
+  // count, which exists so a wave never opens with nothing to throw and will
+  // happily floor a density of zero back up to one prop of every type — and it
+  // would do that to a new character just as silently.
   const r = await pg.evaluate(() => {
     const P = window.__probe;
     const count = (who) => {
@@ -509,17 +511,23 @@ test("characters: the pyromancer's arena has nothing to pick up", async (pg) => 
       P.buildWave(5);
       return P.rocks.filter(o => !o.gone).length;
     };
-    const tele = count("telekinetic");
-    const pyro = count("pyromancer");
+    const out = {};
+    for (const key in P.CHARS) out[key] = { props: P.CHARS[key].props, spawned: count(key) };
     P.setCharacter("telekinetic");
-    return { tele, pyro, back: count("telekinetic") };
+    out.back = { props: 1, spawned: count("telekinetic") };
+    return out;
   });
 
-  ok(r.tele > 5, "the telekinetic's arena should be littered; got " + r.tele + " props");
-  eq(r.pyro, 0,
-     "the pyromancer's arena still spawned " + r.pyro + " throwable props — the " +
-     "per-type floor is flooring a zero density back up to one of each");
-  ok(r.back > 5, "switching back to the telekinetic left the arena bare (" + r.back + ")");
+  for (const key in r) {
+    if (r[key].props > 0)
+      ok(r[key].spawned > 5, key + "'s arena should be littered; got " + r[key].spawned);
+    else
+      eq(r[key].spawned, 0,
+         key + "'s arena still spawned " + r[key].spawned + " throwable props — the " +
+         "per-type floor is flooring a zero density back up to one of each");
+  }
+  ok(r.back.spawned > 5,
+     "switching back to the telekinetic left the arena bare (" + r.back.spawned + ")");
 });
 
 test("characters: a boss kill levels the one you are playing, permanently", async (pg) => {
@@ -535,7 +543,7 @@ test("characters: a boss kill levels the one you are playing, permanently", asyn
     P.buildWave(3); P.parkWalkers(); P.stripProps();
     P.spawnMaw ? P.spawnMaw(0, -12) : P.spawnWalker("maw", 0, -12);
     const boss = P.walkers.filter(w => !w.dead).pop();
-    const capBefore = P.pyroCap(P.charLevel("pyromancer"));
+    const capBefore = P.castCap(P.charLevel("pyromancer"));
     // The plates absorb damage while they stand, so a boss with its armour on
     // simply will not die here — strip them first or this measures the shield.
     boss.platesLeft = 0;
@@ -550,7 +558,7 @@ test("characters: a boss kill levels the one you are playing, permanently", asyn
       after: P.charLevel("pyromancer"),
       other: P.charLevel("telekinetic"),
       capBefore,
-      capAfter: P.pyroCap(P.charLevel("pyromancer")),
+      capAfter: P.castCap(P.charLevel("pyromancer")),
       saved: false,
     };
     // Written through to storage, not just held in memory.
@@ -579,60 +587,76 @@ test("characters: a boss kill levels the one you are playing, permanently", asyn
   eq(r.afterMook, r.mookBase, "an ordinary walker levelled the character");
 });
 
-test("characters: the pyromancer's stack is capped by level and grows back", async (pg) => {
-  const r = await pg.evaluate(() => {
+test("characters: every caster's stack is capped by level and grows back", async (pg) => {
+  // Runs for each carried-stack character in turn. The machinery is shared, so
+  // what this really guards is that a new kit's own numbers — its regen clock
+  // above all — still fill the stack inside a reasonable stretch of play.
+  const casters = await pg.evaluate(() =>
+    Object.keys(window.__probe.CHARS).filter(k => !!window.__probe.CHARS[k].cast));
+  ok(casters.length >= 2, "expected at least two casters, found " + casters.join(", "));
+
+  for (const who of casters) {
+    const r = await pg.evaluate(async (who) => {
     const P = window.__probe;
-    P.setCharacter("pyromancer");
-    P.PROFILE.charLv.pyromancer = 1;
+    P.setCharacter(who);
+    P.PROFILE.charLv[who] = 1;
     P.buildWave(3); P.parkWalkers(); P.stripProps();
-    P.pyroState.held = 0; P.buildPyroStack();
+    P.castState.held = 0; P.buildCastStack();
 
     // Regenerates up to the cap and stops there.
-    const cap1 = P.pyroCap(1);
+    const cap1 = P.castCap(1);
     for (let i = 0; i < 60 * 40; i++) { P.hero.hp = 99; P.step(1 / 60); }
-    const filled = P.pyroState.held;
+    const filled = P.castState.held;
 
     // A level raises the ceiling.
-    P.PROFILE.charLv.pyromancer = 4;
-    P.buildPyroStack();
+    P.PROFILE.charLv[who] = 4;
+    P.buildCastStack();
     for (let i = 0; i < 60 * 40; i++) { P.hero.hp = 99; P.step(1 / 60); }
-    const filled4 = P.pyroState.held;
+    const filled4 = P.castState.held;
 
     // Firing spends one and puts something in the air.
-    const before = P.pyroState.held;
-    P.pyroFire();
-    return { cap1, filled, cap4: P.pyroCap(4), filled4,
-             spent: before - P.pyroState.held, inFlight: P.pyroState.shots.length,
-             orbs: P.pyroState.orbs.length };
-  });
+    const before = P.castState.held;
+    P.castFire();
+    return { cap1, filled, cap4: P.castCap(4), filled4,
+             spent: before - P.castState.held, inFlight: P.castState.shots.length,
+             orbs: P.castState.orbs.length };
+    }, who);
 
-  eq(r.filled, r.cap1, "at level 1 the stack settled at " + r.filled + ", not the cap " + r.cap1);
-  eq(r.filled4, r.cap4, "at level 4 the stack settled at " + r.filled4 + ", not the cap " + r.cap4);
-  ok(r.cap4 > r.cap1, "levelling did not raise the fireball cap");
-  eq(r.orbs, r.cap4, "the visible stack (" + r.orbs + ") does not match the cap " + r.cap4);
-  eq(r.spent, 1, "firing did not spend exactly one fireball");
-  eq(r.inFlight, 1, "firing put nothing in the air");
+    eq(r.filled, r.cap1, who + ": at level 1 the stack settled at " + r.filled +
+       ", not the cap " + r.cap1);
+    eq(r.filled4, r.cap4, who + ": at level 4 the stack settled at " + r.filled4 +
+       ", not the cap " + r.cap4);
+    ok(r.cap4 > r.cap1, who + ": levelling did not raise the cap");
+    eq(r.orbs, r.cap4, who + ": the visible stack (" + r.orbs + ") does not match the cap " +
+       r.cap4);
+    eq(r.spent, 1, who + ": firing did not spend exactly one");
+    eq(r.inFlight, 1, who + ": firing put nothing in the air");
+  }
 });
 
-test("characters: the carried fireballs scatter behind the player", async (pg) => {
+test("characters: the carried stack scatters behind the player", async (pg) => {
   // They used to sit in one evenly spaced line at a single height, which reads
   // as a rack rather than fire being carried. What the scatter has to be: a
   // spread in depth as well as sideways, a spread in height, every ball clear
   // of the ground and none of them up at the crown — and fixed per ball, so
   // the cloud rides with the player instead of boiling around them.
-  const r = await pg.evaluate(() => {
+  const casters = await pg.evaluate(() =>
+    Object.keys(window.__probe.CHARS).filter(k => !!window.__probe.CHARS[k].cast));
+
+  for (const who of casters) {
+  const r = await pg.evaluate((who) => {
     const P = window.__probe;
-    P.setCharacter("pyromancer");
-    P.PROFILE.charLv.pyromancer = 7;
+    P.setCharacter(who);
+    P.PROFILE.charLv[who] = 7;
     P.buildWave(3); P.parkWalkers(); P.stripProps();
-    P.pyroState.held = 0; P.buildPyroStack();
+    P.castState.held = 0; P.buildCastStack();
     for (let i = 0; i < 60 * 40; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1 / 60); }
 
     // Depth is measured along the axis the stack rides on, not as a raw
     // distance: a straight sideways line puts every ball at the same depth
     // but at different distances, so distance alone would call it scattered.
     const bx = -Math.sin(P.cam.yaw), bz = -Math.cos(P.cam.yaw);
-    const rel = () => P.pyroState.orbs.filter(o => o.visible).map(o => ({
+    const rel = () => P.castState.orbs.filter(o => o.visible).map(o => ({
       back: (o.position.x - P.hero.pos.x) * bx + (o.position.z - P.hero.pos.z) * bz,
       side: (o.position.x - P.hero.pos.x) * bz - (o.position.z - P.hero.pos.z) * bx,
       y:     o.position.y - P.hero.pos.y,
@@ -657,23 +681,24 @@ test("characters: the carried fireballs scatter behind the player", async (pg) =
     return { n: a.length, backSpan: span("back"), sideSpan: span("side"), ySpan: span("y"),
              lowest: Math.min(...a.map(o => o.y)), highest: Math.max(...a.map(o => o.y)),
              drift, carried, crownY: P.CROWN_Y };
-  });
+  }, who);
 
-  ok(r.n >= 5, "only " + r.n + " fireballs were carried, too few to judge the spread");
-  ok(r.backSpan > 0.12,
-     "the fireballs all ride at the same depth (span " + r.backSpan.toFixed(3) + ") — still a line");
-  ok(r.sideSpan > 0.5, "the fireballs barely spread sideways: " + r.sideSpan.toFixed(3));
-  ok(r.ySpan > 0.35, "the fireballs sit at nearly one height: span " + r.ySpan.toFixed(3));
-  // A ball is ~0.24 across at this scale, so its underside is that much below
-  // the centre the test can see.
-  ok(r.lowest - 0.25 > 0.6,
-     "the lowest fireball hangs at " + r.lowest.toFixed(2) + ", close enough to scrape the ground");
-  ok(r.highest < r.crownY,
-     "a fireball rode up to " + r.highest.toFixed(2) + ", at or above the crown (" + r.crownY + ")");
-  ok(r.drift < 1e-6,
-     "the offsets are re-rolled every frame (drift " + r.drift.toFixed(4) + ") — the cloud boils");
-  ok(r.carried < 1e-6,
-     "the fireballs did not follow the player (offset moved " + r.carried.toFixed(3) + ")");
+    ok(r.n >= 5, who + ": only " + r.n + " were carried, too few to judge the spread");
+    ok(r.backSpan > 0.12,
+       who + ": they all ride at the same depth (span " + r.backSpan.toFixed(3) + ") — still a line");
+    ok(r.sideSpan > 0.5, who + ": they barely spread sideways: " + r.sideSpan.toFixed(3));
+    ok(r.ySpan > 0.35, who + ": they sit at nearly one height: span " + r.ySpan.toFixed(3));
+    // The widest projectile here is about 0.5 across at carry scale, so its
+    // underside hangs ~0.25 below the centre this test can see.
+    ok(r.lowest - 0.25 > 0.6,
+       who + ": the lowest hangs at " + r.lowest.toFixed(2) + ", close enough to scrape the ground");
+    ok(r.highest < r.crownY,
+       who + ": one rode up to " + r.highest.toFixed(2) + ", at or above the crown (" + r.crownY + ")");
+    ok(r.drift < 1e-6,
+       who + ": the offsets are re-rolled every frame (drift " + r.drift.toFixed(4) + ") — it boils");
+    ok(r.carried < 1e-6,
+       who + ": they did not follow the player (offset moved " + r.carried.toFixed(3) + ")");
+  }
 });
 
 test("characters: telekinesis-only drafts are withheld from the pyromancer", async (pg) => {
@@ -690,17 +715,130 @@ test("characters: telekinesis-only drafts are withheld from the pyromancer", asy
         return u && (!u.more || u.more());
       });
     };
-    const pyro = offered("pyromancer");
+    const bad = {};
+    for (const key in P.CHARS)
+      if (P.CHARS[key].power !== "kinesis") bad[key] = offered(key);
     const tele = offered("telekinetic");
     P.setCharacter("telekinetic");
-    return { pyro, tele };
+    return { bad, tele };
   });
 
-  eq(r.pyro.length, 0,
-     "the pyromancer is still offered telekinesis-only picks: " + r.pyro.join(", "));
+  for (const key in r.bad)
+    eq(r.bad[key].length, 0,
+       key + " is still offered telekinesis-only picks: " + r.bad[key].join(", "));
   eq(r.tele.length, 4,
      "the gate also withheld these from the telekinetic: expected all four, got " +
      r.tele.join(", "));
+});
+
+test("characters: the wind mage's blade cuts a line and spares the bystanders", async (pg) => {
+  // The two casters share every piece of machinery, so what has to be proven
+  // is the part that is NOT shared: a fireball stops at the first body and
+  // pays for it with a blast that catches whatever is standing around it; a
+  // blade carries straight through a line of them and pays for that with no
+  // blast at all.
+  //
+  // Both halves are measured on one layout: four bodies in a row 6 apart —
+  // further than a blast can chain — and a bystander off the line at each END
+  // of the shot. One bystander is not enough: a piercing blade WITH a blast
+  // would still leave the one by the first body untouched, because it does not
+  // stop there. It is the bystander where the shot actually ends that can tell
+  // a blast from a pierce, and each kit ends somewhere different.
+  const r = await pg.evaluate(async () => {
+    const P = window.__probe;
+    const shoot = (who, tanky, gap) => {
+      P.setCharacter(who);
+      P.PROFILE.charLv[who] = 6;
+      P.buildWave(6); P.parkWalkers(); P.stripProps();
+      P.castState.held = 0; P.buildCastStack();
+      for (let i = 0; i < 60 * 30; i++) {
+        P.S.phase = "play"; P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1/60);
+      }
+      // AGAIN, after the fill. The wave keeps arriving in pulses while the
+      // stack grows, so the bodies parked before it are not the bodies
+      // standing next to the hero after it — and an unparked one within a
+      // stride of the muzzle eats the pierce budget before the shot has
+      // travelled a metre. (Measured: it was spending two of three.)
+      P.parkWalkers();
+
+      P.cam.yaw = Math.PI / 2;               // aim down +X
+      P.hero.pos.set(0, 0, 0);
+      const live = P.walkers.filter(w => !w.dead).slice(0, 6);
+      if (live.length < 6) return { short: live.length };
+      const line = live.slice(0, 4);
+      const near = live[4], far = live[5];
+      // A body that SURVIVES being cut. The blade homes on what it was aimed
+      // at, and a target that dies stops being homed on — so a kill hides the
+      // case where the blade passes through a body that is still standing.
+      if (tanky) { line[0].hp = 9999; line[0].maxHp = 9999; }
+      // Re-pinned every frame, not placed once. These bodies still run their
+      // own AI, and a Runner crossing 4 units mid-flight would quietly rewrite
+      // the layout the measurement depends on.
+      const place = () => {
+        const step = gap || 6;
+        line.forEach((w, i) => { w.pos.set(6 + i * step, 0, 0); w.aggro = false; w.cool = 999; });
+        // Off the line by 3: further than any hit radius, well inside a
+        // fireball's blast. `near` sits by the first body, where the fireball
+        // stops; `far` by the third, where the blade's budget runs out.
+        near.pos.set(6, 0, 3);              near.aggro = false; near.cool = 999;
+        far.pos.set(6 + 2 * step, 0, 3);    far.aggro = false;  far.cool = 999;
+      };
+      place();
+
+      const hp0 = live.map(w => w.hp);
+      P.S.lock = null;
+      const before = P.castState.held;
+      P.castFire();
+      for (let i = 0; i < 90; i++) {
+        P.S.phase = "play"; P.hero.hp = 99; P.hero.pos.set(0, 0, 0); place(); P.step(1/60);
+      }
+      const hurt = live.map((w, i) => w.dead || w.hp < hp0[i]);
+      return { fired: before > P.castState.held,
+               line: hurt.slice(0, 3).filter(Boolean).length,
+               fourth: hurt[3], near: hurt[4], far: hurt[5] };
+    };
+    return { wind: shoot("windmage"), tanky: shoot("windmage", true),
+             long: shoot("windmage", true, 34), fire: shoot("pyromancer") };
+  });
+
+  for (const kit of ["wind", "tanky", "long", "fire"]) {
+    ok(!r[kit].short, kit + ": not enough live bodies to lay the test out (" + r[kit].short + ")");
+    ok(r[kit].fired, kit + ": nothing was fired — the stack never filled");
+  }
+
+  eq(r.wind.line, 3,
+     "the blade cut " + r.wind.line + " of the three bodies in its path — a blade that " +
+     "stops at the first one is a fireball without the blast");
+  eq(r.wind.fourth, false,
+     "the blade cut a fourth body: its pierce budget is not being spent down");
+  eq(r.wind.far, false,
+     "a body 3 off the line WHERE THE BLADE STOPPED was hurt — it is detonating, and " +
+     "the pierce it trades that blast for is being handed out for free");
+  eq(r.wind.near, false, "the blade hurt a body 3 off the line at the near end");
+
+  // Through a body that is still standing afterwards. Without releasing its
+  // homing target on the way through, the blade turns straight back onto the
+  // body it just passed and circles it, and everything behind that body lives.
+  eq(r.tanky.line, 3,
+     "cutting a body that survived, the blade reached " + r.tanky.line + " of three — " +
+     "it is still homing on the one it went through");
+  // And the same shot with the next body far enough downrange that a blade
+  // still turning back toward the one it cut has time to curve off the line
+  // and miss it entirely.
+  ok(r.long.line >= 2,
+     "34 downrange of a body it cut but did not kill, the blade reached " + r.long.line +
+     " of three — it is arcing back onto its old target instead of flying on");
+
+  // The control. Same layout, same shot, the other kit: the blast is exactly
+  // what reaches the near bystander, and exactly what stops the shot at the
+  // first body — 6 short of the second.
+  eq(r.fire.near, true,
+     "the fireball left the bystander beside its impact untouched — the blast is what " +
+     "makes a shot into a crowd worth taking, and it is not landing");
+  eq(r.fire.line, 1,
+     "the fireball reached " + r.fire.line + " bodies in the line; it is meant to stop " +
+     "at the first, and the next is further away than its blast can chain");
+  eq(r.fire.far, false, "the fireball reached a body 18 downrange without travelling there");
 });
 
 test("characters: the telekinetic's level buys carry capacity", async (pg) => {

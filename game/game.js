@@ -1613,36 +1613,29 @@ function stepCrown(dt) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════ pyromancer
-// The pyromancer's whole kit. Where the telekinetic's ammunition is the arena
-// — walk somewhere new when the ground runs dry — the pyromancer's is a stack
-// that refills on its own, so their pressure is a clock rather than a place.
-// That is why the arena spawns them nothing to pick up: two characters that
-// both solve "what do I throw" the same way are one character with two skins.
+// ═════════════════════════════════════════════════════════════════ casters
+// Everything a character carries on their back rather than picking up. Where
+// the telekinetic's ammunition is the arena — walk somewhere new when the
+// ground runs dry — a caster's is a stack that refills on its own, so their
+// pressure is a clock rather than a place. That is why the arena spawns them
+// nothing to lift: two characters that both solve "what do I throw" the same
+// way are one character with two skins.
 //
 // The held count comes from the character's PERMANENT level, so levelling is
 // felt immediately and every run after.
-const PYRO = {
-  regen:    2.3,      // seconds to grow one back
-  speed:    32,
-  dmg:      170,
-  blastR:   4.4,
-  blastDmg: 95,
-  hitR:     1.15,
-  life:     3.4,
-  orbitR:   0.62,     // how far behind the shoulders they ride
-  // The height band the carried balls scatter through, measured from the
-  // hero's feet. Both ends are load-bearing: at `low` the bottom of a ball
-  // (radius ~0.24 once scaled, plus its bob) still clears the ground by most
-  // of a metre, and `high` stays under the Ice Crown at CROWN_Y so the stack
-  // reads as carried on the back rather than orbiting the head.
-  low:      1.28,
-  high:     1.95,
-  hot:      0xff8a2e,
-};
+//
+// One system, two kits. The stack, the regen clock, the scatter behind the
+// shoulders and the trigger are identical for the pyromancer and the wind
+// mage; what differs is the projectile — its model, how it moves, what it
+// leaves behind, and what it does on arrival. Those live in a SPEC per
+// character (PYRO and WIND at the foot of this section), and the machinery
+// below reads the spec rather than knowing which character is playing.
+const FIRE_HOT = 0xff8a2e;
+const WIND_PALE = 0x9fe8ff;
 
-const pyroState = { held: 0, t: 0, group: null, orbs: [], shots: [], embers: [] };
+const castState = { held: 0, t: 0, group: null, orbs: [], shots: [], embers: [] };
 
+// ── the fireball ──────────────────────────────────────────────────────────
 // One geometry and one material for every ball, held and in flight alike.
 // A fireball is a hot core seen THROUGH burning gas, so it is built as nested
 // shells rather than one glowing ball: near-white at the centre, yellow over
@@ -1669,7 +1662,7 @@ const pyroCoreMat = new T.MeshBasicMaterial({ color: 0xfff6d8, transparent: true
   opacity: 0.95, blending: T.AdditiveBlending, depthWrite: false });
 const pyroMidMat = new T.MeshBasicMaterial({ color: 0xffc23a, transparent: true,
   opacity: 0.7, blending: T.AdditiveBlending, depthWrite: false });
-const pyroMat = new T.MeshBasicMaterial({ color: PYRO.hot, transparent: true,
+const pyroMat = new T.MeshBasicMaterial({ color: FIRE_HOT, transparent: true,
   opacity: 0.55, blending: T.AdditiveBlending, depthWrite: false });
 const pyroRimMat = new T.MeshBasicMaterial({ color: 0xff4a12, transparent: true,
   opacity: 0.22, blending: T.AdditiveBlending, depthWrite: false });
@@ -1697,7 +1690,7 @@ const pyroTrailMats = [
     depthWrite: false }),
 ];
 
-// Builds the layered ball. `lit` is the whole thing's brightness, so the orbs
+// Builds the layered ball. `size` is the whole thing's scale, so the orbs
 // riding on the back can be the same object at a lower burn than the one in
 // flight without a second set of materials.
 function makeFireball() {
@@ -1725,22 +1718,210 @@ function burnFireball(g, t, seed, size) {
   g.children[3].scale.setScalar(s * 0.44);
 }
 
+// ── the air blade ─────────────────────────────────────────────────────────
+// Air is invisible; what you can see is its EDGE. So the blade is not a solid
+// disc but three open crescents of different radius, nested and counter-
+// spinning, over a faint wash of compressed air in the middle. Nothing here is
+// opaque — the arena has to stay readable through it, which is also what keeps
+// it from reading as a metal saw.
+//
+// The arcs are open rather than closed rings on purpose: a closed ring is a
+// hoop, and a hoop reads as something to pass through. A crescent has a
+// leading point, and a leading point reads as something that cuts.
+// Squashed into an ellipse rather than left as a circle, and the openings of
+// all three arcs pointed the SAME way. Both matter: a true circle with its
+// gaps spread around it closes up into a hoop, and a hoop is something you
+// pass through. An ellipse with one open side has two points and a belly —
+// which is a blade.
+const squash = (g) => { g.scale(1, 0.62, 1); return g; };
+const bladeRimGeo   = squash(new T.TorusGeometry(0.46, 0.026, 5, 20, Math.PI * 1.28));
+const bladeBodyGeo  = squash(new T.TorusGeometry(0.38, 0.052, 6, 22, Math.PI * 1.22));
+const bladeEdgeGeo  = squash(new T.TorusGeometry(0.30, 0.028, 5, 18, Math.PI * 1.16));
+// A short, thick, bright section riding at the leading point. Real blades are
+// read by their glint, not by their outline.
+const bladeGlintGeo = squash(new T.TorusGeometry(0.43, 0.055, 6, 10, Math.PI * 0.26));
+const bladeWashGeo  = squash(new T.RingGeometry(0.10, 0.34, 22, 1, 0, Math.PI * 1.22));
+// The trail is a shed SLIVER, not a puff: wind leaves streaks. Each one is
+// dropped at a random angle, so the wake behind a blade reads as air coming
+// apart rather than as a dotted line of smaller blades.
+const bladeWispGeo  = new T.BoxGeometry(0.028, 0.028, 0.52);
+
+const bladeEdgeMat = new T.MeshBasicMaterial({ color: 0xf4feff, transparent: true,
+  opacity: 0.85, blending: T.AdditiveBlending, depthWrite: false });
+const bladeBodyMat = new T.MeshBasicMaterial({ color: WIND_PALE, transparent: true,
+  opacity: 0.5, blending: T.AdditiveBlending, depthWrite: false });
+const bladeRimMat = new T.MeshBasicMaterial({ color: 0x5fc8f0, transparent: true,
+  opacity: 0.30, blending: T.AdditiveBlending, depthWrite: false });
+const bladeWashMat = new T.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true,
+  opacity: 0.09, blending: T.AdditiveBlending, depthWrite: false,
+  side: T.DoubleSide });
+
+// Pale to nothing rather than pale to smoke: a fireball leaves soot behind,
+// a blade leaves disturbed air that simply stops being visible.
+const bladeTrailMats = [
+  new T.MeshBasicMaterial({ color: 0xf0fdff, transparent: true, opacity: 0.42,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0xd6f6ff, transparent: true, opacity: 0.30,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0xa8e6ff, transparent: true, opacity: 0.21,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x86d2f6, transparent: true, opacity: 0.14,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x6ab6e0, transparent: true, opacity: 0.09,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x5aa0c8, transparent: true, opacity: 0.05,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x4e8aad, transparent: true, opacity: 0.02,
+    blending: T.AdditiveBlending, depthWrite: false }),
+];
+
+function makeAirBlade() {
+  const g = new T.Group();
+  g.add(new T.Mesh(bladeWashGeo,  bladeWashMat));  // 0 compressed air inside
+  g.add(new T.Mesh(bladeRimGeo,   bladeRimMat));   // 1 wide outer curve
+  g.add(new T.Mesh(bladeBodyGeo,  bladeBodyMat));  // 2 the blade itself
+  g.add(new T.Mesh(bladeEdgeGeo,  bladeEdgeMat));  // 3 bright inner edge
+  g.add(new T.Mesh(bladeGlintGeo, bladeEdgeMat));  // 4 glint at the leading point
+  // Barely offset from each other: the three curves have to stack into ONE
+  // shape with one opening. Spreading them around the circle is what turned
+  // the first version into a hoop.
+  g.children[1].rotation.z = 0.10;
+  g.children[2].rotation.z = 0.00;
+  g.children[3].rotation.z = -0.08;
+  g.children[4].rotation.z = 1.02;
+  return g;
+}
+
+// All one way round, at slightly different rates. Counter-rotating them was
+// the first attempt and it churned the gaps closed; turning together keeps the
+// crescent readable while the small rate differences keep the edges alive.
+function spinAirBlade(g, t, seed, size) {
+  const s = size || 1;
+  g.scale.setScalar(s);
+  g.children[0].rotation.z -= 0.014;
+  g.children[1].rotation.z += 0.101;
+  g.children[2].rotation.z += 0.115;
+  g.children[3].rotation.z += 0.128;
+  g.children[4].rotation.z += 0.115;
+  // Breathing on the shared irregular flicker, so a blade never pulses in
+  // time with the ring of fire or with the blade beside it.
+  g.children[1].scale.setScalar(1 + 0.09 * flick(t * 3.4 + seed));
+  g.children[2].scale.setScalar(1 + 0.05 * flick(t * 4.9 + seed * 1.7));
+  g.children[3].scale.setScalar(1 + 0.07 * flick(t * 6.2 + seed * 2.3));
+  g.children[4].scale.setScalar(1 + 0.13 * flick(t * 7.1 + seed * 3.1));
+}
+
+// A disc travelling edge-on is a line, and a line is invisible from behind the
+// player — which is where the player is. So the blade flies FACE-ON, spinning
+// about the axis it travels along. It costs a little physical plausibility and
+// buys the entire read of the projectile.
+// Takes no scratch vector of its own on purpose. It is called from inside the
+// placement loop, which is holding the side axis in one of the shared temps —
+// borrowing that temp here silently re-aimed the axis and stacked the whole
+// carried set into a single narrow line.
+function aimAirBlade(g, vel) {
+  if (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z < 1e-6) return;
+  g.lookAt(g.position.x + vel.x, g.position.y + vel.y, g.position.z + vel.z);
+}
+
+// ── the two kits ──────────────────────────────────────────────────────────
+// Read by the machinery below. Anything a character does differently lives
+// here; anything they share does not.
+const PYRO = {
+  label:    "Fire",   // HUD chip and the touch trigger
+  verb:     "Fire",
+  kind:     "fire",   // what the kill is credited to
+  dry:      "NO FIRE LEFT — it grows back",
+  hint:     "Tap FIRE to throw · the stack grows back on its own",
+  regen:    2.3,      // seconds to grow one back
+  speed:    32,
+  dmg:      170,
+  pierce:   0,        // stops at the first body
+  blastR:   4.4,
+  blastDmg: 95,
+  hitR:     1.15,
+  life:     3.4,
+  knock:    6,
+  orbitR:   0.62,     // how far behind the shoulders they ride
+  // The height band the carried projectiles scatter through, measured from
+  // the hero's feet. Both ends are load-bearing: at `low` the bottom of one
+  // still clears the ground by most of a metre, and `high` stays under the
+  // Ice Crown at CROWN_Y so the stack reads as carried on the back rather
+  // than orbiting the head.
+  low:      1.28,
+  high:     1.95,
+  hot:      FIRE_HOT,
+  make:     makeFireball,
+  anim:     burnFireball,
+  aim:      null,     // a ball has no orientation worth setting
+  carry:    0.66,     // scale on the back
+  fly:      1.75,     // the thrown one burns bigger than the carried
+  trail:    { geo: () => pyroShellGeo, mats: pyroTrailMats, every: 0.018,
+              life: 0.42, spread: 0.13, rise: 0.16, drift: [0.25, 0.75],
+              size: [0.85, 1.5], grow: 0.85, spin: [-3, 3] },
+};
+
+const WIND = {
+  label:    "Blades",
+  verb:     "Cut",
+  kind:     "cut",
+  dry:      "NO BLADES LEFT — they gather again",
+  hint:     "Tap CUT to throw · a blade cuts through a line of them",
+  // Faster to grow back and faster in the air than fire, and it has to be:
+  // the blade has no blast, so a shot into empty space is worth nothing at
+  // all, where a fireball into the same space still clears a footprint.
+  regen:    1.9,
+  speed:    46,
+  dmg:      120,
+  // The trade for losing the blast. Three bodies standing in a line take the
+  // full hit each, which makes lining a crowd up the wind mage's whole game,
+  // the way "throw it into the middle" is the pyromancer's.
+  pierce:   3,
+  blastR:   0,
+  blastDmg: 0,
+  hitR:     1.3,      // a blade is wider than a ball
+  life:     2.6,
+  knock:    4,
+  orbitR:   0.66,
+  low:      1.24,
+  high:     1.98,
+  hot:      WIND_PALE,
+  make:     makeAirBlade,
+  anim:     spinAirBlade,
+  aim:      aimAirBlade,
+  carry:    0.62,
+  // Bigger in the air than the carried ones by more than fire is, because a
+  // crescent seen at 40 metres is mostly empty space where a ball is not.
+  fly:      1.62,
+  // Denser and shorter-lived than fire's: the blade covers a metre and a half
+  // in the time a fireball covers one, so the same interval would leave gaps.
+  trail:    { geo: () => bladeWispGeo, mats: bladeTrailMats, every: 0.011,
+              life: 0.30, spread: 0.10, rise: 0.05, drift: [-0.1, 0.35],
+              size: [0.7, 1.35], grow: 1.15, spin: [-7, 7] },
+};
+
+// The kit of whoever is playing, or the pyromancer's as a stand-in for the
+// telekinetic so nothing downstream has to null-check a spec it never uses.
+function castSpec() { return CHAR.cast || PYRO; }
+
+// ── the shared machinery ──────────────────────────────────────────────────
 // Rebuilt on a level change and on restart. Every orb the last cap created is
-// removed first — growing the cap without clearing would stack two sets of
-// balls on the same shoulders, the same way the crown once stacked circlets.
-function buildPyroStack() {
-  if (!pyroState.group) { pyroState.group = new T.Group(); scene.add(pyroState.group); }
-  const g = pyroState.group;
-  for (const o of pyroState.orbs) g.remove(o);
-  pyroState.orbs.length = 0;
-  if (!isPyro()) { g.visible = false; return; }
+// removed first — growing the cap without clearing would stack two sets on the
+// same shoulders, the same way the crown once stacked circlets.
+function buildCastStack() {
+  if (!castState.group) { castState.group = new T.Group(); scene.add(castState.group); }
+  const g = castState.group;
+  for (const o of castState.orbs) g.remove(o);
+  castState.orbs.length = 0;
+  if (!isCaster()) { g.visible = false; return; }
   g.visible = true;
-  const cap = pyroCap(charLv());
+  const spec = castSpec();
+  const cap = castCap(charLv());
   // Height bands, one per slot, handed out in shuffled order. A plain uniform
-  // draw can deal three balls the same height by luck, and taking band i for
+  // draw can deal three of them the same height by luck, and taking band i for
   // slot i would tilt the cloud into a diagonal — the ordered layout this
   // scatter exists to break. Shuffling gives a guaranteed spread with no
-  // relationship between a ball's slot and where it rides.
+  // relationship between a slot and where it rides.
   const bands = [];
   for (let i = 0; i < cap; i++) bands.push(i);
   for (let i = cap - 1; i > 0; i--) {
@@ -1748,85 +1929,90 @@ function buildPyroStack() {
     const t = bands[i]; bands[i] = bands[j]; bands[j] = t;
   }
   for (let i = 0; i < cap; i++) {
-    const m = makeFireball();
+    const m = spec.make();
     m.userData.slot = i;
     // Drawn once, here, and then carried for the life of the stack. Re-rolling
     // per frame would make the cloud boil around the player instead of riding
     // with them.
     m.userData.off = {
       side: (i % 2 ? 1 : -1) * (0.18 + Math.floor(i / 2) * 0.28 + Math.random() * 0.15),
-      back: PYRO.orbitR + (Math.random() - 0.5) * 0.36,
-      y:    PYRO.low + (bands[i] + Math.random()) / cap * (PYRO.high - PYRO.low),
+      back: spec.orbitR + (Math.random() - 0.5) * 0.36,
+      y:    spec.low + (bands[i] + Math.random()) / cap * (spec.high - spec.low),
       phase: Math.random() * Math.PI * 2,
       rate:  2.0 + Math.random() * 1.3,
     };
     g.add(m);
-    pyroState.orbs.push(m);
+    castState.orbs.push(m);
   }
-  pyroState.held = Math.min(pyroState.held, cap);
+  castState.held = Math.min(castState.held, cap);
 }
 
-function clearPyroShots() {
-  for (const s of pyroState.shots) scene.remove(s.g);
-  pyroState.shots.length = 0;
-  for (const p of pyroState.embers) scene.remove(p.m);
-  pyroState.embers.length = 0;
+function clearCastShots() {
+  for (const s of castState.shots) scene.remove(s.g);
+  castState.shots.length = 0;
+  for (const p of castState.embers) scene.remove(p.m);
+  castState.embers.length = 0;
 }
 
-// Launched at whatever Single would have aimed at, so both characters read the
-// crosshair the same way and the lock-on the player already learned still
+// Launched at whatever Single would have aimed at, so every character reads
+// the crosshair the same way and the lock-on the player already learned still
 // applies.
-function pyroFire() {
-  if (pyroState.held <= 0) { toast("NO FIRE LEFT — it grows back"); SFX.dry(); return; }
-  pyroState.held--;
+function castFire() {
+  const spec = castSpec();
+  if (castState.held <= 0) { toast(spec.dry); SFX.dry(); return; }
+  castState.held--;
 
-  const g = makeFireball();
-  g.scale.setScalar(1.75);             // the thrown one burns bigger than the carried
+  const g = spec.make();
+  g.scale.setScalar(spec.fly);
   g.position.set(hero.pos.x, hero.pos.y + 1.5, hero.pos.z);
   scene.add(g);
 
   aimDir.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw)).normalize();
   const seek = S.lock && !S.lock.dead ? S.lock : nearestInCone();
-  pyroState.shots.push({
+  const shot = {
     g, seek,
-    vel: aimDir.clone().multiplyScalar(PYRO.speed),
-    life: PYRO.life,
+    vel: aimDir.clone().multiplyScalar(spec.speed),
+    life: spec.life,
     seed: Math.random() * 40,
     puffT: 0,
-  });
+    hit: null,        // bodies already cut by this shot, for a piercing kit
+  };
+  if (spec.aim) spec.aim(g, shot.vel);
+  castState.shots.push(shot);
   SFX.throw ? SFX.throw(1.2) : null;
   S.shake = Math.min(0.4, S.shake + 0.09);
   updateForceLabel();
 }
 
-function stepPyro(dt) {
-  const g = pyroState.group;
-  if (g && isPyro()) {
+function stepCast(dt) {
+  const spec = castSpec();
+  const g = castState.group;
+  if (g && isCaster()) {
     g.visible = true;
-    // Grow one back on a timer. This is the pyromancer's only resource, so it
-    // is deliberately visible: the orb pops in rather than fading up.
-    const cap = pyroCap(charLv());
-    if (pyroState.held < cap && S.phase === "play") {
-      pyroState.t -= dt;
-      if (pyroState.t <= 0) {
-        pyroState.t = PYRO.regen;
-        pyroState.held++;
-        sparks(tmp.set(hero.pos.x, hero.pos.y + 1.6, hero.pos.z), PYRO.hot, 5, 6);
+    // Grow one back on a timer. This is the caster's only resource, so it is
+    // deliberately visible: the projectile pops in rather than fading up.
+    const cap = castCap(charLv());
+    if (castState.held < cap && S.phase === "play") {
+      castState.t -= dt;
+      if (castState.t <= 0) {
+        castState.t = spec.regen;
+        castState.held++;
+        sparks(tmp.set(hero.pos.x, hero.pos.y + 1.6, hero.pos.z), spec.hot, 5, 6);
         updateForceLabel();
       }
     } else {
-      pyroState.t = PYRO.regen;
+      castState.t = spec.regen;
     }
 
     // Ride behind the shoulders as a loose cloud, so they read as carried
-    // rather than orbiting — an orbit would be a second ring of fire. Each
-    // ball keeps the offset it was dealt when the stack was built, so the
-    // scatter travels with the player and turns with the camera.
+    // rather than orbiting — an orbit would be a second ring of fire. Each one
+    // keeps the offset it was dealt when the stack was built, so the scatter
+    // travels with the player and turns with the camera.
     const back = tmp.set(-Math.sin(cam.yaw), 0, -Math.cos(cam.yaw)).normalize();
     const side = tmp2.set(back.z, 0, -back.x);
-    for (let i = 0; i < pyroState.orbs.length; i++) {
-      const orb = pyroState.orbs[i];
-      orb.visible = i < pyroState.held;
+    for (let i = 0; i < castState.orbs.length; i++) {
+      const orb = castState.orbs[i];
+      orb.visible = i < castState.held;
       if (!orb.visible) continue;
       const off = orb.userData.off;
       const bob = Math.sin(S.t * off.rate + off.phase) * 0.07;
@@ -1834,17 +2020,20 @@ function stepPyro(dt) {
         hero.pos.x + back.x * off.back + side.x * off.side,
         hero.pos.y + off.y + bob,
         hero.pos.z + back.z * off.back + side.z * off.side);
-      // Each one burns on its own phase, the same reason the ring's curtains
-      // do: a stack pulsing in unison reads as one object.
-      burnFireball(orb, S.t, i * 2.1, 0.66);
+      // A carried blade faces the way the player does, so the crescents read
+      // face-on over the shoulders instead of edge-on as three thin lines.
+      if (spec.aim) spec.aim(orb, tmp3.set(-back.x, 0, -back.z));
+      // Each one animates on its own phase, the same reason the ring's
+      // curtains do: a stack pulsing in unison reads as one object.
+      spec.anim(orb, S.t, i * 2.1, spec.carry);
     }
   } else if (g) {
     g.visible = false;
   }
 
   // ---- shots in flight
-  for (let i = pyroState.shots.length - 1; i >= 0; i--) {
-    const s = pyroState.shots[i];
+  for (let i = castState.shots.length - 1; i >= 0; i--) {
+    const s = castState.shots[i];
     s.life -= dt;
     // Light homing, matching the guided stone the telekinetic already throws.
     if (s.seek && !s.seek.dead) {
@@ -1853,69 +2042,88 @@ function stepPyro(dt) {
               s.seek.pos.z - s.g.position.z);
       const d = tmp.length() || 1;
       s.vel.addScaledVector(tmp.divideScalar(d), 62 * dt);
-      s.vel.setLength(PYRO.speed);
+      s.vel.setLength(spec.speed);
     }
     s.g.position.addScaledVector(s.vel, dt);
-    burnFireball(s.g, S.t, s.seed, 1.75);
+    spec.anim(s.g, S.t, s.seed, spec.fly);
+    if (spec.aim) spec.aim(s.g, s.vel);
 
     // ---- tail. Dropped at a fixed INTERVAL rather than once per frame, so
     // the trail has the same density at 30fps as at 144 instead of being
     // three times thinner on a slow machine.
+    const tr = spec.trail;
     s.puffT -= dt;
-    while (s.puffT <= 0 && s.life > 0 && pyroState.embers.length < 240) {
-      s.puffT += 0.018;
-      const p = new T.Mesh(pyroShellGeo, pyroTrailMats[0]);
+    while (s.puffT <= 0 && s.life > 0 && castState.embers.length < 240) {
+      s.puffT += tr.every;
+      const p = new T.Mesh(tr.geo(), tr.mats[0]);
       p.position.copy(s.g.position);
       // Scatter each puff off the line of flight, widening the tail behind the
-      // head the way the reference's does.
-      p.position.x += rand(-0.13, 0.13);
-      p.position.y += rand(-0.10, 0.16);
-      p.position.z += rand(-0.13, 0.13);
+      // head the way a real plume does.
+      p.position.x += rand(-tr.spread, tr.spread);
+      p.position.y += rand(-tr.spread * 0.8, tr.rise);
+      p.position.z += rand(-tr.spread, tr.spread);
       p.rotation.set(rand(0, 6.3), rand(0, 6.3), rand(0, 6.3));
       scene.add(p);
       // Owned by the SYSTEM, not by the shot that made it. A tail deleted the
-      // instant its head detonates snaps off mid-air; this way the smoke is
-      // still hanging there after the blast, which is what the reference shows.
-      pyroState.embers.push({ m: p, age: 0, spin: rand(-3, 3),
-                              drift: rand(0.25, 0.75), size: rand(0.85, 1.5) });
+      // instant its head lands snaps off mid-air; this way it is still hanging
+      // there afterwards, which is what a real one does.
+      castState.embers.push({ m: p, age: 0, mats: tr.mats, max: tr.life,
+                              grow: tr.grow, spin: rand(tr.spin[0], tr.spin[1]),
+                              drift: rand(tr.drift[0], tr.drift[1]),
+                              size: rand(tr.size[0], tr.size[1]) });
     }
 
     let done = s.life <= 0 || s.g.position.y < 0.2;
     if (!done) {
       for (const w of walkers) {
         if (w.dead) continue;
+        if (s.hit && s.hit.includes(w)) continue;   // already cut by this one
         const dx = w.pos.x - s.g.position.x, dz = w.pos.z - s.g.position.z;
         const dy = (w.pos.y + 1) - s.g.position.y;
-        if (dx*dx + dy*dy + dz*dz < (PYRO.hitR + w.r) * (PYRO.hitR + w.r)) {
-          damageWalker(w, PYRO.dmg * MOD.allDmg, tmp3.copy(s.vel).normalize(), 6, "fire");
-          done = true;
-          break;
+        if (dx*dx + dy*dy + dz*dz < (spec.hitR + w.r) * (spec.hitR + w.r)) {
+          damageWalker(w, spec.dmg * MOD.allDmg, tmp3.copy(s.vel).normalize(),
+                       spec.knock, spec.kind);
+          // A ball stops at the first body it touches; a blade carries on
+          // through until its budget of bodies is spent.
+          if (spec.pierce <= 0) { done = true; break; }
+          (s.hit || (s.hit = [])).push(w);
+          // Homing is what makes the shot feel aimed, and it is also what
+          // would trap a piercing one: having passed THROUGH its target it
+          // would turn straight back onto it and circle. Cutting a body
+          // releases the blade to whatever is in front of it.
+          if (s.seek === w) s.seek = null;
+          if (s.hit.length >= spec.pierce) { done = true; break; }
         }
       }
     }
     if (done) {
-      // Every fireball ends in a blast, so a miss into a crowd is still worth
-      // the shot — otherwise the whole kit is one unmissable projectile.
-      queueBlast(tmp3.copy(s.g.position), { r: PYRO.blastR * MOD.blastR,
-                                            dmg: PYRO.blastDmg * MOD.blastDmg }, null);
-      burst(s.g.position, PYRO.hot);
+      // A fireball ends in a blast, so a miss into a crowd is still worth the
+      // shot. A blade has no blast at all — that is what its pierce is paid
+      // for — so it simply comes apart where it stopped.
+      if (spec.blastR > 0) {
+        queueBlast(tmp3.copy(s.g.position), { r: spec.blastR * MOD.blastR,
+                                              dmg: spec.blastDmg * MOD.blastDmg }, null);
+        burst(s.g.position, spec.hot);
+      } else {
+        sparks(tmp3.copy(s.g.position), spec.hot, 7, 9);
+      }
       scene.remove(s.g);
-      pyroState.shots.splice(i, 1);
+      castState.shots.splice(i, 1);
     }
   }
 
-  // ---- the tail, aged as one pool
-  for (let k = pyroState.embers.length - 1; k >= 0; k--) {
-    const p = pyroState.embers[k];
+  // ---- the tail, aged as one pool. Each puff carries the ladder it was born
+  // with, so a wind mage's wisps still fade like wind after switching kits
+  // mid-air rather than turning into smoke halfway down.
+  for (let k = castState.embers.length - 1; k >= 0; k--) {
+    const p = castState.embers[k];
     p.age += dt;
-    const f = p.age / 0.42;                        // 0 at birth, 1 at death
-    if (f >= 1) { scene.remove(p.m); pyroState.embers.splice(k, 1); continue; }
-    // Cools along the ladder as it ages: white, orange, red, then smoke.
-    p.m.material = pyroTrailMats[Math.min(pyroTrailMats.length - 1,
-                                          (f * pyroTrailMats.length) | 0)];
-    // Swells and lifts as it cools, which is what turns a line of dots into a
+    const f = p.age / p.max;                       // 0 at birth, 1 at death
+    if (f >= 1) { scene.remove(p.m); castState.embers.splice(k, 1); continue; }
+    p.m.material = p.mats[Math.min(p.mats.length - 1, (f * p.mats.length) | 0)];
+    // Swells and lifts as it ages, which is what turns a line of dots into a
     // plume rather than a dotted line.
-    p.m.scale.setScalar(p.size * (0.55 + f * 0.85));
+    p.m.scale.setScalar(p.size * (0.55 + f * p.grow));
     p.m.position.y += p.drift * dt;
     p.m.rotation.y += p.spin * dt;
   }
@@ -3559,7 +3767,9 @@ function offerDraft() {
 // progression in the game that outlives a death, so it is deliberately slow
 // and tied to the hardest thing in a wave rather than to score.
 const CHAR_MAX_LV = 8;
-function pyroCap(lv) { return Math.min(8, 1 + lv); }
+// Shared by every carried-stack character: what levelling buys is the same
+// number for all of them, so a level means the same thing whoever you picked.
+function castCap(lv) { return Math.min(8, 1 + lv); }
 
 const CHARS = {
   telekinetic: {
@@ -3574,7 +3784,19 @@ const CHARS = {
     desc: "Nothing to lift. Fire rides your back.",
     power: "pyro",
     props: 0,                                   // an empty field by design
-    perk(lv) { return pyroCap(lv) + " fireballs held"; },
+    cast: PYRO,
+    perk(lv) { return castCap(lv) + " fireballs held"; },
+  },
+  // Same mechanism as the pyromancer — a stack that grows back, capped by a
+  // permanent level — and a deliberately different answer to a crowd: no
+  // blast, but the blade keeps going through the bodies behind the first.
+  windmage: {
+    name: "WIND MAGE",
+    desc: "Nothing to lift. Blades ride the air.",
+    power: "wind",
+    props: 0,
+    cast: WIND,
+    perk(lv) { return castCap(lv) + " air blades held"; },
   },
 };
 for (const k in CHARS) CHARS[k].key = k;
@@ -3588,16 +3810,27 @@ function charLevel(key) {
   return Math.max(1, Math.min(CHAR_MAX_LV, raw | 0));
 }
 function charLv() { return charLevel(CHAR.key); }
-function isPyro() { return CHAR.power === "pyro"; }
+// A caster is anyone whose ammunition rides on their back. The machinery asks
+// this rather than naming a character, so a third kit is a CHARS entry with a
+// `cast` spec and nothing else.
+function isCaster() { return !!CHAR.cast; }
 
 function setCharacter(key) {
   CHAR = CHARS[key] || CHARS.telekinetic;
   try { localStorage.setItem("kinesis.char", CHAR.key); } catch (e) {}
-  // The strain bar and the carry counter belong to telekinesis; the pyromancer
-  // has neither, and leaving them on screen reads as a broken HUD.
-  document.body.classList.toggle("pyroChar", isPyro());
+  // The strain bar and the carry counter belong to telekinesis; a caster has
+  // neither, and leaving them on screen reads as a broken HUD. One class for
+  // "carries a stack" and one per character, because the widgets are shared
+  // but the briefing and the labels are not.
+  document.body.classList.toggle("casterChar", isCaster());
+  for (const k in CHARS) document.body.classList.toggle(k + "Char", CHAR.key === k);
   const n = el("charName");
   if (n) n.textContent = CHAR.name;
+  // The chip and the trigger are one widget shared by every caster, so their
+  // wording is set here rather than duplicated per character in the shell.
+  const cl = el("castLbl");
+  if (cl) cl.textContent = castSpec().label;
+  updateForceLabel();
 }
 
 // ─────────────────────────────────────────────────────────── persistence
@@ -3644,7 +3877,7 @@ function levelCharacter() {
   saveProfile();
   banner(CHAR.name + " · LEVEL " + (lv + 1));
   toast(CHAR.perk(lv + 1) + " — kept between runs", 3200);
-  if (isPyro()) buildPyroStack();
+  if (isCaster()) buildCastStack();
   SFX.rankUp ? SFX.rankUp(3) : SFX.overload();
 }
 
@@ -4064,6 +4297,10 @@ const KILL_KINDS = {
   impact:  { label:"IMPACT",      style:10 },
   blast:   { label:"DETONATION",  style:16 },
   pierce:  { label:"SKEWERED",    style:18 },
+  // An air blade's kills. Without an entry of its own every one of them would
+  // fall through to IMPACT, and the wind mage would never see the style their
+  // kit is built around.
+  cut:     { label:"CLEAVED",     style:18 },
   env:     { label:"ENVIRONMENTAL", style:24 },
   crush:   { label:"CRUSHED",     style:20 },
   chem:    { label:"DISSOLVED",   style:14 },
@@ -4810,7 +5047,7 @@ const cam = { yaw: Math.PI, pitch: 0.26, dist: 11.2, distWant: 11.2 };
 function clearAll() {
   clearArrows();
   clearSpikes();
-  clearPyroShots();
+  clearCastShots();
   for (const w of walkers) {
     releaseDetached(w);
     if (w.acolytes) for (const a of w.acolytes) {
@@ -5078,11 +5315,11 @@ function updateForceLabel() {
   // The button IS the state readout: FORCE while empty, SHOOT/THROW while
   // loaded, with the remaining count on it. Reverts on its own at zero.
   const btn = el("force");
-  if (isPyro()) {
+  if (isCaster()) {
     // The stack IS the readout: how many are left, and whether firing is even
     // possible right now.
-    const f = pyroState.held;
-    btn.innerHTML = "Fire" + (f ? '<b class="cnt">' + f + '</b>' : "");
+    const f = castState.held;
+    btn.innerHTML = castSpec().verb + (f ? '<b class="cnt">' + f + '</b>' : "");
     btn.classList.toggle("loaded", f > 0);
     return;
   }
@@ -5315,9 +5552,9 @@ canvas.addEventListener("wheel", e => {
 // ─────────────────────────────────────────────────────────── power
 function pressForce() {
   if (S.phase !== "play") return;
-  // The pyromancer has nothing to gather and no modes to switch between, so
-  // the same button is simply the trigger.
-  if (isPyro()) { pyroFire(); return; }
+  // A caster has nothing to gather and no modes to switch between, so the
+  // same button is simply the trigger.
+  if (isCaster()) { castFire(); return; }
   if (S.held.length) {
     if (S.mode === "single") shootOne();
     else burstAll();
@@ -5521,7 +5758,7 @@ function step(dt) {
   S.t += dt;
   stepRing(dt);
   stepCrown(dt);
-  stepPyro(dt);
+  stepCast(dt);
   stepArrows(dt);
 
   // Strain bleeds off on its own, and faster once you have stopped acting
@@ -6642,19 +6879,19 @@ function step(dt) {
       el("ammoWrap").classList.toggle("dry", n === 0);
       el("ammoWrap").classList.toggle("low", n > 0 && n <= 2);
     }
-    // The pyromancer's ammunition is the stack on their back rather than the
+    // A caster's ammunition is the stack on their back rather than the
     // ground, so it gets a readout of its own. The touch FORCE button already
     // carries the count, but that button is hidden on desktop — without this
     // chip the whole resource would be invisible to a keyboard player.
-    const fc = el("fireCnt");
-    if (fc && isPyro()) {
-      fc.textContent = pyroState.held;
-      el("fireWrap").classList.toggle("dry", pyroState.held === 0);
+    const fc = el("castCnt");
+    if (fc && isCaster()) {
+      fc.textContent = castState.held;
+      el("castWrap").classList.toggle("dry", castState.held === 0);
     }
     // Only nags when it is actionable: empty-handed with nothing in reach.
-    // Never for the pyromancer — an empty field is their design, not a problem
-    // they can walk out of.
-    if (!isPyro() && n === 0 && !S.held.length && S.phase === "play") {
+    // Never for a caster — an empty field is their design, not a problem they
+    // can walk out of.
+    if (!isCaster() && n === 0 && !S.held.length && S.phase === "play") {
       if (!S.dryWarned) { S.dryWarned = true; toast("NO OBJECTS IN RANGE — move", 2000); }
     } else S.dryWarned = false;
   }
@@ -6918,10 +7155,10 @@ function restart() {
   clearSpikes();
   // The stack is a per-run resource even though the CAP that sizes it is
   // permanent, so a new run opens empty and has to earn its first shot.
-  pyroState.held = 0;
-  pyroState.t = PYRO.regen;
-  clearPyroShots();
-  buildPyroStack();
+  castState.held = 0;
+  castState.t = castSpec().regen;
+  clearCastShots();
+  buildCastStack();
   S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0;
   S.style = 0; S.styleT = 0; S.rank = "D"; S.recent.length = 0; S.endless = false;
   buildArena(ARENAS[0]);
@@ -7085,18 +7322,18 @@ function start() {
   S.modeCd = 0;
   el("modeBtn").classList.remove("cool");
   // The opening run reaches here without going through restart(), so the
-  // stack has to be raised on this path too — otherwise the pyromancer's very
-  // first run has a working trigger and no fireballs to show for it.
-  pyroState.held = 0;
-  pyroState.t = PYRO.regen;
-  clearPyroShots();
-  buildPyroStack();
+  // stack has to be raised on this path too — otherwise a caster's very first
+  // run has a working trigger and nothing to show for it.
+  castState.held = 0;
+  castState.t = castSpec().regen;
+  clearCastShots();
+  buildCastStack();
   buildWave(S.wave);
   S.phase = "play";
   last = performance.now();
   resize();
-  toast(isPyro() ? "Tap FIRE to throw · the stack grows back on its own"
-                 : "Tap FORCE to gather · then SHOOT one at a time", 3400);
+  toast(isCaster() ? castSpec().hint
+                   : "Tap FORCE to gather · then SHOOT one at a time", 3400);
 }
 
 // Browsers only allow audio to start from a gesture, so the first tap of

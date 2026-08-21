@@ -201,26 +201,33 @@
      because each card carries a permanent level as well as a name */
   #charPick { display: flex; gap: 7px; justify-content: center; margin: 12px 0 2px;
               flex-wrap: wrap; }
-  #charPick .diffBtn { min-width: 168px; }
+  /* Capped rather than merely wide: left to size themselves the cards run to
+     the width of their longest line, and three of those wrap 2+1 — which
+     reads as an accident rather than a row. */
+  #charPick .diffBtn { flex: 1 1 190px; min-width: 150px; max-width: 212px; }
   .charLv { display: block; font-family: var(--mono); font-size: 9px;
             letter-spacing: .1em; color: var(--force); margin-top: 5px; }
   .charLv s { text-decoration: none; color: var(--dim); }
   .pickLabel { font-family: var(--mono); font-size: 8px; letter-spacing: .22em;
                color: var(--dim); text-transform: uppercase; margin-top: 12px; }
   /* Each character shows only the resource it actually has: kinetic strain
-     belongs to the telekinetic, the fireball stack to the pyromancer. A widget
+     belongs to the telekinetic, the carried stack to the casters. A widget
      pinned at a permanent zero reads as a broken HUD, not as an empty one.
-     Mode is telekinesis-only too — the pyromancer has one shot, not two. */
-  /* The brief is per character: half of it is telekinesis-only, and the
-     pyromancer needs their own resource explained instead. */
-  .brief .pyro { display: none; }
-  body.pyroChar .brief .kin { display: none; }
-  body.pyroChar .brief .pyro { display: block; }
-  #fireWrap { display: none; }
-  body.pyroChar #fireWrap { display: flex; }
-  body.pyroChar #focusWrap { display: none; }
-  body.pyroChar #modeBtn { display: none; }
-  #fireWrap.dry .val { color: var(--blood); text-shadow: 0 0 10px rgba(255,90,60,.8); }
+     Mode is telekinesis-only too — a caster has one shot, not two. So the HUD
+     is gated on "carries a stack" rather than on any one character, and only
+     the wording inside it is per character. */
+  #castWrap { display: none; }
+  body.casterChar #castWrap { display: flex; }
+  body.casterChar #focusWrap { display: none; }
+  body.casterChar #modeBtn { display: none; }
+  #castWrap.dry .val { color: var(--blood); text-shadow: 0 0 10px rgba(255,90,60,.8); }
+  /* The brief IS per character: half of it is telekinesis-only, and each
+     caster has to have their own resource explained rather than a shared
+     paragraph that fits neither. */
+  .brief .pyro, .brief .wind { display: none; }
+  body.casterChar .brief .kin { display: none; }
+  body.pyromancerChar .brief .pyro { display: block; }
+  body.windmageChar .brief .wind { display: block; }
   #diffTag { display: block; font-family: var(--mono); font-size: 8px;
              letter-spacing: .16em; color: var(--dim); margin-top: 2px; }
   #menuBest { display: none; margin-top: 10px; font-size: 11px; color: var(--force); opacity: .85; }
@@ -495,8 +502,8 @@
     <div class="chip"><span class="lbl">Health</span><div id="hp"></div></div>
     <div class="chip" id="focusWrap"><span class="lbl">Strain</span>
       <div id="focusBar"><div id="focusFill"></div></div></div>
-    <div class="chip" id="fireWrap"><span class="lbl">Fire</span>
-      <span class="val" id="fireCnt">0</span></div>
+    <div class="chip" id="castWrap"><span class="lbl" id="castLbl">Fire</span>
+      <span class="val" id="castCnt">0</span></div>
   </div>
   <div id="hudR">
     <div class="chip"><span class="lbl">Threat</span>
@@ -569,6 +576,17 @@
          trade: you never have to go and fetch ammunition, and you never get a boulder
          when you need one. Beat a <b>boss</b> to raise your level for good — it is kept
          between runs, and it is the only thing here that is.</p>
+
+      <p class="wind"><b>CUT</b> throws one of the blades turning behind your
+         shoulders. They gather again on their own, about two seconds each, up to the
+         number your level allows — so your pressure is a <b>clock</b>, not a place.
+         A blade does not burst: it <em>cuts through</em> up to three bodies in a line
+         and keeps going, so where you stand decides how much one shot is worth.</p>
+
+      <p class="wind"><b>There is nothing on the ground to pick up.</b> That is the
+         trade: you never have to go and fetch ammunition, and a shot into empty air
+         is worth nothing at all. Beat a <b>boss</b> to raise your level for good — it
+         is kept between runs, and it is the only thing here that is.</p>
 
       <p>Every attack has a <b>wind-up</b> — a flaring ring and a sound. Step, dash or jump out
          of it and it whiffs. <em>Grabbers</em> root you; <b>DASH</b> always breaks it.
