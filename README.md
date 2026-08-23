@@ -112,6 +112,22 @@ If you want passive observation, you need a live-dealer baccarat table
 with a shared shoe. That is a different API surface, and neither this repo
 nor StakeAPI covers it.
 
+**3. The bot must run on the machine that got the cookie.** Cloudflare
+binds `cf_clearance` to the IP address that solved the challenge *and* to
+the User-Agent that requested it. A cookie copied out of your laptop
+browser will be rejected the moment a bot on a different host replays it.
+In practice that means stake.com play only works when the browser you
+logged in with and the bot share an outbound IP -- run it on your own
+machine, not on a server, a VPS, or a cloud dev container. (stake.us has
+no Cloudflare gate and does not have this constraint.)
+
+**4. Install stakeapi from GitHub, not PyPI.** Both publish themselves as
+`0.1.0`, but the PyPI build predates Cloudflare support: it has no
+`cf_clearance` or `user_agent` parameters, so it cannot authenticate
+against stake.com at all. `pip install -e '.[live]'` pulls from GitHub for
+this reason, and `live` mode checks the installed signature and refuses to
+start if it finds the PyPI build.
+
 ## Configuration
 
 Copy `.env.example` to `.env`. stake.us needs only an access token;

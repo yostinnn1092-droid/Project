@@ -12,7 +12,14 @@ license = { text = "MIT" }
 dependencies = []
 
 [project.optional-dependencies]
-live = ["stakeapi", "aiohttp>=3.9"]
+# NOTE: install stakeapi from GitHub, not PyPI. Both call themselves
+# 0.1.0, but the PyPI build predates Cloudflare support and has no
+# cf_clearance/user_agent parameters at all -- it cannot authenticate
+# against stake.com. The GitHub HEAD has them.
+live = [
+    "stakeapi @ git+https://github.com/brokechubb/StakeAPI.git",
+    "aiohttp>=3.9",
+]
 dev = ["pytest>=7", "pytest-asyncio>=0.23", "black", "isort", "mypy"]
 
 [project.scripts]

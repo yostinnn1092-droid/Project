@@ -141,6 +141,22 @@ async def _run_live(config: BotConfig, args: argparse.Namespace) -> int:
     creds = config.credentials
     creds.validate()
 
+    # The PyPI build of stakeapi predates Cloudflare support and silently
+    # lacks these parameters, which makes stake.com unreachable. Fail with
+    # an actionable message rather than a bare TypeError.
+    import inspect
+
+    params = inspect.signature(StakeAPI.__init__).parameters
+    if "cf_clearance" not in params:
+        print(
+            "The installed 'stakeapi' has no cf_clearance support, so it "
+            "cannot authenticate against stake.com. Reinstall from source:\n"
+            "  pip install 'stakeapi @ "
+            "git+https://github.com/brokechubb/StakeAPI.git'",
+            file=sys.stderr,
+        )
+        return 2
+
     client = StakeAPI(
         access_token=creds.access_token,
         cf_clearance=creds.cf_clearance,
