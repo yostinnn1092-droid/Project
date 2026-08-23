@@ -24,9 +24,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "mode",
-        choices=("paper", "backtest", "live"),
+        choices=("paper", "backtest", "live", "check"),
         help="paper: one simulated session; backtest: many sessions; "
-        "live: real money via StakeAPI",
+        "live: real money via StakeAPI; check: preflight the live setup",
     )
     parser.add_argument("--rounds", type=int, default=500, help="max coups per session")
     parser.add_argument("--sessions", type=int, default=1000, help="backtest sessions")
@@ -196,6 +196,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     config = _apply_overrides(BotConfig.from_env(), args)
+
+    if args.mode == "check":
+        from .doctor import render, run_checks
+
+        checks, ready = asyncio.run(run_checks(config))
+        print(render(checks, ready))
+        return 0 if ready else 1
 
     if args.mode == "paper":
         report = asyncio.run(
