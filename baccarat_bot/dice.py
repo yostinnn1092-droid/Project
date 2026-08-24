@@ -113,6 +113,7 @@ class DiceReport:
     max_loss_streak: float
     busted: bool
     stopped: str
+    hit_target: bool = False
     curve: List[float] = field(default_factory=list)
 
     @property
@@ -130,6 +131,7 @@ def run_session(
     max_rolls: int = 1000,
     min_bet: float = 0.0,
     stop_loss_pct: float = 1.0,
+    take_profit_mult: float = 0.0,
     rng: Optional[random.Random] = None,
     keep_curve: bool = False,
 ) -> DiceReport:
@@ -146,6 +148,7 @@ def run_session(
     stopped = "roll limit"
     curve: List[float] = [balance] if keep_curve else []
     floor = start * (1 - stop_loss_pct)
+    target = start * take_profit_mult if take_profit_mult else None
 
     while rolls < max_rolls:
         bet = strategy.bet
@@ -170,6 +173,10 @@ def run_session(
         if keep_curve:
             curve.append(balance)
 
+        if target is not None and balance >= target:
+            stopped = "take-profit"
+            break
+
         if balance <= floor:
             stopped = "stop-loss"
             break
@@ -181,7 +188,8 @@ def run_session(
         turnover=turnover,
         peak_bet=peak_bet,
         max_loss_streak=max_streak,
-        busted=balance <= floor or stopped in ("bankrupt", "below table minimum"),
+        busted=stopped in ("bankrupt", "below table minimum", "stop-loss"),
+        hit_target=stopped == "take-profit",
         stopped=stopped,
         curve=curve,
     )
