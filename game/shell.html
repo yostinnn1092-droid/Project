@@ -225,7 +225,8 @@
      caster has to have their own resource explained rather than a shared
      paragraph that fits neither. */
   .brief .pyro, .brief .wind, .brief .water, .brief .arcane,
-  .brief .storm, .brief .plague, .brief .frost { display: none; }
+  .brief .storm, .brief .plague, .brief .frost,
+  .brief .warden, .brief .grave, .brief .split { display: none; }
   body.casterChar .brief .kin { display: none; }
   body.pyromancerChar .brief .pyro { display: block; }
   body.windmageChar .brief .wind { display: block; }
@@ -234,6 +235,9 @@
   body.stormcallerChar .brief .storm { display: block; }
   body.plaguebearerChar .brief .plague { display: block; }
   body.frostbinderChar .brief .frost { display: block; }
+  body.wardenChar .brief .warden { display: block; }
+  body.gravemindChar .brief .grave { display: block; }
+  body.splitterChar .brief .split { display: block; }
   #diffTag { display: block; font-family: var(--mono); font-size: 8px;
              letter-spacing: .16em; color: var(--dim); margin-top: 2px; }
   #menuBest { display: none; margin-top: 10px; font-size: 11px; color: var(--force); opacity: .85; }
@@ -633,6 +637,23 @@
          point. A struck body <b>wades at a third speed</b> for four seconds, and the
          shot cuts through two of them. It kills almost nothing on its own — it buys
          you distance, and it stacks a crowd up for whatever comes next.</p>
+
+      <p class="warden"><b>SET</b> does almost nothing when it lands. It <b>sticks
+         where it hits and counts down</b>, swelling as it goes, and then goes off far
+         harder than a fireball. The delay is the cost and the reason the blast can be
+         that big — it is the one attack here you aim at where a body is going to be
+         rather than where it is.</p>
+
+      <p class="grave"><b>PULL</b> barely scratches anything. It <b>drags everything
+         nearby into one point</b> — the only attack here that gathers a crowd instead
+         of scattering it. On its own it wins nothing. What it does is build the
+         target every other kit wants.</p>
+
+      <p class="split"><b>BURST</b> sends one shot out and <b>four arrive</b>: it breaks
+         apart where it lands and fans fragments along the line it was already
+         travelling. It covers width rather than a line or a point, which makes it the
+         answer to a crowd that is spread thin — the opposite problem to the one the
+         stormcaller solves.</p>
 
       <p>Every attack has a <b>wind-up</b> — a flaring ring and a sound. Step, dash or jump out
          of it and it whiffs. <em>Grabbers</em> root you; <b>DASH</b> always breaks it.

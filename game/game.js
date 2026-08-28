@@ -2472,6 +2472,144 @@ function clearPools() {
   castState.pools.length = 0;
 }
 
+// ── three more kits ───────────────────────────────────────────────────────
+// Batch two of the roster, and the same rule: one mechanic each that nothing
+// else on the roster has. These three add fuse, pull and split.
+
+// ── the warden ────────────────────────────────────────────────────────────
+// Its shot does not detonate where it lands — it STICKS and counts down. The
+// only kit with a delay between the decision and the damage, which makes it
+// the only one you can aim at where a body is going to be rather than where
+// it is.
+const wardenMats = { rim:  new T.MeshBasicMaterial({ color:0x8a4a10, transparent:true,
+                       opacity:0.24, blending:T.AdditiveBlending, depthWrite:false }),
+                     body: new T.MeshBasicMaterial({ color:0xe08a20, transparent:true,
+                       opacity:0.55, blending:T.AdditiveBlending, depthWrite:false }),
+                     mid:  new T.MeshBasicMaterial({ color:0xffc760, transparent:true,
+                       opacity:0.7, blending:T.AdditiveBlending, depthWrite:false }),
+                     core: new T.MeshBasicMaterial({ color:0xfff4d0, transparent:true,
+                       opacity:0.92, blending:T.AdditiveBlending, depthWrite:false }) };
+const wardenTrailMats = trailLadder(
+  [0xfff0cc, 0xffcf7a, 0xf0a83a, 0xc87c1e, 0x945a16, 0x633c10, 0x40280a],
+  [0.55, 0.44, 0.34, 0.25, 0.17, 0.10, 0.05]);
+
+const WARDEN = {
+  label: "Charge", verb: "Set", kind: "blast",
+  dry: "NO CHARGES LEFT — they pack again",
+  hint: "Tap SET · it sticks first and blows a moment later",
+  regen: 2.8, speed: 30, dmg: 30, pierce: 0, blastR: 0, blastDmg: 0,
+  hitR: 1.15, life: 3.4, knock: 1, home: 55,
+  // Sticks, waits, then goes off far harder than a fireball. The wait is the
+  // cost and the reason the blast can be this big.
+  fuse: { time: 1.1, r: 6.2, dmg: 210 },
+  orbitR: 0.62, low: 1.26, high: 1.94, hot: 0xffb040,
+  make: () => makeArcOrb(wardenMats), anim: burnFireball, aim: null,
+  carry: 0.58, fly: 1.4,
+  trail: { geo: () => pyroShellGeo, mats: wardenTrailMats, every: 0.021,
+           life: 0.34, spread: 0.11, rise: 0.09, drift: [0.1, 0.45],
+           size: [0.7, 1.3], grow: 0.75, spin: [-3, 3] },
+};
+
+// ── the gravemind ─────────────────────────────────────────────────────────
+// Every other kit pushes bodies APART — knockback, blasts, shoves. This one
+// drags them together, and that is its whole purpose: it does almost no
+// damage itself and instead builds the target every other kit wants.
+const graveMats = { rim:  new T.MeshBasicMaterial({ color:0x2a1040, transparent:true,
+                      opacity:0.30, blending:T.AdditiveBlending, depthWrite:false }),
+                    body: new T.MeshBasicMaterial({ color:0x5c2a8a, transparent:true,
+                      opacity:0.55, blending:T.AdditiveBlending, depthWrite:false }),
+                    mid:  new T.MeshBasicMaterial({ color:0x9a4ad0, transparent:true,
+                      opacity:0.6, blending:T.AdditiveBlending, depthWrite:false }),
+                    core: new T.MeshBasicMaterial({ color:0x1a0a2a, transparent:true,
+                      opacity:0.85, depthWrite:false }) };
+const graveTrailMats = trailLadder(
+  [0xc89aff, 0x9a68e0, 0x7040b8, 0x4e2a88, 0x361c60, 0x24123f, 0x160b26],
+  [0.50, 0.40, 0.31, 0.23, 0.16, 0.10, 0.05]);
+
+const GRAVE = {
+  label: "Well", verb: "Pull", kind: "impact",
+  dry: "NO WELLS LEFT — they collapse again",
+  hint: "Tap PULL · it gathers them up, it does not kill them",
+  regen: 2.4, speed: 26, dmg: 35, pierce: 0, blastR: 0, blastDmg: 0,
+  hitR: 1.2, life: 3.2, knock: 0, home: 70,
+  // Reaches wider than any blast on the roster and hurts almost nothing. The
+  // point is the shape the crowd is left in.
+  pull: { r: 11, force: 26 },
+  orbitR: 0.60, low: 1.26, high: 1.94, hot: 0x9a4ad0,
+  make: () => makeArcOrb(graveMats), anim: burnFireball, aim: null,
+  carry: 0.56, fly: 1.5,
+  trail: { geo: () => pyroShellGeo, mats: graveTrailMats, every: 0.020,
+           life: 0.38, spread: 0.10, rise: 0.02, drift: [-0.3, 0.05],
+           size: [0.7, 1.4], grow: 0.8, spin: [-4, 4] },
+};
+
+// ── the splitter ──────────────────────────────────────────────────────────
+// One shot leaves the hand and four arrive. It is the only kit that covers a
+// FAN rather than a line or a point, which makes it the answer to a crowd
+// that is spread out — the exact opposite of the stormcaller's question.
+const splitMats = { rim:  new T.MeshBasicMaterial({ color:0x0f5a52, transparent:true,
+                      opacity:0.24, blending:T.AdditiveBlending, depthWrite:false }),
+                    body: new T.MeshBasicMaterial({ color:0x1fa894, transparent:true,
+                      opacity:0.55, blending:T.AdditiveBlending, depthWrite:false }),
+                    mid:  new T.MeshBasicMaterial({ color:0x5ee0c8, transparent:true,
+                      opacity:0.68, blending:T.AdditiveBlending, depthWrite:false }),
+                    core: new T.MeshBasicMaterial({ color:0xe0fff8, transparent:true,
+                      opacity:0.92, blending:T.AdditiveBlending, depthWrite:false }) };
+const splitTrailMats = trailLadder(
+  [0xdcfff6, 0x9aecd8, 0x5cc8b4, 0x36a08c, 0x247566, 0x184f44, 0x0f332c],
+  [0.55, 0.43, 0.33, 0.25, 0.17, 0.10, 0.05]);
+
+// The fragments are a spec of their own, built ONCE rather than per shot —
+// and deliberately without a `split` of their own, which is what stops a
+// fragment from fragmenting and the whole thing from multiplying forever.
+const SPLIT_FRAGMENT = {
+  label: "Shard", verb: "Split", kind: "impact",
+  dry: "", hint: "",
+  regen: 99, speed: 34, dmg: 55, pierce: 0, blastR: 0, blastDmg: 0,
+  hitR: 1.0, life: 1.1, knock: 2, home: 30,
+  orbitR: 0.6, low: 1.26, high: 1.94, hot: 0x5ee0c8,
+  make: () => makeArcOrb(splitMats), anim: burnFireball, aim: null,
+  carry: 0.4, fly: 0.85,
+  trail: { geo: () => pyroShellGeo, mats: splitTrailMats, every: 0.026,
+           life: 0.22, spread: 0.08, rise: 0.05, drift: [0, 0.3],
+           size: [0.5, 0.9], grow: 0.6, spin: [-3, 3] },
+};
+
+const SPLIT = {
+  label: "Cluster", verb: "Burst", kind: "impact",
+  dry: "NO CLUSTERS LEFT — they reform",
+  hint: "Tap BURST · one leaves, four arrive",
+  regen: 2.3, speed: 32, dmg: 60, pierce: 0, blastR: 0, blastDmg: 0,
+  hitR: 1.1, life: 2.4, knock: 2, home: 50,
+  split: { count: 4, spread: 0.9, spec: SPLIT_FRAGMENT },
+  orbitR: 0.62, low: 1.26, high: 1.94, hot: 0x5ee0c8,
+  make: () => makeArcOrb(splitMats), anim: burnFireball, aim: null,
+  carry: 0.58, fly: 1.45,
+  trail: { geo: () => pyroShellGeo, mats: splitTrailMats, every: 0.020,
+           life: 0.30, spread: 0.10, rise: 0.07, drift: [0, 0.4],
+           size: [0.7, 1.3], grow: 0.7, spin: [-3, 3] },
+};
+
+// Fragments, fanned off the parent's own heading so the spread opens along
+// the line the shot was already travelling rather than in a fixed direction.
+function splitShot(s) {
+  const cfg = s.spec.split;
+  const dir = Math.atan2(s.vel.x, s.vel.z);
+  for (let i = 0; i < cfg.count; i++) {
+    const a = dir + (i - (cfg.count - 1) / 2) * cfg.spread;
+    const g = cfg.spec.make();
+    g.scale.setScalar(cfg.spec.fly);
+    g.position.copy(s.g.position);
+    scene.add(g);
+    castState.shots.push({
+      g, seek: null, spec: cfg.spec,
+      vel: new T.Vector3(Math.sin(a), 0, Math.cos(a)).multiplyScalar(cfg.spec.speed),
+      rising: false, launchDir: null, riseAt: 0,
+      life: cfg.spec.life, seed: Math.random() * 40, puffT: 0, hit: null,
+    });
+  }
+}
+
 // Chain: from the body just struck, hop to the nearest one not yet hit,
 // losing strength each hop. Reuses bolt() — the arc visual the lightning wave
 // modifier already draws — rather than inventing a second one.
@@ -2671,6 +2809,28 @@ function stepCast(dt) {
   for (let i = castState.shots.length - 1; i >= 0; i--) {
     const s = castState.shots[i];
     s.life -= dt;
+    // A charge that has already stuck does not fly, does not home, does not
+    // hit anything again — it sits where it landed and counts down. Handled
+    // before everything else so none of the flight machinery below can touch
+    // it while it waits.
+    if (s.stuck) {
+      s.fuseT -= dt;
+      // Swells and brightens as it runs out, so the countdown is readable off
+      // the object rather than only known to the code.
+      const f = 1 - Math.max(0, s.fuseT) / s.spec.fuse.time;
+      s.g.scale.setScalar(s.spec.fly * (1 + 0.5 * f));
+      s.spec.anim(s.g, S.t * (1 + 3 * f), s.seed, s.spec.fly * (1 + 0.5 * f));
+      if (s.fuseT <= 0) {
+        queueBlast(tmp3.copy(s.g.position),
+                   { r: s.spec.fuse.r * MOD.blastR,
+                     dmg: s.spec.fuse.dmg * MOD.blastDmg }, null);
+        burst(s.g.position, s.spec.hot);
+        scene.remove(s.g);
+        castState.shots.splice(i, 1);
+      }
+      continue;
+    }
+
     // Lifted, then thrown. Nothing touches the ball while it is climbing — no
     // homing, no turn — and the moment it reaches its height it takes the
     // direction the cast was aimed and goes. Doing this on a TIMER instead of
@@ -2734,6 +2894,17 @@ function stepCast(dt) {
         if (dx*dx + dy*dy + dz*dz < (s.spec.hitR + w.r) * (s.spec.hitR + w.r)) {
           damageWalker(w, s.spec.dmg * MOD.allDmg, tmp3.copy(s.vel).normalize(),
                        s.spec.knock, s.spec.kind);
+          // A charge sticks rather than resolving: it stops dead where it
+          // struck and starts its clock. Returning here leaves the shot alive
+          // and in the list, which is what the stuck branch above expects.
+          if (s.spec.fuse) {
+            s.stuck = true;
+            s.fuseT = s.spec.fuse.time;
+            s.vel.set(0, 0, 0);
+            s.seek = null;
+            done = false;
+            break;
+          }
           // A kit that BINDS rather than kills. The multiplier rides on the
           // body so it can differ from the Crown's, which used to be the only
           // thing in the game that slowed anything.
@@ -2769,6 +2940,16 @@ function stepCast(dt) {
       // ground is the actual weapon. Spawned wherever the shot stopped, which
       // is why its own impact damage is so low.
       if (s.spec.pool) spawnPool(s.g.position, s.spec.pool, s.spec.kind);
+      // The opposite of a blast: everything nearby is dragged INTO the point
+      // the shot stopped at, rather than thrown away from it. Reuses
+      // pullToward, which the voidwell modifier already uses.
+      if (s.spec.pull) {
+        pullToward(s.g.position, s.spec.pull.r, s.spec.pull.force);
+        shell(s.g.position, s.spec.pull.r * 0.5, s.spec.hot);
+      }
+      // ...and one shot becoming several. Fragments carry their own spec,
+      // which has no `split` of its own — that is what stops this recursing.
+      if (s.spec.split) splitShot(s);
       scene.remove(s.g);
       castState.shots.splice(i, 1);
     }
@@ -4518,6 +4699,36 @@ const CHARS = {
     cast: FROST,
     perk(lv) { return castCap(lv) + " held · " +
                       Math.round((1 - FROST.slow.mul) * 100) + "% slower"; },
+  },
+  // The only kit with a gap between the decision and the damage, which is
+  // what lets it be aimed at where a body is GOING rather than where it is.
+  warden: {
+    name: "WARDEN",
+    desc: "It sticks first. Then it goes off.",
+    power: "warden",
+    props: 0,
+    cast: WARDEN,
+    perk(lv) { return castCap(lv) + " held · " + WARDEN.fuse.time + "s fuse"; },
+  },
+  // Every other kit pushes bodies apart. This one drags them together, and
+  // builds the target the rest of the roster wants.
+  gravemind: {
+    name: "GRAVEMIND",
+    desc: "It gathers them. Someone else finishes them.",
+    power: "grave",
+    props: 0,
+    cast: GRAVE,
+    perk(lv) { return castCap(lv) + " held · pulls " + GRAVE.pull.r + " wide"; },
+  },
+  // The answer to a crowd that is spread out — the exact opposite of the
+  // question the stormcaller asks.
+  splitter: {
+    name: "SPLITTER",
+    desc: "One leaves. Four arrive.",
+    power: "split",
+    props: 0,
+    cast: SPLIT,
+    perk(lv) { return castCap(lv) + " held · " + SPLIT.split.count + " fragments"; },
   },
 };
 for (const k in CHARS) CHARS[k].key = k;

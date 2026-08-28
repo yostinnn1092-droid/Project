@@ -1188,6 +1188,190 @@ test("characters: the frostbinder slows what it hits, and the crown still slows 
   eq(r.w2mul, r.crownMul, "the Crown's own slow path stopped working");
 });
 
+test("characters: the warden's charge sticks, waits, and only then detonates", async (pg) => {
+  // The one kit with a gap between the decision and the damage. Three things
+  // have to hold or the mechanic is a lie: it stops where it hit rather than
+  // flying on, it deals almost nothing while it waits, and the big damage
+  // arrives only after the fuse runs out.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("warden");
+    P.PROFILE.charLv.warden = 6;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.MOD.allDmg = 1; P.MOD.blastR = 1; P.MOD.blastDmg = 1; P.WMOD.blastR = 1;
+    P.castState.held = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 25; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1/60); }
+    P.parkWalkers();
+
+    const w = P.walkers.find(x => !x.dead);
+    const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+    const pin = () => { w.pos.set(f.x * 16, 0, f.z * 16); w.aggro = false; w.cool = 999; };
+    pin(); w.hp = 9000;
+    const hp0 = w.hp;
+
+    P.S.lock = w;
+    P.castFire();
+    const shot = P.castState.shots[P.castState.shots.length - 1];
+
+    // Run until it sticks, recording where it stopped.
+    let stuckAt = null, hpAtStick = null, framesToStick = 0;
+    for (let i = 0; i < 60 * 3 && !stuckAt; i++) {
+      pin(); P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60);
+      framesToStick++;
+      if (shot.stuck) {
+        stuckAt = { x: shot.g.position.x, z: shot.g.position.z };
+        hpAtStick = w.hp;
+      }
+    }
+    // While it waits it must not move and must not keep hurting anything.
+    let moved = 0;
+    for (let i = 0; i < 20; i++) {
+      pin(); P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60);
+      if (P.castState.shots.includes(shot)) {
+        moved = Math.max(moved, Math.hypot(shot.g.position.x - stuckAt.x,
+                                           shot.g.position.z - stuckAt.z));
+      }
+    }
+    const hpMidFuse = w.hp;
+    // ...and then it goes off.
+    for (let i = 0; i < 90; i++) { pin(); P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60); }
+    const gone = !P.castState.shots.includes(shot);
+    const hpEnd = w.hp;
+    P.setCharacter("telekinetic");
+    return { stuck: !!stuckAt, moved: +moved.toFixed(3),
+             onImpact: +(hp0 - hpAtStick).toFixed(1),
+             duringFuse: +(hpAtStick - hpMidFuse).toFixed(1),
+             onBlast: +(hpMidFuse - hpEnd).toFixed(1), gone,
+             fuseDmg: P.WARDEN.fuse.dmg, impactDmg: P.WARDEN.dmg };
+  });
+
+  ok(r.stuck, "the charge never stuck to anything — it behaves like an ordinary shot");
+  ok(r.moved < 0.01,
+     "a stuck charge drifted " + r.moved + " while counting down; it is supposed to " +
+     "sit where it landed");
+  ok(r.onImpact < 60,
+     "the charge dealt " + r.onImpact + " on impact — the whole point is that landing " +
+     "barely hurts and the wait is what is paid for");
+  ok(r.onBlast > r.onImpact * 2,
+     "the detonation dealt " + r.onBlast + " against " + r.onImpact + " on impact: the " +
+     "payoff is not bigger than the delivery, so the fuse buys nothing");
+  ok(r.gone, "the charge never detonated — it is stuck forever");
+});
+
+test("characters: the gravemind pulls bodies inward where a blast throws them outward", async (pg) => {
+  // Measured as the IMPULSE each body is given, not as ground it covers.
+  // Displacement was the wrong ruler twice over: bodies walk toward the hero
+  // on their own, which packs a crowd together regardless of what hit it, and
+  // over two seconds that walking dwarfs the effect being measured — it had a
+  // fireball "gathering" a crowd harder than the kit built to gather.
+  //
+  // The impulse has no such confound. For each body, take the dot product of
+  // its knockback with the unit vector pointing at the impact. Positive means
+  // thrown toward the point; negative means away. A pull and a blast must come
+  // out with opposite signs or one of them is not doing its job.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const impulseFor = (who) => {
+      P.setCharacter(who);
+      P.PROFILE.charLv[who] = 6;
+      P.buildWave(3); P.parkWalkers(); P.stripProps();
+      P.MOD.allDmg = 1; P.MOD.blastR = 1; P.MOD.blastDmg = 1; P.WMOD.blastR = 1;
+      P.castState.held = 0; P.buildCastStack();
+      for (let i = 0; i < 60 * 25; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1/60); }
+      P.parkWalkers();
+
+      const live = P.walkers.filter(x => !x.dead).slice(0, 4);
+      const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+      live.forEach((w, i) => {
+        const a = i * Math.PI / 2;
+        w.pos.set(f.x * 18 + Math.cos(a) * 5, 0, f.z * 18 + Math.sin(a) * 5);
+        w.aggro = false; w.cool = 999; w.hp = 9000; w.kb.set(0, 0, 0);
+      });
+
+      P.S.lock = live[0];
+      P.castFire();
+      const shot = P.castState.shots[P.castState.shots.length - 1];
+      let last = { x: shot.g.position.x, z: shot.g.position.z };
+      let best = 0;
+      for (let i = 0; i < 60 * 4; i++) {
+        if (P.castState.shots.includes(shot)) {
+          last = { x: shot.g.position.x, z: shot.g.position.z };
+        }
+        P.hero.pos.set(0, 0, 0); P.hero.hp = 99;
+        live.forEach(w => { w.aggro = false; w.cool = 999; });
+        P.step(1/60);
+        // The impulse is spent within a few frames, so take the strongest
+        // reading rather than whatever happens to be left at the end.
+        let sum = 0;
+        for (const w of live) {
+          const dx = last.x - w.pos.x, dz = last.z - w.pos.z;
+          const d = Math.hypot(dx, dz) || 1;
+          sum += (w.kb.x * dx + w.kb.z * dz) / d;
+        }
+        if (Math.abs(sum) > Math.abs(best)) best = sum;
+      }
+      return +best.toFixed(2);
+    };
+    const grave = impulseFor("gravemind");
+    const fire  = impulseFor("pyromancer");
+    P.setCharacter("telekinetic");
+    return { grave, fire };
+  });
+
+  ok(r.grave > 1,
+     "the well gave the crowd an impulse of " + r.grave + " toward the impact — " +
+     "positive means inward, and this is not pulling anything in");
+  ok(r.fire < 0,
+     "a fireball's blast gave " + r.fire + " toward its own impact; a blast is " +
+     "supposed to throw bodies away from it, so the control is not behaving");
+  ok(r.grave > 0 && r.fire < 0,
+     "the well (" + r.grave + ") and the blast (" + r.fire + ") do not have opposite " +
+     "signs — the kit that gathers and the kit that scatters are doing the same thing");
+});
+
+test("characters: the splitter's fragments are real shots, and they cannot split again", async (pg) => {
+  // Two claims. The fragments have to actually exist as shots in the air —
+  // and, more importantly, they must not carry a split of their own, or one
+  // trigger pull multiplies without end and takes the frame rate with it.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("splitter");
+    P.PROFILE.charLv.splitter = 6;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.MOD.allDmg = 1;
+    P.castState.held = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 25; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1/60); }
+    P.parkWalkers();
+
+    P.S.lock = null;
+    P.castFire();
+    const parent = P.castState.shots[P.castState.shots.length - 1];
+    let peak = 0, sawFragments = false;
+    for (let i = 0; i < 60 * 4; i++) {
+      P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60);
+      peak = Math.max(peak, P.castState.shots.length);
+      if (!P.castState.shots.includes(parent) && P.castState.shots.length > 0) {
+        sawFragments = true;
+      }
+    }
+    const settled = P.castState.shots.length;
+    P.setCharacter("telekinetic");
+    return { peak, sawFragments, settled,
+             count: P.SPLIT.split.count,
+             fragmentSplits: !!P.SPLIT_FRAGMENT.split };
+  });
+
+  ok(r.peak >= r.count,
+     "at most " + r.peak + " shots were ever in the air; a burst of " + r.count +
+     " fragments should push it past that");
+  ok(r.sawFragments, "the fragments never outlived their parent — nothing was spawned");
+  eq(r.fragmentSplits, false,
+     "a fragment carries a split of its own, so one trigger pull multiplies forever");
+  eq(r.settled, 0,
+     "shots are still in the air four seconds later: " + r.settled + " — fragments are " +
+     "not expiring, which is the same runaway by a slower route");
+});
+
 test("characters: water shoves a body, fire and blades do not", async (pg) => {
   // Control rather than damage is the trade this kit makes, and the shove is
   // where that trade is visible.
