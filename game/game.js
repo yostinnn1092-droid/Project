@@ -1603,6 +1603,7 @@ function stepCrown(dt) {
           // Ice: the body wades for a moment. This is the Crown's identity —
           // the Ring burns what closes, the Crown slows what is still coming.
           target.slowT = CROWN.slowT;
+          target.slowMul = CROWN.slowMul;
           sparks(tmp3.copy(sp.g.position), CROWN.ice, 10, 14);
           SFX.impact(0.5, 1);
           done = true;
@@ -1641,7 +1642,7 @@ const WIND_PALE = 0x8ef0a8;
 // ground through, with a pale sheen riding on top of it.
 const WATER_BLUE = 0x3aa8e8;
 
-const castState = { held: 0, t: 0, group: null, orbs: [], shots: [], embers: [] };
+const castState = { held: 0, t: 0, group: null, orbs: [], shots: [], embers: [], pools: [] };
 
 // ── the fireball ──────────────────────────────────────────────────────────
 // One geometry and one material for every ball, held and in flight alike.
@@ -2236,16 +2237,19 @@ const makeArcNova  = () => makeArcOrb({ rim: arcNovaRimMat, body: arcNovaMat,
 // The blade's own structure (see makeAirBlade / pulseAirBlade / aimAirBlade
 // / launchAirBlade / faceAirBlade, above), rebuilt with violet materials so
 // the Shard tier reuses all four of those functions UNMODIFIED.
-function makeArcShard() {
+function makeCrescentShard(mats) {
   const g = new T.Group();
   const spin = new T.Group();
-  spin.add(new T.Mesh(bladeGlowGeo, arcShardGlowMat));
-  spin.add(new T.Mesh(bladeBodyGeo, arcShardBodyMat));
-  spin.add(new T.Mesh(bladeCoreGeo, arcShardCoreMat));
+  spin.add(new T.Mesh(bladeGlowGeo, mats.glow));
+  spin.add(new T.Mesh(bladeBodyGeo, mats.body));
+  spin.add(new T.Mesh(bladeCoreGeo, mats.core));
   g.add(spin);
   spin.rotation.z = Math.random() * Math.PI * 2;
   return g;
 }
+const makeArcShard = () => makeCrescentShard({ glow: arcShardGlowMat,
+                                               body: arcShardBodyMat,
+                                               core: arcShardCoreMat });
 
 const ARC_SPARK = {
   label: "Spark", verb: "Cast", kind: "arcane", tier: "Spark",
@@ -2301,6 +2305,196 @@ const ARC_TIERS = [ARC_SPARK, ARC_SHARD, ARC_NOVA];
 // biggest tier is also the one a player has to work longest to reach.
 function arcTierIndex(lv) { return lv < 3 ? 0 : lv < 6 ? 1 : 2; }
 function arcSpec(lv) { return ARC_TIERS[arcTierIndex(lv)]; }
+
+// ═══════════════════════════════════════════════════════════ three more kits
+// Each of these exists to own ONE mechanic no other character has, because a
+// roster where every entry throws a differently coloured ball is one
+// character with several skins. The machinery hooks they add — chain, pool,
+// slow — are generic: any later kit can set them without touching the flight
+// loop again.
+
+// A small helper so a fading tail is a list of colours rather than twenty
+// lines of near-identical material construction.
+function trailLadder(colors, opacities) {
+  return colors.map((c, i) => new T.MeshBasicMaterial({
+    color: c, transparent: true, opacity: opacities[i],
+    blending: T.AdditiveBlending, depthWrite: false }));
+}
+
+// ── the stormcaller ───────────────────────────────────────────────────────
+// Hits one body, then JUMPS to the next, and the next, losing strength each
+// time. Its damage is a function of how tightly packed the crowd is, which no
+// other kit's is: a single body takes less from it than a fireball, and five
+// standing together take more.
+const stormMats = { rim:  new T.MeshBasicMaterial({ color:0x1f5fd0, transparent:true,
+                      opacity:0.22, blending:T.AdditiveBlending, depthWrite:false }),
+                    body: new T.MeshBasicMaterial({ color:0x4aa8ff, transparent:true,
+                      opacity:0.55, blending:T.AdditiveBlending, depthWrite:false }),
+                    mid:  new T.MeshBasicMaterial({ color:0x9fd8ff, transparent:true,
+                      opacity:0.7, blending:T.AdditiveBlending, depthWrite:false }),
+                    core: new T.MeshBasicMaterial({ color:0xf0faff, transparent:true,
+                      opacity:0.95, blending:T.AdditiveBlending, depthWrite:false }) };
+const stormTrailMats = trailLadder(
+  [0xeaf7ff, 0xb8e2ff, 0x7cc4ff, 0x4a9ae8, 0x2d6cc0, 0x1e4a90, 0x152f5c],
+  [0.60, 0.46, 0.34, 0.26, 0.18, 0.11, 0.05]);
+
+const STORM = {
+  label: "Arc", verb: "Arc", kind: "arc",
+  dry: "NO CHARGE LEFT — it builds again",
+  hint: "Tap ARC · it jumps from body to body, so aim at the crowd",
+  regen: 2.2, speed: 40, dmg: 95, pierce: 0, blastR: 0, blastDmg: 0,
+  hitR: 1.1, life: 2.8, knock: 2, home: 80,
+  // Three jumps, each at 70% of the last, reaching 9 units. Worth less than a
+  // fireball into one body and far more into five — which is the trade.
+  chain: { jumps: 3, radius: 9, falloff: 0.7 },
+  orbitR: 0.62, low: 1.26, high: 1.96, hot: 0x6fc0ff,
+  make: () => makeArcOrb(stormMats), anim: burnFireball, aim: null,
+  carry: 0.56, fly: 1.3,
+  trail: { geo: () => pyroShellGeo, mats: stormTrailMats, every: 0.018,
+           life: 0.30, spread: 0.10, rise: 0.08, drift: [0.1, 0.4],
+           size: [0.65, 1.2], grow: 0.7, spin: [-3, 3] },
+};
+
+// ── the plaguebearer ──────────────────────────────────────────────────────
+// Its shot barely hurts. What it leaves behind does. The only kit here that
+// damages GROUND rather than bodies — it denies a piece of the arena for a
+// few seconds and makes the crowd walk through it.
+const plagueMats = { rim:  new T.MeshBasicMaterial({ color:0x3d6b12, transparent:true,
+                       opacity:0.24, blending:T.AdditiveBlending, depthWrite:false }),
+                     body: new T.MeshBasicMaterial({ color:0x7fc02a, transparent:true,
+                       opacity:0.55, blending:T.AdditiveBlending, depthWrite:false }),
+                     mid:  new T.MeshBasicMaterial({ color:0xc8f06a, transparent:true,
+                       opacity:0.68, blending:T.AdditiveBlending, depthWrite:false }),
+                     core: new T.MeshBasicMaterial({ color:0xf0ffd8, transparent:true,
+                       opacity:0.9, blending:T.AdditiveBlending, depthWrite:false }) };
+const plagueTrailMats = trailLadder(
+  [0xeaffc8, 0xc4ee78, 0x96cf40, 0x6da528, 0x4c7a1c, 0x365412, 0x24380c],
+  [0.55, 0.44, 0.34, 0.26, 0.18, 0.11, 0.05]);
+
+const PLAGUE = {
+  label: "Bile", verb: "Spit", kind: "chem",
+  dry: "NO BILE LEFT — it brews again",
+  hint: "Tap SPIT · the puddle is the weapon, not the shot",
+  regen: 2.6, speed: 24, dmg: 40, pierce: 0, blastR: 0, blastDmg: 0,
+  hitR: 1.15, life: 3.2, knock: 1, home: 40,
+  // Six seconds of ground at 55 a second: far more total than a fireball, but
+  // only against something that stays in it.
+  pool: { r: 3.6, dps: 55, life: 6.0, color: 0x8fd93a },
+  orbitR: 0.60, low: 1.24, high: 1.92, hot: 0x9fe04a,
+  make: () => makeArcOrb(plagueMats), anim: burnFireball, aim: null,
+  carry: 0.58, fly: 1.45,
+  trail: { geo: () => pyroShellGeo, mats: plagueTrailMats, every: 0.022,
+           life: 0.42, spread: 0.13, rise: 0.04, drift: [-0.35, 0.1],
+           size: [0.8, 1.5], grow: 0.9, spin: [-2, 2] },
+};
+
+// ── the frostbinder ───────────────────────────────────────────────────────
+// The lowest damage on the roster on purpose. It is not trying to kill
+// anything: a struck body wades at a third speed for four seconds, which is
+// long enough to walk away from and long enough to stack the crowd up for
+// somebody else's blast. The Crown already slowed things; this is a whole kit
+// built on it, and it sets its own strength rather than borrowing the Crown's.
+const frostMats = { glow: new T.MeshBasicMaterial({ color:0x5fb8e8, transparent:true,
+                      opacity:0.30, blending:T.AdditiveBlending, depthWrite:false,
+                      side:T.DoubleSide }),
+                    body: new T.MeshBasicMaterial({ color:0xa8e4ff, transparent:true,
+                      opacity:0.7, blending:T.AdditiveBlending, depthWrite:false,
+                      side:T.DoubleSide }),
+                    core: new T.MeshBasicMaterial({ color:0xffffff, transparent:true,
+                      opacity:0.88, blending:T.AdditiveBlending, depthWrite:false,
+                      side:T.DoubleSide }) };
+const frostTrailMats = trailLadder(
+  [0xffffff, 0xdaf4ff, 0xa8e0f8, 0x78c2e8, 0x529cc8, 0x37729c, 0x244c68],
+  [0.42, 0.34, 0.27, 0.20, 0.14, 0.09, 0.04]);
+
+const FROST = {
+  label: "Frost", verb: "Bind", kind: "impact",
+  dry: "NO FROST LEFT — it forms again",
+  hint: "Tap BIND · it barely hurts them, it just stops them",
+  regen: 1.5, speed: 44, dmg: 45, pierce: 2, blastR: 0, blastDmg: 0,
+  hitR: 1.25, life: 2.6, knock: 2, home: 60,
+  // A third speed for four seconds — the longest control effect in the game,
+  // paid for with the weakest hit in the game.
+  slow: { mul: 0.34, time: 4.0 },
+  orbitR: 0.64, low: 1.24, high: 1.96, hot: 0xbfeaff,
+  make: () => makeCrescentShard(frostMats), anim: pulseAirBlade,
+  launch: launchAirBlade, aim: aimAirBlade, carryAim: faceAirBlade,
+  carry: 0.55, fly: 1.5,
+  trail: { geo: () => bladeWispGeo, mats: frostTrailMats, every: 0.020,
+           life: 0.34, spread: 0.11, rise: 0.05, drift: [-0.2, 0.25],
+           size: [0.9, 1.7], grow: 1.3, spin: [-4, 4] },
+};
+
+// ── the three mechanics themselves ────────────────────────────────────────
+// A lingering pool of ground. One flat disc per pool, its own material so it
+// can fade on its own clock, and a damage tick on a fixed interval rather
+// than per frame so a fast machine does not deal more damage than a slow one.
+const poolGeo = new T.CircleGeometry(1, 30);
+function spawnPool(at, cfg, kind) {
+  const m = new T.Mesh(poolGeo, new T.MeshBasicMaterial({
+    color: cfg.color, transparent: true, opacity: 0.4,
+    blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(at.x, 0.05, at.z);
+  m.scale.setScalar(cfg.r);
+  scene.add(m);
+  castState.pools.push({ m, x: at.x, z: at.z, r: cfg.r, dps: cfg.dps,
+                         age: 0, max: cfg.life, tick: 0, kind,
+                         seed: Math.random() * 6.28 });
+}
+
+function stepPools(dt) {
+  for (let i = castState.pools.length - 1; i >= 0; i--) {
+    const p = castState.pools[i];
+    p.age += dt;
+    if (p.age >= p.max) { scene.remove(p.m); castState.pools.splice(i, 1); continue; }
+    const f = p.age / p.max;
+    // Fades out over its life and breathes while it is there, so a pool that
+    // is nearly spent LOOKS nearly spent — the player can read the clock off
+    // the ground rather than having to count seconds.
+    p.m.material.opacity = 0.40 * (1 - f) * (0.78 + 0.22 * Math.sin(S.t * 5 + p.seed));
+    p.tick -= dt;
+    if (p.tick <= 0) {
+      p.tick = 0.25;
+      for (const w of walkers) {
+        if (w.dead) continue;
+        const dx = w.pos.x - p.x, dz = w.pos.z - p.z;
+        if (dx * dx + dz * dz < p.r * p.r) {
+          damageWalker(w, p.dps * 0.25 * MOD.allDmg, null, 0, p.kind);
+        }
+      }
+    }
+  }
+}
+
+function clearPools() {
+  for (const p of castState.pools) scene.remove(p.m);
+  castState.pools.length = 0;
+}
+
+// Chain: from the body just struck, hop to the nearest one not yet hit,
+// losing strength each hop. Reuses bolt() — the arc visual the lightning wave
+// modifier already draws — rather than inventing a second one.
+function chainFrom(origin, spec, baseDmg) {
+  const cfg = spec.chain;
+  let src = origin, d = baseDmg;
+  const hits = [origin];
+  for (let n = 0; n < cfg.jumps; n++) {
+    let best = null, bd = cfg.radius;
+    for (const w of walkers) {
+      if (w.dead || hits.includes(w)) continue;
+      const dd = Math.hypot(w.pos.x - src.pos.x, w.pos.z - src.pos.z);
+      if (dd < bd) { bd = dd; best = w; }
+    }
+    if (!best) break;
+    d *= cfg.falloff;
+    bolt(src.pos, best.pos);
+    damageWalker(best, d, null, 0, spec.kind);
+    hits.push(best);
+    src = best;
+  }
+  return hits.length - 1;
+}
 
 // The kit of whoever is playing, or the pyromancer's as a stand-in for the
 // telekinetic so nothing downstream has to null-check a spec it never uses.
@@ -2362,6 +2556,7 @@ function buildCastStack() {
 function clearCastShots() {
   for (const s of castState.shots) scene.remove(s.g);
   castState.shots.length = 0;
+  clearPools();
   for (const p of castState.embers) scene.remove(p.m);
   castState.embers.length = 0;
 }
@@ -2539,6 +2734,13 @@ function stepCast(dt) {
         if (dx*dx + dy*dy + dz*dz < (s.spec.hitR + w.r) * (s.spec.hitR + w.r)) {
           damageWalker(w, s.spec.dmg * MOD.allDmg, tmp3.copy(s.vel).normalize(),
                        s.spec.knock, s.spec.kind);
+          // A kit that BINDS rather than kills. The multiplier rides on the
+          // body so it can differ from the Crown's, which used to be the only
+          // thing in the game that slowed anything.
+          if (s.spec.slow) { w.slowT = s.spec.slow.time; w.slowMul = s.spec.slow.mul; }
+          // ...and a kit that jumps. Off the body just struck, not off the
+          // shot, so the arc starts where the damage did.
+          if (s.spec.chain) chainFrom(w, s.spec, s.spec.dmg * MOD.allDmg);
           // A ball stops at the first body it touches; a blade carries on
           // through until its budget of bodies is spent.
           if (s.spec.pierce <= 0) { done = true; break; }
@@ -2563,10 +2765,16 @@ function stepCast(dt) {
       } else {
         sparks(tmp3.copy(s.g.position), s.spec.hot, 7, 9);
       }
+      // A kit whose shot is only a delivery mechanism: what it leaves on the
+      // ground is the actual weapon. Spawned wherever the shot stopped, which
+      // is why its own impact damage is so low.
+      if (s.spec.pool) spawnPool(s.g.position, s.spec.pool, s.spec.kind);
       scene.remove(s.g);
       castState.shots.splice(i, 1);
     }
   }
+
+  stepPools(dt);
 
   // ---- the tail, aged as one pool. Each puff carries the ladder it was born
   // with, so a wind mage's wisps still fade like wind after switching kits
@@ -4279,6 +4487,37 @@ const CHARS = {
     perk(lv) { const t = arcSpec(lv).tier;
                return castCap(lv) + " " + t.toLowerCase() +
                       (castCap(lv) === 1 ? "" : "s") + " held — " + t; },
+  },
+  // Worth less than a fireball into one body and far more into five. The only
+  // kit whose damage depends on how the crowd is STANDING.
+  stormcaller: {
+    name: "STORMCALLER",
+    desc: "One body is a waste. Aim at the crowd.",
+    power: "storm",
+    props: 0,
+    cast: STORM,
+    perk(lv) { return castCap(lv) + " held · " + STORM.chain.jumps + " jumps"; },
+  },
+  // The only kit that damages GROUND instead of bodies: the shot is a
+  // delivery mechanism and the puddle it leaves is the weapon.
+  plaguebearer: {
+    name: "PLAGUEBEARER",
+    desc: "The puddle is the weapon.",
+    power: "plague",
+    props: 0,
+    cast: PLAGUE,
+    perk(lv) { return castCap(lv) + " held · " + PLAGUE.pool.life + "s pools"; },
+  },
+  // The weakest hit on the roster, deliberately. It is not trying to kill
+  // anything — it is trying to stop it.
+  frostbinder: {
+    name: "FROSTBINDER",
+    desc: "It does not kill them. It stops them.",
+    power: "frost",
+    props: 0,
+    cast: FROST,
+    perk(lv) { return castCap(lv) + " held · " +
+                      Math.round((1 - FROST.slow.mul) * 100) + "% slower"; },
   },
 };
 for (const k in CHARS) CHARS[k].key = k;
@@ -6626,7 +6865,11 @@ function step(dt) {
       let spd = w.E.speed;
       // Struck by the Crown: wades for a moment. Decremented here rather than
       // in stepCrown so it ticks with the body that owns it.
-      if (w.slowT > 0) { w.slowT -= dt; spd *= CROWN.slowMul; }
+      // The multiplier travels WITH the body rather than being read off the
+      // Crown, because the Crown is no longer the only thing that slows: a
+      // frost kit sets its own strength here. Falls back to the Crown's so
+      // anything that sets slowT without a multiplier behaves as before.
+      if (w.slowT > 0) { w.slowT -= dt; spd *= (w.slowMul || CROWN.slowMul); }
       // Leapers hold back, then cover ground in a burst — the threat is the
       // timing, not the top speed.
       if (w.E.leap) {

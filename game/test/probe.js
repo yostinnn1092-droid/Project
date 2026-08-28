@@ -15,6 +15,7 @@ window.__probe = {
   CHARS, PROFILE, PYRO, WIND, castState, setCharacter, charLevel, castCap,
   castFire, buildCastStack, levelCharacter, carryCap, isCaster, castSpec,
   ARC_TIERS, arcSpec, arcTierIndex,
+  STORM, PLAGUE, FROST, chainFrom, spawnPool, stepPools, clearPools,
   charNow() { return CHAR.key; },
   CROWN, CROWN_Y, crownState, crownUpgrade, buildCrown, stepCrown,
   judgeFrame, setQuality,

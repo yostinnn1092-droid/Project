@@ -1023,6 +1023,171 @@ test("characters: a shot in flight keeps the tier it was fired under, even if a 
 
 
 
+test("characters: the stormcaller's arc jumps to bodies the shot never touched", async (pg) => {
+  // The kit's whole claim: damage depends on how the crowd is STANDING. So
+  // line up four bodies within jump range of each other, fire at the first,
+  // and count how many took damage. Only one of them is ever touched by the
+  // shot itself — the rest can only have been reached by the chain.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("stormcaller");
+    P.PROFILE.charLv.stormcaller = 6;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.MOD.allDmg = 1;
+    P.castState.held = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 25; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1/60); }
+    P.parkWalkers();
+
+    const live = P.walkers.filter(w => !w.dead).slice(0, 4);
+    const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+    const side = { x: f.z, z: -f.x };
+    // A cluster: the first straight ahead, the rest beside it, each within
+    // the 9-unit jump radius of the one before.
+    const place = () => live.forEach((w, i) => {
+      w.pos.set(f.x * 18 + side.x * i * 4, 0, f.z * 18 + side.z * i * 4);
+      w.aggro = false; w.cool = 999; w.hp = 4000;
+    });
+    place();
+    const hp0 = live.map(w => w.hp);
+
+    P.S.lock = live[0];
+    P.castFire();
+    for (let i = 0; i < 150; i++) {
+      P.hero.pos.set(0, 0, 0); P.hero.hp = 99;
+      live.forEach((w, i2) => { w.aggro = false; w.cool = 999; });
+      P.step(1/60);
+    }
+    const hurt = live.map((w, i) => w.hp < hp0[i]);
+    const dmg = live.map((w, i) => +(hp0[i] - w.hp).toFixed(1));
+    P.setCharacter("telekinetic");
+    return { hurt, dmg, jumps: P.STORM.chain.jumps };
+  });
+
+  ok(r.hurt[0], "the arc never hit the body it was aimed at");
+  const reached = r.hurt.filter(Boolean).length;
+  ok(reached >= 3,
+     "the arc reached " + reached + " of four clustered bodies — it is not chaining, " +
+     "it is a plain single-target shot wearing a different colour");
+  // Each jump is weaker than the last, which is what stops a chain kit from
+  // simply being strictly better than every single-target kit.
+  ok(r.dmg[1] < r.dmg[0],
+     "the second body took " + r.dmg[1] + " and the first " + r.dmg[0] +
+     " — the chain is not losing strength as it jumps");
+});
+
+test("characters: the plaguebearer's pool keeps damaging after the shot is gone", async (pg) => {
+  // The shot barely hurts; the ground it leaves is the weapon. The test that
+  // matters is therefore about TIME: a body that walks nowhere should keep
+  // taking damage long after the projectile itself has stopped existing.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("plaguebearer");
+    P.PROFILE.charLv.plaguebearer = 6;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.MOD.allDmg = 1;
+    P.castState.held = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 25; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1/60); }
+    P.parkWalkers();
+
+    const w = P.walkers.find(x => !x.dead);
+    const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+    const pin = () => { w.pos.set(f.x * 16, 0, f.z * 16); w.aggro = false; w.cool = 999; };
+    pin(); w.hp = 9000;
+
+    P.S.lock = w;
+    P.castFire();
+    // Wait for the shot to land and be GONE first, and only start the clock
+    // then. The first version of this measured a fixed 1.5s window from the
+    // trigger, most of which the shot spent in the air — it read 41 damage,
+    // which is exactly 0.75s of pool, and looked like a broken mechanic when
+    // it was a short ruler.
+    let shotGone = false, hpWhenGone = null, pools = 0;
+    for (let i = 0; i < 60 * 3 && !shotGone; i++) {
+      pin(); P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60);
+      if (P.castState.shots.length === 0) {
+        shotGone = true; hpWhenGone = w.hp; pools = P.castState.pools.length;
+      }
+    }
+    // Now four seconds of standing in it, with nothing else able to touch it.
+    for (let i = 0; i < 60 * 4; i++) {
+      pin(); P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60);
+    }
+    const hpLater = w.hp;
+    // ...and long enough for the pool to expire on its own.
+    for (let i = 0; i < 60 * 8; i++) { pin(); P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60); }
+    const poolsAfter = P.castState.pools.length;
+    const hpFinal = w.hp;
+    P.setCharacter("telekinetic");
+    return { shotGone, pools, afterShot: +(hpWhenGone - hpLater).toFixed(1),
+             poolsAfter, stoppedAtEnd: hpFinal === w.hp };
+  });
+
+  ok(r.shotGone, "the shot never resolved, so nothing about the pool was tested");
+  eq(r.pools, 1, "the shot left " + r.pools + " pools behind, expected exactly one");
+  // Four seconds at 55 a second is 220 before armour; anything in that
+  // neighbourhood is the pool working, and anything near zero is not.
+  ok(r.afterShot > 120,
+     "the body lost only " + r.afterShot + " after the shot was already gone — the pool " +
+     "is not the weapon, which is this kit's entire premise");
+  eq(r.poolsAfter, 0, "the pool never expired — it is permanent ground denial");
+});
+
+test("characters: the frostbinder slows what it hits, and the crown still slows its own way", async (pg) => {
+  // Two claims in one, because they share a field. The kit sets a slow the
+  // Crown never could (a third speed, four seconds), and generalising that
+  // field must not have broken the Crown, which was the only thing in the
+  // game that slowed anything before this.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("frostbinder");
+    P.PROFILE.charLv.frostbinder = 6;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.MOD.allDmg = 1;
+    P.castState.held = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 25; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1/60); }
+    P.parkWalkers();
+
+    const w = P.walkers.find(x => !x.dead);
+    const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+    w.pos.set(f.x * 16, 0, f.z * 16); w.aggro = false; w.cool = 999; w.hp = 9000;
+    const hp0 = w.hp;
+
+    P.S.lock = w;
+    P.castFire();
+    let slowT = 0, slowMul = null;
+    for (let i = 0; i < 120; i++) {
+      P.hero.pos.set(0, 0, 0); P.hero.hp = 99;
+      w.aggro = false; w.cool = 999;
+      P.step(1/60);
+      if (w.slowT > slowT) { slowT = w.slowT; slowMul = w.slowMul; }
+    }
+    const dealt = hp0 - w.hp;
+
+    // The Crown's own path, untouched: it sets slowT without the kit.
+    const w2 = P.walkers.filter(x => !x.dead)[1];
+    w2.slowT = 0; w2.slowMul = undefined;
+    w2.slowT = P.CROWN.slowT; w2.slowMul = P.CROWN.slowMul;
+    P.setCharacter("telekinetic");
+    return { slowT: +slowT.toFixed(2), slowMul, dealt: +dealt.toFixed(1),
+             frostMul: P.FROST.slow.mul, frostTime: P.FROST.slow.time,
+             crownMul: P.CROWN.slowMul, w2mul: w2.slowMul };
+  });
+
+  ok(r.slowT > 0, "nothing was ever slowed — the bind does not bind");
+  eq(r.slowMul, r.frostMul,
+     "the struck body wades at " + r.slowMul + ", not the kit's own " + r.frostMul +
+     " — it is still borrowing the Crown's strength");
+  ok(r.slowT > r.frostTime * 0.9,
+     "the slow lasted " + r.slowT + "s against the kit's stated " + r.frostTime + "s");
+  ok(r.frostMul < r.crownMul,
+     "the frostbinder's slow (" + r.frostMul + ") is no stronger than the Crown's (" +
+     r.crownMul + "), so the kit has no identity of its own");
+  // The whole trade: it must be the weakest hit on the roster.
+  ok(r.dealt < 200,
+     "the bind dealt " + r.dealt + " — it is supposed to buy distance, not kill");
+  eq(r.w2mul, r.crownMul, "the Crown's own slow path stopped working");
+});
+
 test("characters: water shoves a body, fire and blades do not", async (pg) => {
   // Control rather than damage is the trade this kit makes, and the shove is
   // where that trade is visible.

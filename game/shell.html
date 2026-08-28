@@ -224,12 +224,16 @@
   /* The brief IS per character: half of it is telekinesis-only, and each
      caster has to have their own resource explained rather than a shared
      paragraph that fits neither. */
-  .brief .pyro, .brief .wind, .brief .water, .brief .arcane { display: none; }
+  .brief .pyro, .brief .wind, .brief .water, .brief .arcane,
+  .brief .storm, .brief .plague, .brief .frost { display: none; }
   body.casterChar .brief .kin { display: none; }
   body.pyromancerChar .brief .pyro { display: block; }
   body.windmageChar .brief .wind { display: block; }
   body.hydromancerChar .brief .water { display: block; }
   body.arcanistChar .brief .arcane { display: block; }
+  body.stormcallerChar .brief .storm { display: block; }
+  body.plaguebearerChar .brief .plague { display: block; }
+  body.frostbinderChar .brief .frost { display: block; }
   #diffTag { display: block; font-family: var(--mono); font-size: 8px;
              letter-spacing: .16em; color: var(--dim); margin-top: 2px; }
   #menuBest { display: none; margin-top: 10px; font-size: 11px; color: var(--force); opacity: .85; }
@@ -611,6 +615,24 @@
       <p class="arcane"><b>The level that changes it is permanent.</b> A boss kill
          raises it for good, same as any other caster, and it is kept between runs.
          Reaching the next tier is the whole point of this one.</p>
+
+      <p class="storm"><b>ARC</b> hits one body and then <b>jumps to the next</b>,
+         and the next, losing strength each time. Into one body it is worth less
+         than a fireball; into five standing together it is worth far more. This is
+         the only attack here whose damage depends on how the crowd is standing, so
+         the question it asks is never "where is a target" but "where are they
+         thickest".</p>
+
+      <p class="plague"><b>SPIT</b> barely hurts what it hits. What it leaves does:
+         a <b>pool on the ground</b> that eats anything standing in it for several
+         seconds. It is the only attack that damages GROUND rather than bodies —
+         so you are not aiming at the crowd, you are aiming at where the crowd has
+         to walk.</p>
+
+      <p class="frost"><b>BIND</b> is the weakest hit on the roster and that is the
+         point. A struck body <b>wades at a third speed</b> for four seconds, and the
+         shot cuts through two of them. It kills almost nothing on its own — it buys
+         you distance, and it stacks a crowd up for whatever comes next.</p>
 
       <p>Every attack has a <b>wind-up</b> — a flaring ring and a sound. Step, dash or jump out
          of it and it whiffs. <em>Grabbers</em> root you; <b>DASH</b> always breaks it.
