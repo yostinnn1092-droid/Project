@@ -2146,9 +2146,171 @@ const WATER = {
               size: [1.2, 2.1], grow: 0.6, spin: [-4, 4] },
 };
 
+// ═══════════════════════════════════════════════════════════════ arcanist
+// Progression-fantasy web serials and manhwa built around levels, status
+// screens and "class" or "awakening" systems — the genre associates names
+// like Solo Leveling, Tower of God, The Beginning After the End — share a
+// shape none of the three kits above have: a signature ability does not
+// just get STRONGER with level, it changes KIND at a threshold. Fire, wind
+// and water each hold one fixed shot for the whole run and only the COUNT
+// held scales with level; the Arcanist's shot itself is a different thing
+// at level 6 than it was at level 1, the way a class evolves rather than
+// simply levelling up.
+//
+// Three tiers, and they reuse the existing MODELS rather than inventing a
+// fourth set of geometry — the point of this character is the switch
+// between shapes the player already knows, not a new one:
+//   Spark (lv 1-2)  a plain bolt — the fireball's own four-layer structure
+//   Shard (lv 3-5)  gains pierce — the blade's own crescent structure
+//   Nova  (lv 6-8)  gains a blast — the orb again, bigger and hotter
+const ARC_VIOLET = 0xb066f2;
+
+const arcCoreMat = new T.MeshBasicMaterial({ color: 0xf3e8ff, transparent: true,
+  opacity: 0.95, blending: T.AdditiveBlending, depthWrite: false });
+const arcMidMat  = new T.MeshBasicMaterial({ color: 0xc98cf5, transparent: true,
+  opacity: 0.7, blending: T.AdditiveBlending, depthWrite: false });
+const arcMat     = new T.MeshBasicMaterial({ color: ARC_VIOLET, transparent: true,
+  opacity: 0.55, blending: T.AdditiveBlending, depthWrite: false });
+const arcRimMat  = new T.MeshBasicMaterial({ color: 0x7a3ad1, transparent: true,
+  opacity: 0.22, blending: T.AdditiveBlending, depthWrite: false });
+
+// Nova reuses the same four-layer structure, hotter: the core goes pure
+// white and the body goes toward magenta, so the last tier reads as more
+// VOLTAGE rather than as a bigger ball of the same colour.
+const arcNovaCoreMat = new T.MeshBasicMaterial({ color: 0xffffff, transparent: true,
+  opacity: 0.97, blending: T.AdditiveBlending, depthWrite: false });
+const arcNovaMidMat  = new T.MeshBasicMaterial({ color: 0xe6a6ff, transparent: true,
+  opacity: 0.75, blending: T.AdditiveBlending, depthWrite: false });
+const arcNovaMat     = new T.MeshBasicMaterial({ color: 0xc23af0, transparent: true,
+  opacity: 0.6, blending: T.AdditiveBlending, depthWrite: false });
+const arcNovaRimMat  = new T.MeshBasicMaterial({ color: 0x8a1fc4, transparent: true,
+  opacity: 0.26, blending: T.AdditiveBlending, depthWrite: false });
+
+const arcShardGlowMat = new T.MeshBasicMaterial({ color: 0x9a5cf0, transparent: true,
+  opacity: 0.32, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide });
+const arcShardBodyMat = new T.MeshBasicMaterial({ color: ARC_VIOLET, transparent: true,
+  opacity: 0.72, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide });
+const arcShardCoreMat = new T.MeshBasicMaterial({ color: 0xf3e8ff, transparent: true,
+  opacity: 0.85, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide });
+
+// One fading ladder shared by all three tiers' tails — colour only, so it
+// costs nothing extra to reuse across three different trail geometries.
+const arcTrailMats = [
+  new T.MeshBasicMaterial({ color: 0xf0e0ff, transparent: true, opacity: 0.60,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0xd6a8ff, transparent: true, opacity: 0.46,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0xb670f2, transparent: true, opacity: 0.34,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x9048d0, transparent: true, opacity: 0.26,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x6c30a8, transparent: true, opacity: 0.18,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x4a2078, transparent: true, opacity: 0.11,
+    blending: T.AdditiveBlending, depthWrite: false }),
+  new T.MeshBasicMaterial({ color: 0x362058, transparent: true, opacity: 0.05,
+    depthWrite: false }),
+];
+
+// The fireball's own structure (see makeFireball / burnFireball, above),
+// rebuilt with a swappable material set so both orb tiers can reuse
+// burnFireball UNMODIFIED — it only ever touches scale and rotation, never
+// colour, so it does not care which materials are underneath it.
+function makeArcOrb(mats) {
+  const g = new T.Group();
+  g.add(new T.Mesh(pyroShellGeo, mats.rim));
+  g.add(new T.Mesh(pyroShellGeo, mats.body));
+  g.add(new T.Mesh(pyroGeo, mats.mid));
+  g.add(new T.Mesh(pyroGeo, mats.core));
+  g.children[0].scale.setScalar(1.42);
+  g.children[1].scale.setScalar(1.18);
+  g.children[2].scale.setScalar(0.78);
+  g.children[3].scale.setScalar(0.44);
+  return g;
+}
+const makeArcSpark = () => makeArcOrb({ rim: arcRimMat, body: arcMat,
+                                        mid: arcMidMat, core: arcCoreMat });
+const makeArcNova  = () => makeArcOrb({ rim: arcNovaRimMat, body: arcNovaMat,
+                                        mid: arcNovaMidMat, core: arcNovaCoreMat });
+
+// The blade's own structure (see makeAirBlade / pulseAirBlade / aimAirBlade
+// / launchAirBlade / faceAirBlade, above), rebuilt with violet materials so
+// the Shard tier reuses all four of those functions UNMODIFIED.
+function makeArcShard() {
+  const g = new T.Group();
+  const spin = new T.Group();
+  spin.add(new T.Mesh(bladeGlowGeo, arcShardGlowMat));
+  spin.add(new T.Mesh(bladeBodyGeo, arcShardBodyMat));
+  spin.add(new T.Mesh(bladeCoreGeo, arcShardCoreMat));
+  g.add(spin);
+  spin.rotation.z = Math.random() * Math.PI * 2;
+  return g;
+}
+
+const ARC_SPARK = {
+  label: "Spark", verb: "Cast", kind: "arcane", tier: "Spark",
+  dry: "NO ARCANE LEFT — it gathers again",
+  hint: "Tap CAST · a plain bolt, for now",
+  regen: 1.6, speed: 30, dmg: 90, pierce: 0, blastR: 0, blastDmg: 0,
+  hitR: 1.0, life: 3.0, knock: 3, home: 50,
+  orbitR: 0.60, low: 1.26, high: 1.94, hot: ARC_VIOLET,
+  make: makeArcSpark, anim: burnFireball, aim: null,
+  carry: 0.58, fly: 1.35,
+  trail: { geo: () => pyroShellGeo, mats: arcTrailMats, every: 0.020,
+           life: 0.36, spread: 0.12, rise: 0.10, drift: [0.15, 0.5],
+           size: [0.7, 1.3], grow: 0.7, spin: [-3, 3] },
+};
+
+// Everything Spark has, plus the pierce a blade trades its blast for — the
+// reward at the first tier boundary.
+const ARC_SHARD = {
+  label: "Shard", verb: "Cast", kind: "arcane", tier: "Shard",
+  dry: "NO ARCANE LEFT — it gathers again",
+  hint: "Tap CAST · the bolt cuts now, through more than one",
+  regen: 1.4, speed: 42, dmg: 125, pierce: 2, blastR: 0, blastDmg: 0,
+  hitR: 1.2, life: 2.6, knock: 4, home: 68,
+  orbitR: 0.64, low: 1.24, high: 1.96, hot: ARC_VIOLET,
+  make: makeArcShard, anim: pulseAirBlade, launch: launchAirBlade,
+  aim: aimAirBlade, carryAim: faceAirBlade,
+  carry: 0.55, fly: 1.5,
+  trail: { geo: () => bladeWispGeo, mats: arcTrailMats, every: 0.020,
+           life: 0.32, spread: 0.11, rise: 0.05, drift: [-0.1, 0.35],
+           size: [0.9, 1.8], grow: 1.4, spin: [-5, 5] },
+};
+
+// The last tier: the orb again, bigger and hotter, and now it ends in a
+// blast — the reward at the second boundary, at the level the other three
+// kits stop changing shape at all.
+const ARC_NOVA = {
+  label: "Nova", verb: "Cast", kind: "arcane", tier: "Nova",
+  dry: "NO ARCANE LEFT — it gathers again",
+  hint: "Tap CAST · it detonates now",
+  regen: 2.0, speed: 26, dmg: 170, pierce: 0, blastR: 4.0, blastDmg: 90,
+  hitR: 1.3, life: 3.2, knock: 8, home: 90,
+  orbitR: 0.62, low: 1.28, high: 1.98, hot: 0xd060ff,
+  make: makeArcNova, anim: burnFireball, aim: null,
+  carry: 0.64, fly: 1.9,
+  trail: { geo: () => pyroShellGeo, mats: arcTrailMats, every: 0.017,
+           life: 0.40, spread: 0.14, rise: 0.14, drift: [0.2, 0.6],
+           size: [0.9, 1.7], grow: 0.85, spin: [-3, 3] },
+};
+
+const ARC_TIERS = [ARC_SPARK, ARC_SHARD, ARC_NOVA];
+// The two boundaries, placed inside the level range every character already
+// shares (max 8): two levels of Spark, three of Shard, three of Nova — the
+// biggest tier is also the one a player has to work longest to reach.
+function arcTierIndex(lv) { return lv < 3 ? 0 : lv < 6 ? 1 : 2; }
+function arcSpec(lv) { return ARC_TIERS[arcTierIndex(lv)]; }
+
 // The kit of whoever is playing, or the pyromancer's as a stand-in for the
 // telekinetic so nothing downstream has to null-check a spec it never uses.
-function castSpec() { return CHAR.cast || PYRO; }
+// A caster whose kit changes by LEVEL stores a function here instead of a
+// fixed object; every other kit is the object itself, called through the
+// same door.
+function castSpec() {
+  const c = CHAR.cast;
+  return (typeof c === "function" ? c(charLv()) : c) || PYRO;
+}
 
 // ── the shared machinery ──────────────────────────────────────────────────
 // Rebuilt on a level change and on restart. Every orb the last cap created is
@@ -2230,6 +2392,13 @@ function castFire() {
   const seek = S.lock && !S.lock.dead ? S.lock : nearestInCone();
   const shot = {
     g, seek,
+    // Frozen at the moment of the cast. A TIERED caster's spec can change
+    // shape while this shot is still airborne — a boss kill can cross a
+    // tier boundary mid-flight — and everything below reads THIS copy, never
+    // the live castSpec(). Reading the live one would run a new tier's
+    // anim/aim function against a mesh the OLD tier's make() built: not a
+    // stat change but a structural mismatch, and it throws.
+    spec,
     vel: aimDir.clone().multiplyScalar(spec.speed),
     // A kit that is LIFTED before it is thrown holds on to the direction it
     // will eventually take. Reading the camera again at the top of the lift
@@ -2316,7 +2485,7 @@ function stepCast(dt) {
     if (s.rising) {
       if (s.g.position.y >= s.riseAt) {
         s.rising = false;
-        s.vel.copy(s.launchDir).multiplyScalar(spec.speed);
+        s.vel.copy(s.launchDir).multiplyScalar(s.spec.speed);
         s.g.userData.launched = true;
       }
     } else if (s.seek && !s.seek.dead) {
@@ -2324,17 +2493,17 @@ function stepCast(dt) {
               s.seek.pos.y + 1 - s.g.position.y,
               s.seek.pos.z - s.g.position.z);
       const d = tmp.length() || 1;
-      s.vel.addScaledVector(tmp.divideScalar(d), (spec.home || 62) * dt);
-      s.vel.setLength(spec.speed);
+      s.vel.addScaledVector(tmp.divideScalar(d), (s.spec.home || 62) * dt);
+      s.vel.setLength(s.spec.speed);
     }
     s.g.position.addScaledVector(s.vel, dt);
-    spec.anim(s.g, S.t, s.seed, spec.fly);
-    if (spec.aim) spec.aim(s.g, s.vel);
+    s.spec.anim(s.g, S.t, s.seed, s.spec.fly);
+    if (s.spec.aim) s.spec.aim(s.g, s.vel);
 
     // ---- tail. Dropped at a fixed INTERVAL rather than once per frame, so
     // the trail has the same density at 30fps as at 144 instead of being
     // three times thinner on a slow machine.
-    const tr = spec.trail;
+    const tr = s.spec.trail;
     s.puffT -= dt;
     while (s.puffT <= 0 && s.life > 0 && castState.embers.length < 240) {
       s.puffT += tr.every;
@@ -2367,19 +2536,19 @@ function stepCast(dt) {
         if (s.hit && s.hit.includes(w)) continue;   // already cut by this one
         const dx = w.pos.x - s.g.position.x, dz = w.pos.z - s.g.position.z;
         const dy = (w.pos.y + 1) - s.g.position.y;
-        if (dx*dx + dy*dy + dz*dz < (spec.hitR + w.r) * (spec.hitR + w.r)) {
-          damageWalker(w, spec.dmg * MOD.allDmg, tmp3.copy(s.vel).normalize(),
-                       spec.knock, spec.kind);
+        if (dx*dx + dy*dy + dz*dz < (s.spec.hitR + w.r) * (s.spec.hitR + w.r)) {
+          damageWalker(w, s.spec.dmg * MOD.allDmg, tmp3.copy(s.vel).normalize(),
+                       s.spec.knock, s.spec.kind);
           // A ball stops at the first body it touches; a blade carries on
           // through until its budget of bodies is spent.
-          if (spec.pierce <= 0) { done = true; break; }
+          if (s.spec.pierce <= 0) { done = true; break; }
           (s.hit || (s.hit = [])).push(w);
           // Homing is what makes the shot feel aimed, and it is also what
           // would trap a piercing one: having passed THROUGH its target it
           // would turn straight back onto it and circle. Cutting a body
           // releases the blade to whatever is in front of it.
           if (s.seek === w) s.seek = null;
-          if (s.hit.length >= spec.pierce) { done = true; break; }
+          if (s.hit.length >= s.spec.pierce) { done = true; break; }
         }
       }
     }
@@ -2387,12 +2556,12 @@ function stepCast(dt) {
       // A fireball ends in a blast, so a miss into a crowd is still worth the
       // shot. A blade has no blast at all — that is what its pierce is paid
       // for — so it simply comes apart where it stopped.
-      if (spec.blastR > 0) {
-        queueBlast(tmp3.copy(s.g.position), { r: spec.blastR * MOD.blastR,
-                                              dmg: spec.blastDmg * MOD.blastDmg }, null);
-        burst(s.g.position, spec.hot);
+      if (s.spec.blastR > 0) {
+        queueBlast(tmp3.copy(s.g.position), { r: s.spec.blastR * MOD.blastR,
+                                              dmg: s.spec.blastDmg * MOD.blastDmg }, null);
+        burst(s.g.position, s.spec.hot);
       } else {
-        sparks(tmp3.copy(s.g.position), spec.hot, 7, 9);
+        sparks(tmp3.copy(s.g.position), s.spec.hot, 7, 9);
       }
       scene.remove(s.g);
       castState.shots.splice(i, 1);
@@ -4096,6 +4265,20 @@ const CHARS = {
     props: 0,
     cast: WATER,
     perk(lv) { return castCap(lv) + " to call up"; },
+  },
+  // The fourth answer is a different question. Fire, wind and water each
+  // hold one shape for the whole run; the Arcanist's shot changes KIND as
+  // it levels — a plain bolt, then a piercing shard, then a detonating
+  // nova — so `cast` here is a FUNCTION of level rather than a fixed spec.
+  arcanist: {
+    name: "ARCANIST",
+    desc: "The bolt is not what it will become.",
+    power: "arcane",
+    props: 0,
+    cast: (lv) => arcSpec(lv),
+    perk(lv) { const t = arcSpec(lv).tier;
+               return castCap(lv) + " " + t.toLowerCase() +
+                      (castCap(lv) === 1 ? "" : "s") + " held — " + t; },
   },
 };
 for (const k in CHARS) CHARS[k].key = k;

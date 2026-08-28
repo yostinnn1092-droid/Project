@@ -904,6 +904,125 @@ test("characters: the hydromancer carries nothing and lifts its water before thr
      "the tail reached " + r.tail + " behind the ball, which is outside what reads as a tail");
 });
 
+test("characters: the arcanist's shot changes SHAPE at each level tier, not just count", async (pg) => {
+  // The whole point of this character: the other three casters hold one
+  // fixed shot for the whole run and only the COUNT scales with level. This
+  // one is supposed to hand out a structurally different shot at levels 1,
+  // 3 and 6 — a ball, then a blade, then a bigger ball again. Counting the
+  // top-level children of the built mesh is the cheap fingerprint for
+  // "which shape": the ball factories (Spark, Nova) always produce 4, the
+  // blade factory (Shard) always produces 1 (a spin group holding the
+  // three crescents).
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("arcanist");
+    const out = {};
+    for (const lv of [1, 2, 3, 5, 6, 8]) {
+      P.PROFILE.charLv.arcanist = lv;
+      P.castState.held = 0;
+      P.buildCastStack();
+      const orb = P.castState.orbs[0];
+      out[lv] = {
+        tier: P.arcSpec(lv).tier,
+        shape: orb.children.length,
+        pierce: P.arcSpec(lv).pierce,
+        blastR: P.arcSpec(lv).blastR,
+        rimHex: (orb.children.length === 4
+          ? orb.children[0].material.color.getHexString() : null),
+      };
+    }
+    P.setCharacter("telekinetic");
+    return out;
+  });
+
+  eq(r[1].tier, "Spark", "level 1 should be the Spark tier, got " + r[1].tier);
+  eq(r[2].tier, "Spark", "level 2 should still be Spark, got " + r[2].tier);
+  eq(r[3].tier, "Shard", "level 3 should cross into Shard, got " + r[3].tier);
+  eq(r[5].tier, "Shard", "level 5 should still be Shard, got " + r[5].tier);
+  eq(r[6].tier, "Nova", "level 6 should cross into Nova, got " + r[6].tier);
+  eq(r[8].tier, "Nova", "level 8 (max) should still be Nova, got " + r[8].tier);
+
+  eq(r[1].shape, 4, "Spark's carried shot is not the four-layer orb structure");
+  eq(r[3].shape, 1, "Shard's carried shot is not the one-child blade structure");
+  eq(r[6].shape, 4, "Nova's carried shot is not the four-layer orb structure");
+  ok(r[1].rimHex !== r[6].rimHex,
+     "Spark and Nova are both the orb shape but share a rim colour (" +
+     r[1].rimHex + ") — Nova is not visibly hotter, it is a recolour that did nothing");
+
+  eq(r[1].pierce, 0, "Spark should have no pierce");
+  ok(r[3].pierce > 0, "Shard should gain pierce — it has none");
+  eq(r[3].blastR, 0, "Shard should have no blast — that is what its pierce is paid for");
+  ok(r[6].blastR > 0, "Nova should gain a blast — it has none");
+});
+
+test("characters: a shot in flight keeps the tier it was fired under, even if a level-up crosses a boundary underneath it", async (pg) => {
+  // stepCast() used to read castSpec() ONCE per frame and apply it to every
+  // in-flight shot. That is safe for the other three casters, whose spec
+  // never changes shape mid-run — but this character's does, and a boss
+  // kill can land while a shot is still airborne. Firing under Spark (a
+  // four-child orb, no aim function) and then jumping the character straight
+  // to Nova reproduces the worst case cheaply: if the flight loop reads the
+  // LIVE spec instead of a frozen one, Nova's config still has no aim
+  // function either, so the structural mismatch this guards against would
+  // have to come from Shard's aim/anim running against Spark's mesh — which
+  // is exactly the case the frozen-spec fix (game.js: `spec` on the shot
+  // object) exists for. Jumping through Shard on the way to Nova, one frame
+  // at a time, is what actually exercises it.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("arcanist");
+    P.PROFILE.charLv.arcanist = 1;                 // Spark
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.castState.held = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 20; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1 / 60); }
+    P.parkWalkers();
+
+    const tierAtFire = P.castSpec().tier;
+    P.S.lock = null;
+    P.castFire();
+    const shot = P.castState.shots[P.castState.shots.length - 1];
+    const shapeAtFire = shot.g.children.length;
+
+    // Cross straight to Shard, then straight to Nova, one frame apart —
+    // the fastest way to put the live spec and the shot's frozen one on
+    // different tiers while the shot is still alive.
+    let threw = null;
+    try {
+      P.PROFILE.charLv.arcanist = 4;                // Shard
+      P.buildCastStack();
+      for (let i = 0; i < 10; i++) { P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1 / 60); }
+      P.PROFILE.charLv.arcanist = 8;                 // Nova
+      P.buildCastStack();
+      for (let i = 0; i < 30; i++) { P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1 / 60); }
+    } catch (e) {
+      threw = String((e && e.message) || e);
+    }
+
+    const stillTracked = P.castState.shots.includes(shot);
+    const shapeNow = stillTracked ? shot.g.children.length : null;
+    P.setCharacter("telekinetic");
+    return { tierAtFire, shapeAtFire, threw, liveTierAfter: "Nova",
+             stillTracked, shapeNow };
+  });
+
+  eq(r.tierAtFire, "Spark", "the shot should have been fired under Spark");
+  eq(r.shapeAtFire, 4, "the fired shot should be the four-child orb shape");
+  eq(r.threw, null,
+     "stepping the game after a level-up crossed two tier boundaries under an " +
+     "airborne shot threw: " + r.threw);
+  // Whether the shot is still alive by the time the loop above finishes is a
+  // matter of its own lifetime, not something this case controls — the only
+  // claim here is that IF it is still alive, it never silently turned into
+  // Shard or Nova's shape.
+  if (r.stillTracked) {
+    eq(r.shapeNow, r.shapeAtFire,
+       "an airborne shot's own mesh shape changed after the character's live " +
+       "tier moved on without it");
+  }
+});
+
+
+
 test("characters: water shoves a body, fire and blades do not", async (pg) => {
   // Control rather than damage is the trade this kit makes, and the shove is
   // where that trade is visible.

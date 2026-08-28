@@ -224,11 +224,12 @@
   /* The brief IS per character: half of it is telekinesis-only, and each
      caster has to have their own resource explained rather than a shared
      paragraph that fits neither. */
-  .brief .pyro, .brief .wind, .brief .water { display: none; }
+  .brief .pyro, .brief .wind, .brief .water, .brief .arcane { display: none; }
   body.casterChar .brief .kin { display: none; }
   body.pyromancerChar .brief .pyro { display: block; }
   body.windmageChar .brief .wind { display: block; }
   body.hydromancerChar .brief .water { display: block; }
+  body.arcanistChar .brief .arcane { display: block; }
   #diffTag { display: block; font-family: var(--mono); font-size: 8px;
              letter-spacing: .16em; color: var(--dim); margin-top: 2px; }
   #menuBest { display: none; margin-top: 10px; font-size: 11px; color: var(--force); opacity: .85; }
@@ -600,6 +601,16 @@
          what you have is a <b>number of times you can call it</b>, which refills on its
          own. Beat a <b>boss</b> to raise that number for good: it is kept between runs,
          and it is the only thing here that is.</p>
+
+      <p class="arcane"><b>CAST</b> is one button for the whole run, but not one attack.
+         What it throws <b>changes as you level</b>: a plain bolt at first, a piercing
+         shard once you have grown past it, a detonation once you have grown past
+         that. The number held still refills on its own the way it does for the
+         others — the difference is that the SHAPE of what refills is not fixed.</p>
+
+      <p class="arcane"><b>The level that changes it is permanent.</b> A boss kill
+         raises it for good, same as any other caster, and it is kept between runs.
+         Reaching the next tier is the whole point of this one.</p>
 
       <p>Every attack has a <b>wind-up</b> — a flaring ring and a sound. Step, dash or jump out
          of it and it whiffs. <em>Grabbers</em> root you; <b>DASH</b> always breaks it.
