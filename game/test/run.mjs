@@ -622,8 +622,13 @@ test("characters: every caster's stack is capped by level and grows back", async
     // Firing spends one and puts something in the air.
     const before = P.castState.held;
     P.castFire();
+    // A volley kit spends ONE charge and leaves a whole fan behind it, so the
+    // number in the air is a property of the kit rather than a constant. What
+    // stays constant across every kit is the price: one charge per trigger.
+    const sp = P.castSpec();
     return { cap1, filled, cap4: P.castCap(4), filled4,
              spent: before - P.castState.held, inFlight: P.castState.shots.length,
+             wantFlight: sp.volley ? sp.volley.count : 1,
              orbs: P.castState.orbs.length, worn: P.CHARS[who].cast.carried !== false };
     }, who);
 
@@ -639,7 +644,8 @@ test("characters: every caster's stack is capped by level and grows back", async
       eq(r.orbs, 0, who + ": carries nothing, yet " + r.orbs + " are riding its back");
     }
     eq(r.spent, 1, who + ": firing did not spend exactly one");
-    eq(r.inFlight, 1, who + ": firing put nothing in the air");
+    eq(r.inFlight, r.wantFlight, who + ": firing put " + r.inFlight +
+       " in the air, not the " + r.wantFlight + " this kit fires");
   }
 });
 
