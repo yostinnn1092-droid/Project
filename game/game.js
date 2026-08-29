@@ -1642,7 +1642,8 @@ const WIND_PALE = 0x8ef0a8;
 // ground through, with a pale sheen riding on top of it.
 const WATER_BLUE = 0x3aa8e8;
 
-const castState = { held: 0, t: 0, group: null, orbs: [], shots: [], embers: [], pools: [] };
+const castState = { held: 0, t: 0, group: null, orbs: [], shots: [], embers: [],
+                    pools: [], turrets: [], leech: 0 };
 
 // ── the fireball ──────────────────────────────────────────────────────────
 // One geometry and one material for every ball, held and in flight alike.
@@ -2610,6 +2611,246 @@ function splitShot(s) {
   }
 }
 
+// ── the last four kits ────────────────────────────────────────────────────
+// Batch three, and the same rule again: one mechanic each that nothing else
+// has. These add leech, boomerang, turret and volley.
+
+// ── the revenant ──────────────────────────────────────────────────────────
+// The only kit that gives anything BACK. Health here is five whole hearts,
+// not a bar, so a leech cannot pay out a fraction of the damage dealt — it
+// would put the hero on 3.4 hearts and the HUD draws pips. Damage is banked
+// instead, and every full bank buys one whole heart. That also makes the kit
+// legible: you are working toward a heart, not watching a number creep.
+const revMats = { rim:  new T.MeshBasicMaterial({ color:0x5c0f22, transparent:true,
+                    opacity:0.26, blending:T.AdditiveBlending, depthWrite:false }),
+                  body: new T.MeshBasicMaterial({ color:0xb0203c, transparent:true,
+                    opacity:0.55, blending:T.AdditiveBlending, depthWrite:false }),
+                  mid:  new T.MeshBasicMaterial({ color:0xe85a70, transparent:true,
+                    opacity:0.66, blending:T.AdditiveBlending, depthWrite:false }),
+                  core: new T.MeshBasicMaterial({ color:0xffe0e6, transparent:true,
+                    opacity:0.9, blending:T.AdditiveBlending, depthWrite:false }) };
+const revTrailMats = trailLadder(
+  [0xffd8e0, 0xf09aa8, 0xd05c74, 0xa8384e, 0x7a2436, 0x501722, 0x330e16],
+  [0.55, 0.44, 0.34, 0.25, 0.17, 0.10, 0.05]);
+
+const REVENANT = {
+  label: "Sanguine", verb: "Drain", kind: "impact",
+  dry: "NO SANGUINE LEFT — it wells again",
+  hint: "Tap DRAIN · enough damage banked buys a heart back",
+  regen: 2.1, speed: 34, dmg: 105, pierce: 1, blastR: 0, blastDmg: 0,
+  hitR: 1.15, life: 3.0, knock: 3, home: 65,
+  // Roughly nine clean hits for a heart. Deliberately slow: a kit that heals
+  // faster than the arena hurts is not a character, it is an off switch.
+  leech: { per: 950 },
+  orbitR: 0.62, low: 1.26, high: 1.94, hot: 0xe85a70,
+  make: () => makeArcOrb(revMats), anim: burnFireball, aim: null,
+  carry: 0.58, fly: 1.4,
+  trail: { geo: () => pyroShellGeo, mats: revTrailMats, every: 0.020,
+           life: 0.32, spread: 0.11, rise: 0.06, drift: [-0.1, 0.35],
+           size: [0.7, 1.3], grow: 0.75, spin: [-3, 3] },
+};
+
+// ── the boomeranger ───────────────────────────────────────────────────────
+// Goes out, turns, comes back — and can strike the same bodies on the way
+// home, because its list of what it has already cut is wiped at the turn.
+// The only kit that is dangerous in two directions, which makes standing
+// still behind it a mistake and makes its range a decision rather than a
+// limit.
+const boomMats = { glow: new T.MeshBasicMaterial({ color:0xb08a20, transparent:true,
+                     opacity:0.30, blending:T.AdditiveBlending, depthWrite:false,
+                     side:T.DoubleSide }),
+                   body: new T.MeshBasicMaterial({ color:0xf0c850, transparent:true,
+                     opacity:0.7, blending:T.AdditiveBlending, depthWrite:false,
+                     side:T.DoubleSide }),
+                   core: new T.MeshBasicMaterial({ color:0xfff8e0, transparent:true,
+                     opacity:0.88, blending:T.AdditiveBlending, depthWrite:false,
+                     side:T.DoubleSide }) };
+const boomTrailMats = trailLadder(
+  [0xfff4d0, 0xf0d488, 0xd8ac48, 0xb0842c, 0x805e1e, 0x553e14, 0x33260c],
+  [0.50, 0.40, 0.31, 0.23, 0.16, 0.10, 0.05]);
+
+const BOOMER = {
+  label: "Loop", verb: "Throw", kind: "cut",
+  dry: "NO LOOPS LEFT — they wind again",
+  hint: "Tap THROW · it comes back, and it cuts both ways",
+  regen: 1.9, speed: 38, dmg: 85, pierce: 3, blastR: 0, blastDmg: 0,
+  hitR: 1.25, life: 4.0, knock: 3, home: 0,
+  // Turns at eighteen units and homes on the hero from there. Homing is off
+  // entirely: a shot that chases a body cannot also be a shot that comes back.
+  boomerang: { range: 18, catchR: 1.6 },
+  orbitR: 0.64, low: 1.24, high: 1.96, hot: 0xf0c850,
+  make: () => makeCrescentShard(boomMats), anim: pulseAirBlade,
+  launch: launchAirBlade, aim: aimAirBlade, carryAim: faceAirBlade,
+  carry: 0.56, fly: 1.55,
+  trail: { geo: () => bladeWispGeo, mats: boomTrailMats, every: 0.019,
+           life: 0.30, spread: 0.10, rise: 0.05, drift: [-0.15, 0.3],
+           size: [0.9, 1.7], grow: 1.3, spin: [-5, 5] },
+};
+
+// ── the sentinel ──────────────────────────────────────────────────────────
+// The only kit whose shot is not the weapon at all. It lands, plants itself,
+// and then fights on its own for eight seconds while the player goes
+// somewhere else. Everything else on the roster is aimed; this one is PLACED.
+const sentMats = { rim:  new T.MeshBasicMaterial({ color:0x1a4a3a, transparent:true,
+                     opacity:0.26, blending:T.AdditiveBlending, depthWrite:false }),
+                   body: new T.MeshBasicMaterial({ color:0x2f9c74, transparent:true,
+                     opacity:0.58, blending:T.AdditiveBlending, depthWrite:false }),
+                   mid:  new T.MeshBasicMaterial({ color:0x6fe0b0, transparent:true,
+                     opacity:0.68, blending:T.AdditiveBlending, depthWrite:false }),
+                   core: new T.MeshBasicMaterial({ color:0xe8fff4, transparent:true,
+                     opacity:0.9, blending:T.AdditiveBlending, depthWrite:false }) };
+const sentTrailMats = trailLadder(
+  [0xe0fff0, 0x9ae8c8, 0x5cc09c, 0x389876, 0x246a52, 0x184636, 0x0f2c22],
+  [0.52, 0.42, 0.32, 0.24, 0.16, 0.10, 0.05]);
+
+// What the turret shoots. Its own spec, so a bolt can never plant a second
+// turret — the same guard the splitter's fragments have.
+const SENTINEL_BOLT = {
+  label: "Bolt", verb: "", kind: "impact", dry: "", hint: "",
+  regen: 99, speed: 40, dmg: 48, pierce: 0, blastR: 0, blastDmg: 0,
+  hitR: 1.0, life: 1.6, knock: 2, home: 120,
+  orbitR: 0.6, low: 1.26, high: 1.94, hot: 0x6fe0b0,
+  make: () => makeArcOrb(sentMats), anim: burnFireball, aim: null,
+  carry: 0.4, fly: 0.8,
+  trail: { geo: () => pyroShellGeo, mats: sentTrailMats, every: 0.030,
+           life: 0.20, spread: 0.07, rise: 0.04, drift: [0, 0.25],
+           size: [0.45, 0.8], grow: 0.6, spin: [-3, 3] },
+};
+
+const SENTINEL = {
+  label: "Sentry", verb: "Place", kind: "impact",
+  dry: "NO SENTRIES LEFT — they rebuild",
+  hint: "Tap PLACE · it fights on its own, so go somewhere else",
+  regen: 4.0, speed: 26, dmg: 25, pierce: 0, blastR: 0, blastDmg: 0,
+  hitR: 1.1, life: 3.0, knock: 1, home: 30,
+  // Eight seconds, a shot every 0.55s, reaching 22 units. The slowest regen
+  // on the roster by a wide margin, because what it leaves behind keeps
+  // working after the cost is paid.
+  turret: { life: 8.0, every: 0.55, range: 22, spec: SENTINEL_BOLT },
+  orbitR: 0.62, low: 1.26, high: 1.94, hot: 0x6fe0b0,
+  make: () => makeArcOrb(sentMats), anim: burnFireball, aim: null,
+  carry: 0.58, fly: 1.45,
+  trail: { geo: () => pyroShellGeo, mats: sentTrailMats, every: 0.022,
+           life: 0.30, spread: 0.10, rise: 0.05, drift: [0, 0.3],
+           size: [0.7, 1.3], grow: 0.7, spin: [-3, 3] },
+};
+
+// ── the scattershot ───────────────────────────────────────────────────────
+// Five at once, in a cone, and each one weak. Spread means it is nearly
+// useless at range — the fan opens wider than a body is — and brutal at arm's
+// length, which is the only kit on the roster that WANTS the crowd close.
+const scatMats = { rim:  new T.MeshBasicMaterial({ color:0x6a2a10, transparent:true,
+                     opacity:0.24, blending:T.AdditiveBlending, depthWrite:false }),
+                   body: new T.MeshBasicMaterial({ color:0xd85a20, transparent:true,
+                     opacity:0.55, blending:T.AdditiveBlending, depthWrite:false }),
+                   mid:  new T.MeshBasicMaterial({ color:0xffa050, transparent:true,
+                     opacity:0.66, blending:T.AdditiveBlending, depthWrite:false }),
+                   core: new T.MeshBasicMaterial({ color:0xffe8d0, transparent:true,
+                     opacity:0.9, blending:T.AdditiveBlending, depthWrite:false }) };
+const scatTrailMats = trailLadder(
+  [0xffe8cc, 0xffbc84, 0xf08a44, 0xc06428, 0x8c481c, 0x5e3014, 0x3a1e0c],
+  [0.50, 0.40, 0.31, 0.23, 0.16, 0.10, 0.05]);
+
+const SCATTER = {
+  label: "Shot", verb: "Blast", kind: "impact",
+  dry: "NO SHOT LEFT — it packs again",
+  hint: "Tap BLAST · five at once, and useless past arm's length",
+  regen: 1.7, speed: 30, dmg: 46, pierce: 0, blastR: 0, blastDmg: 0,
+  hitR: 1.0, life: 0.85, knock: 3, home: 0,
+  // Five pellets over a wide fan, and a life short enough that the fan never
+  // gets the chance to open past useful range.
+  volley: { count: 5, spread: 0.30 },
+  orbitR: 0.62, low: 1.26, high: 1.94, hot: 0xffa050,
+  make: () => makeArcOrb(scatMats), anim: burnFireball, aim: null,
+  carry: 0.56, fly: 1.0,
+  trail: { geo: () => pyroShellGeo, mats: scatTrailMats, every: 0.024,
+           life: 0.22, spread: 0.08, rise: 0.05, drift: [0, 0.3],
+           size: [0.55, 1.0], grow: 0.6, spin: [-3, 3] },
+};
+
+// ── the machinery for those four ──────────────────────────────────────────
+// A planted sentry. It is not a shot: it does not move, it cannot be hit, and
+// it outlives the thing that delivered it — so it gets its own list rather
+// than pretending to be a shot with zero velocity.
+function spawnTurret(at, spec) {
+  const cfg = spec.turret;
+  const m = spec.make();
+  m.scale.setScalar(spec.fly * 0.9);
+  m.position.set(at.x, 0.9, at.z);
+  scene.add(m);
+  castState.turrets.push({ m, x: at.x, z: at.z, age: 0, life: cfg.life,
+                           cool: 0.2, cfg, seed: Math.random() * 40 });
+}
+
+function stepTurrets(dt) {
+  for (let i = castState.turrets.length - 1; i >= 0; i--) {
+    const t = castState.turrets[i];
+    t.age += dt;
+    if (t.age >= t.life) {
+      sparks(tmp3.set(t.x, 0.9, t.z), t.cfg.spec.hot, 8, 10);
+      scene.remove(t.m);
+      castState.turrets.splice(i, 1);
+      continue;
+    }
+    // Sinks as it runs down, so a nearly spent sentry looks nearly spent.
+    const left = 1 - t.age / t.life;
+    t.m.position.y = 0.35 + 0.55 * left;
+    t.m.rotation.y += dt * 2.2;
+    t.cfg.spec.anim(t.m, S.t, t.seed, t.cfg.spec.fly * (0.7 + 0.3 * left));
+
+    t.cool -= dt;
+    if (t.cool > 0) continue;
+    let best = null, bd = t.cfg.range;
+    for (const w of walkers) {
+      if (w.dead) continue;
+      const d = Math.hypot(w.pos.x - t.x, w.pos.z - t.z);
+      if (d < bd) { bd = d; best = w; }
+    }
+    if (!best) continue;
+    t.cool = t.cfg.every;
+    const bs = t.cfg.spec;
+    const g = bs.make();
+    g.scale.setScalar(bs.fly);
+    g.position.set(t.x, 0.9, t.z);
+    scene.add(g);
+    const dx = best.pos.x - t.x, dz = best.pos.z - t.z;
+    const d = Math.hypot(dx, dz) || 1;
+    castState.shots.push({
+      g, seek: best, spec: bs,
+      vel: new T.Vector3(dx / d, 0, dz / d).multiplyScalar(bs.speed),
+      rising: false, launchDir: null, riseAt: 0,
+      life: bs.life, seed: Math.random() * 40, puffT: 0, hit: null,
+    });
+  }
+}
+
+function clearTurrets() {
+  for (const t of castState.turrets) scene.remove(t.m);
+  castState.turrets.length = 0;
+}
+
+// Extra pellets for a volley kit. The first one is the ordinary shot castFire
+// already built; these are the rest of the fan, spawned beside it.
+function volleyExtra(spec, baseAngle, from, seek) {
+  const cfg = spec.volley;
+  for (let i = 1; i < cfg.count; i++) {
+    // Alternating either side of the aim, so the fan is centred on where the
+    // player actually pointed rather than skewed to one side of it.
+    const step = Math.ceil(i / 2) * cfg.spread * (i % 2 ? 1 : -1);
+    const a = baseAngle + step;
+    const g = spec.make();
+    g.scale.setScalar(spec.fly);
+    g.position.copy(from);
+    scene.add(g);
+    castState.shots.push({
+      g, seek, spec,
+      vel: new T.Vector3(Math.sin(a), 0, Math.cos(a)).multiplyScalar(spec.speed),
+      rising: false, launchDir: null, riseAt: 0,
+      life: spec.life, seed: Math.random() * 40, puffT: 0, hit: null,
+    });
+  }
+}
+
 // Chain: from the body just struck, hop to the nearest one not yet hit,
 // losing strength each hop. Reuses bolt() — the arc visual the lightning wave
 // modifier already draws — rather than inventing a second one.
@@ -2695,6 +2936,8 @@ function clearCastShots() {
   for (const s of castState.shots) scene.remove(s.g);
   castState.shots.length = 0;
   clearPools();
+  clearTurrets();
+  castState.leech = 0;
   for (const p of castState.embers) scene.remove(p.m);
   castState.embers.length = 0;
 }
@@ -2752,6 +2995,12 @@ function castFire() {
   if (spec.launch) spec.launch(g);
   if (spec.aim) spec.aim(g, shot.vel);
   castState.shots.push(shot);
+  // A volley kit fires a FAN rather than one shot, and it happens here at the
+  // trigger rather than on impact — that is what separates it from the
+  // splitter, whose fragments only appear where its shot lands.
+  if (spec.volley) {
+    volleyExtra(spec, Math.atan2(aimDir.x, aimDir.z), g.position, seek);
+  }
   SFX.throw ? SFX.throw(1.2) : null;
   S.shake = Math.min(0.4, S.shake + 0.09);
   updateForceLabel();
@@ -2852,6 +3101,28 @@ function stepCast(dt) {
       s.vel.setLength(s.spec.speed);
     }
     s.g.position.addScaledVector(s.vel, dt);
+    // Out, turn, back. The hit list is wiped at the turn so the same bodies
+    // can be struck on the way home — that second pass is the whole kit, and
+    // without the wipe it would fly back through them harmlessly.
+    if (s.spec.boomerang) {
+      s.travel = (s.travel || 0) + s.spec.speed * dt;
+      if (!s.returning && s.travel >= s.spec.boomerang.range) {
+        s.returning = true;
+        s.hit = null;
+      }
+      if (s.returning) {
+        tmp.set(hero.pos.x - s.g.position.x, 0, hero.pos.z - s.g.position.z);
+        const d = tmp.length() || 1;
+        // Caught: it has come home, so it simply stops rather than
+        // detonating or dropping anything.
+        if (d < s.spec.boomerang.catchR) {
+          scene.remove(s.g);
+          castState.shots.splice(i, 1);
+          continue;
+        }
+        s.vel.copy(tmp.divideScalar(d)).multiplyScalar(s.spec.speed);
+      }
+    }
     s.spec.anim(s.g, S.t, s.seed, s.spec.fly);
     if (s.spec.aim) s.spec.aim(s.g, s.vel);
 
@@ -2905,6 +3176,21 @@ function stepCast(dt) {
             done = false;
             break;
           }
+          // Banked, not paid straight out: health is five whole hearts and a
+          // fractional one would break the pips the HUD draws. Every full
+          // bank is one heart, and the remainder carries over.
+          if (s.spec.leech) {
+            castState.leech += s.spec.dmg * MOD.allDmg;
+            const cap = CFG.maxHealth + MOD.hpBonus;
+            while (castState.leech >= s.spec.leech.per) {
+              castState.leech -= s.spec.leech.per;
+              if (hero.hp < cap) {
+                hero.hp++;
+                banner("SANGUINE");
+                SFX.rankUp ? SFX.rankUp(1) : null;
+              }
+            }
+          }
           // A kit that BINDS rather than kills. The multiplier rides on the
           // body so it can differ from the Crown's, which used to be the only
           // thing in the game that slowed anything.
@@ -2950,12 +3236,16 @@ function stepCast(dt) {
       // ...and one shot becoming several. Fragments carry their own spec,
       // which has no `split` of its own — that is what stops this recursing.
       if (s.spec.split) splitShot(s);
+      // The shot was only a delivery mechanism for something that outlives
+      // it. Planted where it stopped, and then it is on its own.
+      if (s.spec.turret) spawnTurret(s.g.position, s.spec);
       scene.remove(s.g);
       castState.shots.splice(i, 1);
     }
   }
 
   stepPools(dt);
+  stepTurrets(dt);
 
   // ---- the tail, aged as one pool. Each puff carries the ladder it was born
   // with, so a wind mage's wisps still fade like wind after switching kits
@@ -4729,6 +5019,42 @@ const CHARS = {
     props: 0,
     cast: SPLIT,
     perk(lv) { return castCap(lv) + " held · " + SPLIT.split.count + " fragments"; },
+  },
+  // The only kit that gives anything back.
+  revenant: {
+    name: "REVENANT",
+    desc: "Take enough and you get a heart back.",
+    power: "revenant",
+    props: 0,
+    cast: REVENANT,
+    perk(lv) { return castCap(lv) + " held · heart per " + REVENANT.leech.per; },
+  },
+  // The only kit that is dangerous in two directions.
+  boomeranger: {
+    name: "BOOMERANGER",
+    desc: "It comes back. Do not stand behind it.",
+    power: "boomer",
+    props: 0,
+    cast: BOOMER,
+    perk(lv) { return castCap(lv) + " held · turns at " + BOOMER.boomerang.range; },
+  },
+  // The only kit that is PLACED rather than aimed.
+  sentinel: {
+    name: "SENTINEL",
+    desc: "Put it down and walk away.",
+    power: "sentinel",
+    props: 0,
+    cast: SENTINEL,
+    perk(lv) { return castCap(lv) + " held · " + SENTINEL.turret.life + "s sentries"; },
+  },
+  // The only kit that wants the crowd close.
+  scattershot: {
+    name: "SCATTERSHOT",
+    desc: "Useless at range. Brutal in your face.",
+    power: "scatter",
+    props: 0,
+    cast: SCATTER,
+    perk(lv) { return castCap(lv) + " held · " + SCATTER.volley.count + " per shot"; },
   },
 };
 for (const k in CHARS) CHARS[k].key = k;

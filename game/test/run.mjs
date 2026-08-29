@@ -1372,6 +1372,230 @@ test("characters: the splitter's fragments are real shots, and they cannot split
      "not expiring, which is the same runaway by a slower route");
 });
 
+test("characters: the revenant pays out WHOLE hearts and never overfills", async (pg) => {
+  // Health is five whole hearts and the HUD draws pips, so a leech that paid
+  // a fraction of the damage would put the hero on 3.4 and break the display.
+  // Three things must hold: damage is banked rather than paid straight out,
+  // the payout is a whole number, and it cannot push the hero past the cap.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("revenant");
+    P.PROFILE.charLv.revenant = 8;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.MOD.allDmg = 1;
+    P.castState.held = 0; P.castState.leech = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 30; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1/60); }
+    P.parkWalkers();
+
+    const cap = P.CFG.maxHealth + P.MOD.hpBonus;
+    const w = P.walkers.find(x => !x.dead);
+    const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+    // Everything parked every frame, then the one target put back. The hero
+    // is sitting on two hearts and his health is the measurement, so a
+    // reinforcement pulse wandering over and hitting him does not just add
+    // noise — it silently falsifies the result. This is why the first version
+    // of this case reported "never healed" for a mechanic that works.
+    const pin = () => {
+      P.parkWalkers();
+      w.pos.set(f.x * 12, 0, f.z * 12); w.aggro = false; w.cool = 999; w.hp = 99999;
+    };
+
+    // Wounded, so there is room to heal into.
+    P.hero.hp = 2;
+    const seen = new Set();
+    let fractional = false, overCap = false;
+    for (let shot = 0; shot < 14; shot++) {
+      pin();
+      P.castState.held = Math.max(1, P.castState.held);
+      P.S.lock = w;
+      P.castFire();
+      for (let i = 0; i < 70; i++) {
+        pin(); P.hero.pos.set(0, 0, 0); P.step(1/60);
+        seen.add(P.hero.hp);
+        if (P.hero.hp !== Math.floor(P.hero.hp)) fractional = true;
+        if (P.hero.hp > cap) overCap = true;
+      }
+    }
+    const healed = P.hero.hp > 2;
+
+    // And at full health the bank must not silently overflow the cap.
+    P.hero.hp = cap;
+    P.castState.leech = 0;
+    for (let shot = 0; shot < 6; shot++) {
+      pin();
+      P.castState.held = Math.max(1, P.castState.held);
+      P.S.lock = w; P.castFire();
+      for (let i = 0; i < 70; i++) { pin(); P.hero.pos.set(0, 0, 0); P.step(1/60); }
+      if (P.hero.hp > cap) overCap = true;
+    }
+    P.setCharacter("telekinetic");
+    return { healed, fractional, overCap, cap, finalHp: P.hero.hp,
+             values: [...seen].sort((a, b) => a - b), per: P.REVENANT.leech.per };
+  });
+
+  ok(r.healed, "the revenant never healed at all — the leech is not paying out");
+  eq(r.fractional, false,
+     "the hero's health went fractional (" + r.values.join(", ") + "); hearts are whole " +
+     "and the HUD draws pips");
+  eq(r.overCap, false, "healing pushed the hero past the cap of " + r.cap);
+  eq(r.finalHp, r.cap, "at full health the hero ended on " + r.finalHp + " of " + r.cap);
+});
+
+test("characters: the boomerang turns, comes home, and can cut on the way back", async (pg) => {
+  // The second pass is the whole kit. If it forgets to wipe what it already
+  // hit at the turn, it flies home straight through the same bodies without
+  // touching them — which looks identical and is worth half as much.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("boomeranger");
+    P.PROFILE.charLv.boomeranger = 6;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.MOD.allDmg = 1;
+    P.castState.held = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 25; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1/60); }
+    P.parkWalkers();
+
+    // One body ON the outbound line, close enough that the loop passes it
+    // twice — out through it, and back through it.
+    const w = P.walkers.find(x => !x.dead);
+    const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+    const pin = () => { w.pos.set(f.x * 9, 0, f.z * 9); w.aggro = false; w.cool = 999; };
+    pin(); w.hp = 99999;
+    const hp0 = w.hp;
+
+    P.S.lock = null;
+    P.castFire();
+    const shot = P.castState.shots[P.castState.shots.length - 1];
+    let turned = false, maxDist = 0, hpAtTurn = null, cameBack = false;
+    for (let i = 0; i < 60 * 6; i++) {
+      pin(); P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60);
+      if (!P.castState.shots.includes(shot)) { cameBack = true; break; }
+      const d = Math.hypot(shot.g.position.x - P.hero.pos.x,
+                           shot.g.position.z - P.hero.pos.z);
+      maxDist = Math.max(maxDist, d);
+      if (shot.returning && !turned) { turned = true; hpAtTurn = w.hp; }
+    }
+    const total = hp0 - w.hp;
+    const afterTurn = turned ? hpAtTurn - w.hp : 0;
+    P.setCharacter("telekinetic");
+    return { turned, cameBack, maxDist: +maxDist.toFixed(1),
+             total: +total.toFixed(1), afterTurn: +afterTurn.toFixed(1),
+             range: P.BOOMER.boomerang.range };
+  });
+
+  ok(r.turned, "the loop never turned around — it is an ordinary shot with a long life");
+  ok(r.maxDist >= r.range * 0.8,
+     "it turned at " + r.maxDist + " against a stated range of " + r.range);
+  ok(r.cameBack, "it turned but never reached the hero — it is not being caught");
+  ok(r.total > 0, "the loop never hit the body on its own outbound line");
+  ok(r.afterTurn > 0,
+     "the body took " + r.afterTurn + " after the turn: the loop is flying home through " +
+     "bodies it already hit without touching them, so the return pass is worth nothing");
+});
+
+test("characters: the sentinel outlives its own shot and fires on its own", async (pg) => {
+  // The only kit whose shot is not the weapon. What matters is that something
+  // exists after the shot is gone, that it shoots without the player doing
+  // anything, and that it eventually expires rather than becoming permanent.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("sentinel");
+    P.PROFILE.charLv.sentinel = 6;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.MOD.allDmg = 1;
+    P.castState.held = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 35; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1/60); }
+    P.parkWalkers();
+
+    const w = P.walkers.find(x => !x.dead);
+    const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+    const pin = () => { w.pos.set(f.x * 14, 0, f.z * 14); w.aggro = false; w.cool = 999; };
+    pin(); w.hp = 99999;
+
+    P.S.lock = null;
+    P.castFire();
+    const shot = P.castState.shots[P.castState.shots.length - 1];
+    let planted = 0, hpWhenPlanted = null, shotGone = false;
+    for (let i = 0; i < 60 * 3 && !planted; i++) {
+      pin(); P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60);
+      if (P.castState.turrets.length) {
+        planted = P.castState.turrets.length;
+        shotGone = !P.castState.shots.includes(shot);
+        hpWhenPlanted = w.hp;
+      }
+    }
+    // The player does nothing at all from here.
+    let boltsSeen = 0;
+    for (let i = 0; i < 60 * 5; i++) {
+      pin(); P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60);
+      boltsSeen = Math.max(boltsSeen, P.castState.shots.length);
+    }
+    const dealtByTurret = hpWhenPlanted - w.hp;
+    // ...and it must not be permanent.
+    for (let i = 0; i < 60 * 6; i++) { pin(); P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60); }
+    const left = P.castState.turrets.length;
+    P.setCharacter("telekinetic");
+    return { planted, shotGone, boltsSeen, dealtByTurret: +dealtByTurret.toFixed(1),
+             left, life: P.SENTINEL.turret.life };
+  });
+
+  eq(r.planted, 1, "the shot planted " + r.planted + " sentries, expected exactly one");
+  ok(r.shotGone, "the sentry appeared while its delivery shot was still in the air");
+  ok(r.boltsSeen > 0, "the sentry never fired anything — it is scenery");
+  ok(r.dealtByTurret > 100,
+     "the sentry dealt " + r.dealtByTurret + " on its own while the player did nothing");
+  eq(r.left, 0, "the sentry never expired — it is a permanent turret");
+});
+
+test("characters: the scattershot fires a fan at the trigger, not on impact", async (pg) => {
+  // The distinction that separates it from the splitter: all five exist the
+  // instant the trigger is pulled, spread around where the player pointed,
+  // rather than appearing where something lands.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("scattershot");
+    P.PROFILE.charLv.scattershot = 6;
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.castState.held = 0; P.buildCastStack();
+    for (let i = 0; i < 60 * 25; i++) { P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1/60); }
+    P.parkWalkers();
+
+    const before = P.castState.shots.length;
+    P.S.lock = null;
+    P.castFire();
+    const immediately = P.castState.shots.length - before;
+    // The fan has to actually be a fan: collect the headings.
+    const angles = P.castState.shots.slice(-immediately)
+      .map(s => Math.atan2(s.vel.x, s.vel.z));
+    const spreadOf = (xs) => Math.max(...xs) - Math.min(...xs);
+    // Angles are CIRCULAR. A plain average breaks across the seam at +/-pi —
+    // a fan straddling it averages to roughly zero instead of pi, which read
+    // as the fan pointing 144 degrees away from the aim when it was centred
+    // perfectly. Every angle is compared as a wrapped difference instead.
+    const aim = Math.atan2(Math.sin(P.cam.yaw), Math.cos(P.cam.yaw));
+    const wrap = (x) => Math.atan2(Math.sin(x), Math.cos(x));
+    const deltas = angles.map(a2 => wrap(a2 - aim));
+    const mean = aim + deltas.reduce((a2, b2) => a2 + b2, 0) / deltas.length;
+    let spent = 0;
+    for (let i = 0; i < 60 * 3; i++) { P.hero.pos.set(0, 0, 0); P.hero.hp = 99; P.step(1/60); }
+    spent = P.castState.shots.length;
+    P.setCharacter("telekinetic");
+    return { immediately, spread: +spreadOf(deltas).toFixed(3),
+             offCentre: +Math.abs(wrap(mean - aim)).toFixed(3),
+             count: P.SCATTER.volley.count, cfg: P.SCATTER.volley.spread, spent };
+  });
+
+  eq(r.immediately, r.count,
+     "the trigger put " + r.immediately + " shots in the air, not the " + r.count +
+     " the fan is meant to be — this is a splitter, which fragments on impact instead");
+  ok(r.spread > r.cfg,
+     "the five pellets left on headings spanning " + r.spread + " radians, which is no " +
+     "wider than a single shot — there is no fan");
+  ok(r.offCentre < 0.05,
+     "the fan's centre sits " + r.offCentre + " radians off where the player aimed");
+  eq(r.spent, 0, "pellets are still in the air three seconds later: " + r.spent);
+});
+
 test("characters: water shoves a body, fire and blades do not", async (pg) => {
   // Control rather than damage is the trade this kit makes, and the shove is
   // where that trade is visible.

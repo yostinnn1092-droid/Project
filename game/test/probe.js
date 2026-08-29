@@ -17,6 +17,7 @@ window.__probe = {
   ARC_TIERS, arcSpec, arcTierIndex,
   STORM, PLAGUE, FROST, chainFrom, spawnPool, stepPools, clearPools,
   WARDEN, GRAVE, SPLIT, SPLIT_FRAGMENT, splitShot, pullToward,
+  REVENANT, BOOMER, SENTINEL, SENTINEL_BOLT, SCATTER, spawnTurret, stepTurrets,
   charNow() { return CHAR.key; },
   CROWN, CROWN_Y, crownState, crownUpgrade, buildCrown, stepCrown,
   judgeFrame, setQuality,

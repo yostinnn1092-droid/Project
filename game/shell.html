@@ -226,7 +226,8 @@
      paragraph that fits neither. */
   .brief .pyro, .brief .wind, .brief .water, .brief .arcane,
   .brief .storm, .brief .plague, .brief .frost,
-  .brief .warden, .brief .grave, .brief .split { display: none; }
+  .brief .warden, .brief .grave, .brief .split,
+  .brief .revenant, .brief .boomer, .brief .sentinel, .brief .scatter { display: none; }
   body.casterChar .brief .kin { display: none; }
   body.pyromancerChar .brief .pyro { display: block; }
   body.windmageChar .brief .wind { display: block; }
@@ -238,6 +239,10 @@
   body.wardenChar .brief .warden { display: block; }
   body.gravemindChar .brief .grave { display: block; }
   body.splitterChar .brief .split { display: block; }
+  body.revenantChar .brief .revenant { display: block; }
+  body.boomerangerChar .brief .boomer { display: block; }
+  body.sentinelChar .brief .sentinel { display: block; }
+  body.scattershotChar .brief .scatter { display: block; }
   #diffTag { display: block; font-family: var(--mono); font-size: 8px;
              letter-spacing: .16em; color: var(--dim); margin-top: 2px; }
   #menuBest { display: none; margin-top: 10px; font-size: 11px; color: var(--force); opacity: .85; }
@@ -654,6 +659,28 @@
          travelling. It covers width rather than a line or a point, which makes it the
          answer to a crowd that is spread thin — the opposite problem to the one the
          stormcaller solves.</p>
+
+      <p class="revenant"><b>DRAIN</b> banks the damage you deal, and every full bank
+         <b>buys a heart back</b>. Health here is five whole hearts, so it pays out in
+         whole ones — you are working toward a heart, not watching a number creep. It
+         is the only attack that gives anything back, and it is deliberately slow:
+         roughly nine clean hits.</p>
+
+      <p class="boomer"><b>THROW</b> sends it out, and at eighteen paces it <b>turns and
+         comes back</b> — cutting on the way out and again on the way home, because it
+         forgets what it already hit at the turn. It is the only attack dangerous in two
+         directions, so its range is a decision rather than a limit.</p>
+
+      <p class="sentinel"><b>PLACE</b> is not aimed at anything. It lands, plants itself,
+         and then <b>fights on its own for eight seconds</b> while you go somewhere else.
+         Everything else here is thrown; this is put down. It refills slower than
+         anything on the roster, because what it leaves keeps working after you have
+         paid for it.</p>
+
+      <p class="scatter"><b>BLAST</b> throws <b>five at once</b> in a cone, each one weak.
+         The fan opens wider than a body past a few paces, so at range it is nearly
+         useless — and at arm's length every pellet lands. It is the only attack here
+         that wants the crowd close.</p>
 
       <p>Every attack has a <b>wind-up</b> — a flaring ring and a sound. Step, dash or jump out
          of it and it whiffs. <em>Grabbers</em> root you; <b>DASH</b> always breaks it.
