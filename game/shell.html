@@ -186,6 +186,11 @@
   /* difficulty picker on the menu */
   #diffPick { display: flex; gap: 7px; justify-content: center; margin: 10px 0 2px;
               flex-wrap: wrap; }
+  /* Three difficulties left to size themselves wrap 2+1, which reads as an
+     accident rather than a row — the same trap the character cards fell into.
+     A shared basis makes them one row of equals wherever there is width for it,
+     and a clean stack on a phone where there is not. */
+  #diffPick .diffBtn { flex: 1 1 185px; max-width: 224px; }
   .diffBtn { background: rgba(232,228,240,.04); border: 1px solid rgba(232,228,240,.16);
              border-radius: 5px; padding: 6px 10px; cursor: pointer; color: var(--ink);
              font-family: var(--sans); text-align: left; min-width: 116px;
@@ -202,9 +207,24 @@
   #charPick { display: flex; gap: 7px; justify-content: center; margin: 12px 0 2px;
               flex-wrap: wrap; }
   /* Capped rather than merely wide: left to size themselves the cards run to
-     the width of their longest line, and three of those wrap 2+1 — which
-     reads as an accident rather than a row. */
-  #charPick .diffBtn { flex: 1 1 190px; min-width: 150px; max-width: 212px; }
+     the width of their longest line, which wraps into ragged rows. At fifteen
+     characters the cap is also what keeps the roster to three tidy rows
+     instead of five. */
+  #charPick .diffBtn { flex: 1 1 118px; min-width: 104px; max-width: 148px; }
+  /* The card's flavour line is the SAME sentence the briefing prints for
+     whoever is selected, so on the card it is duplication that costs five rows
+     of height across fifteen of them. Name and level stay; the description is
+     read once, below, for the one character that is actually chosen. */
+  #charPick .diffBtn i { display: none; }
+  /* On a phone the cards stretch to their max and settle at two per row, which
+     is eight rows of roster and puts Begin below the fold again. Capping them
+     narrower fits three across the 350px the menu actually has. */
+  @media (max-width: 520px) {
+    #charPick .diffBtn { flex: 1 1 100px; min-width: 96px; max-width: 110px;
+                         padding: 5px 7px; }
+    #charPick .diffBtn b { font-size: 9.5px; letter-spacing: .08em; }
+    #charPick .charLv { font-size: 8px; margin-top: 4px; }
+  }
   .charLv { display: block; font-family: var(--mono); font-size: 9px;
             letter-spacing: .1em; color: var(--force); margin-top: 5px; }
   .charLv s { text-decoration: none; color: var(--dim); }
@@ -484,6 +504,13 @@
   .rule { font-size: 13.5px; line-height: 1.6; color: var(--dim); margin-bottom: 7px; }
   .rule b { color: var(--ink); font-weight: 600; }
   .rule em { color: var(--blood); font-style: normal; }
+  /* three.js is MIT; the notice ships inside the bundle, this is the human
+     half of the same credit. */
+  .credits {
+    margin-top: 14px; font-family: var(--mono); font-size: 9px;
+    letter-spacing: .08em; color: var(--dim); opacity: .7;
+  }
+  .credits a { color: inherit; }
   button {
     margin-top: 16px; font-family: var(--mono); font-size: 11.5px;
     letter-spacing: .2em; text-transform: uppercase;
@@ -568,6 +595,18 @@
   <div id="card">
     <h1>Kinesis</h1>
     <p class="sub">Best played in landscape</p>
+
+    <!-- Pick, then play. The briefing used to sit above this and ran six
+         paragraphs deep, which put Begin ~280px below the fold on a 1280x800
+         desktop and ~1400px below it on a phone: the first thing a new player
+         met was an essay, and the button they came for was off screen. Choice
+         and call-to-action come first now; the rules stay directly underneath
+         for anyone who wants them. -->
+    <p class="pickLabel">Character</p>
+    <div id="charPick"></div>
+    <p class="pickLabel">Difficulty</p>
+    <div id="diffPick"></div>
+    <button id="startBtn">Begin</button>
 
     <div class="brief">
       <p class="kin"><b>FORCE</b> gathers what is in reach; the button becomes <b>SHOOT</b> until the wheel
@@ -690,12 +729,9 @@
          Zoom — scroll wheel, pinch, or <b>[</b> <b>]</b> · <b>0</b> resets</p>
     </div>
 
-    <p class="pickLabel">Character</p>
-    <div id="charPick"></div>
-    <p class="pickLabel">Difficulty</p>
-    <div id="diffPick"></div>
     <p class="rule" id="menuBest"></p>
-    <button id="startBtn">Begin</button>
+    <p class="credits">Built with <a href="https://threejs.org/" target="_blank"
+       rel="noopener noreferrer">three.js</a> r185 — MIT</p>
   </div>
 </div>
 

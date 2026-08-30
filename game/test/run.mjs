@@ -1900,6 +1900,53 @@ test("characters: the telekinetic's level buys carry capacity", async (pg) => {
   ok(r.pyro <= r.lv1, "the pyromancer's level is leaking into carry capacity");
 });
 
+test("menu: the whole roster fits, and Begin stays above the fold", async (pg) => {
+  // The roster grew from five characters to fifteen without the menu changing
+  // shape, and the briefing sat above the picker. The result was measured, not
+  // guessed: Begin ended up 279px below the fold on a 1280x800 desktop and
+  // 1417px below it on a 390x844 phone — the button a new player came for was
+  // off screen on EVERY size, behind six paragraphs of rules.
+  //
+  // This case is here so the sixteenth character cannot quietly do it again. It
+  // is deliberately a viewport measurement rather than a CSS assertion: it does
+  // not care HOW the menu fits, only that it does.
+  const sizes = [["desktop", 1280, 800], ["laptop", 1000, 640], ["phone", 390, 844]];
+  const seen = [];
+
+  for (const [label, width, height] of sizes) {
+    await pg.setViewportSize({ width, height });
+    // The harness clicks into the game during setup; go back to the menu.
+    await pg.reload({ timeout: 90000 });
+    await pg.waitForFunction(() => window.__probe, null, { timeout: 90000 });
+
+    const r = await pg.evaluate(() => {
+      const btn = document.querySelector("#startBtn");
+      const cards = [...document.querySelectorAll("#charPick > *")];
+      const b = btn.getBoundingClientRect();
+      return {
+        cards: cards.length,
+        chars: Object.keys(window.__probe.CHARS).length,
+        // Every card has to be reachable, not merely present in the DOM.
+        cardsSized: cards.every(c => c.getBoundingClientRect().height > 0),
+        beginBottom: Math.round(b.bottom),
+        beginVisible: b.bottom <= window.innerHeight + 1,
+        vh: window.innerHeight,
+      };
+    });
+    seen.push(label + " " + JSON.stringify(r));
+
+    eq(r.cards, r.chars,
+       label + ": the picker shows " + r.cards + " cards for " + r.chars +
+       " characters — one of them cannot be chosen");
+    ok(r.cardsSized, label + ": a character card has collapsed to zero height");
+    ok(r.beginVisible,
+       label + " (" + width + "x" + height + "): Begin ends at " + r.beginBottom +
+       "px, which is " + (r.beginBottom - r.vh) + "px below the " + r.vh +
+       "px fold — a new player has to scroll to find the button that starts the " +
+       "game. Measurements: " + seen.join(" | "));
+  }
+});
+
 test("ring of fire: the wall licks, it does not only turn", async (pg) => {
   // Reported as "it moves in a circle, not like flame". It did: every curtain
   // scrolled its texture sideways at a fixed rate, and all six were stretched
