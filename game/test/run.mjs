@@ -2024,6 +2024,47 @@ test("unlocks: the roster is earned, and every run pays into it", async (pg) => 
      pace.priced.join(", ") + ") — a stretch that long stops paying out");
 });
 
+test("unlocks: the run that earns a character offers to play it", async (pg) => {
+  // "Try again" puts the player straight back in as whoever they just died as.
+  // Without this the death screen names the character the run earned and then
+  // leaves it behind a trip to the menu — the reward is announced at the exact
+  // moment it cannot be taken, which is the worst possible time.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("pyromancer");
+    P.PROFILE.bestWave = 1;
+
+    // A run that reaches wave 4 buys several rungs of the ladder.
+    P.S.wave = 4; P.S.score = 500; P.S.kills = 9;
+    P.gameOver();
+    const btn = document.querySelector("#playNew");
+    const offered = btn ? btn.textContent.trim() : null;
+    const before = P.charNow();
+    if (btn) btn.click();
+    const after = P.charNow();
+
+    // ...and a run that earns nothing must not offer a button at all.
+    P.setCharacter("pyromancer");
+    P.S.wave = 2; P.S.score = 10; P.S.kills = 1;
+    P.gameOver();
+    const barren = !!document.querySelector("#playNew");
+
+    return { offered, before, after, barren,
+             unlockedAt4: P.charUnlockAt(after) };
+  });
+
+  ok(r.offered, "a run that unlocked a character offered no way to play it");
+  ok(/^Play as /.test(r.offered),
+     "the button reads '" + r.offered + "' rather than naming the character to play");
+  ok(r.after !== r.before,
+     "pressing it left the player as the " + r.before + " they just died as");
+  ok(r.unlockedAt4 > 0 && r.unlockedAt4 <= 4,
+     "it switched to a character priced at wave " + r.unlockedAt4 +
+     ", which this run did not earn");
+  eq(r.barren, false,
+     "a run that unlocked nothing still offered a 'play as' button");
+});
+
 test("menu: the whole roster fits, and Begin stays above the fold", async (pg) => {
   // The roster grew from five characters to fifteen without the menu changing
   // shape, and the briefing sat above the picker. The result was measured, not

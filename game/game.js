@@ -5188,7 +5188,7 @@ function levelCharacter() {
 
 // Returns what actually improved, so the end screen can call it out.
 function recordRun() {
-  const beat = { score:false, wave:false, rank:false, unlocked:[] };
+  const beat = { score:false, wave:false, rank:false, unlocked:[], unlockedKeys:[] };
   // Taken BEFORE bestWave moves: afterwards every one of them reads as
   // unlocked and the run gets no credit for the ones it actually earned.
   const wasLocked = [];
@@ -5199,7 +5199,11 @@ function recordRun() {
   S.bankedKills = S.kills;
   if (S.score > PROFILE.best)      { PROFILE.best = S.score; beat.score = true; }
   if (S.wave  > PROFILE.bestWave)  { PROFILE.bestWave = S.wave; beat.wave = true; }
-  for (const k of wasLocked) if (charUnlocked(k)) beat.unlocked.push(CHARS[k].name);
+  for (const k of wasLocked) {
+    if (!charUnlocked(k)) continue;
+    beat.unlocked.push(CHARS[k].name);
+    beat.unlockedKeys.push(k);
+  }
   const ri = RANKS.findIndex(r => r.name === S.rank);
   const bi = RANKS.findIndex(r => r.name === PROFILE.bestRank);
   if (ri > bi) { PROFILE.bestRank = S.rank; beat.rank = true; }
@@ -8392,8 +8396,10 @@ function nextWave() {
     show(`<h1>Survived</h1>${runSummary()}
           <p class="rule">The Maw is down. Nothing walked away from you.</p>
           <button id="endless">Keep going</button>
+          ${tryNewButton()}
           <button id="again" class="ghost">Finish here</button>`);
     el("again").onclick = restart;
+    wireNewButton();
     el("endless").onclick = () => {
       S.endless = true;
       banner("ENDLESS");
@@ -8419,8 +8425,16 @@ function startNextWave() {
 
 // The scoreboard the end screens share: what this run did, and whether any
 // of it was the best you have managed.
+// What the run just earned, held for the screen that is about to be drawn.
+// "Try again" puts the player straight back in as whoever they were playing,
+// so without this the character a run just unlocked is announced and then left
+// behind a trip to the menu — the reward is named at the exact moment it
+// cannot be taken.
+let lastUnlockedKeys = [];
+
 function runSummary() {
   const beat = recordRun();
+  lastUnlockedKeys = beat.unlockedKeys;
   const row = (label, val, isBest) =>
     `<div class="stat"><span>${label}</span><b class="${isBest ? "best" : ""}">${val}` +
     (isBest ? ' <i class="pb">best</i>' : '') + `</b></div>`;
@@ -8449,11 +8463,28 @@ function runSummary() {
        · ${Object.keys(PROFILE.seen).length}/${MODIFIERS.length} conditions met</p>`;
 }
 
+// The prize the run just bought, offered as the FIRST button rather than
+// mentioned in passing: the moment a player is most likely to start another
+// run is the moment they have just been handed something new to try.
+function tryNewButton() {
+  const key = lastUnlockedKeys[0];
+  if (!key || !CHARS[key]) return "";
+  return `<button id="playNew">Play as ${CHARS[key].name}</button>`;
+}
+function wireNewButton() {
+  const b = el("playNew");
+  if (!b) return;
+  b.onclick = () => { setCharacter(lastUnlockedKeys[0]); restart(); };
+}
+
 function gameOver() {
   S.phase = "dead";
   show(`<h1>Overrun</h1>${runSummary()}
-        <p class="rule">They got close enough to touch you.</p><button id="again">Try again</button>`);
+        <p class="rule">They got close enough to touch you.</p>
+        ${tryNewButton()}
+        <button id="again" class="${lastUnlockedKeys.length ? "ghost" : ""}">Try again</button>`);
   el("again").onclick = restart;
+  wireNewButton();
 }
 
 function show(html) {
