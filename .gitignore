@@ -50,5 +50,4 @@ android/build/
 # Scratch copies of the regression runner. The suite takes ~20 minutes, so a
 # queued back-to-back run needs a differently-named copy of run.mjs for the
 # waiter to distinguish the two processes. Disposable — never the source.
-game/test/run-fresh.mjs
-game/test/run-final.mjs
+game/test/run-*.mjs
