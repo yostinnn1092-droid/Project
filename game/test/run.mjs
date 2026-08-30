@@ -700,14 +700,44 @@ test("characters: the carried stack scatters behind the player", async (pg) => {
     for (let i = 0; i < a.length; i++)
       carried = Math.max(carried, Math.abs(a[i].back - c[i].back), Math.abs(a[i].side - c[i].side));
 
-    return { n: a.length, backSpan: span("back"), sideSpan: span("side"), ySpan: span("y"),
-             lowest: Math.min(...a.map(o => o.y)), highest: Math.max(...a.map(o => o.y)),
-             drift, carried, crownY: P.CROWN_Y };
+    // The scatter is RANDOM per ball, so one draw is one sample of a
+    // distribution — and a threshold checked against a single sample fails
+    // whenever the draw lands in its tail. (It did: the boomeranger came up
+    // with a depth span of 0.117 against a bar of 0.12, and passed three times
+    // running immediately afterwards.) The spans are judged on the median of
+    // several rebuilds instead, which asks the real question — does the
+    // GENERATOR scatter — rather than whether one roll was lucky.
+    const draws = [];
+    for (let d = 0; d < 9; d++) {
+      // Fill the stack directly rather than waiting out the regen clock: the
+      // offsets are fixed when the stack is built, which is all this samples.
+      P.castState.held = P.castCap(7);
+      P.buildCastStack();
+      // A rebuilt stack has its offsets but not yet its positions; those are
+      // written during the frame. Without a step every ball reads as sitting
+      // at the same place and the span is a flat zero.
+      P.hero.hp = 99; P.hero.pos.set(0, 0, 0); P.step(1 / 60);
+      const s = rel();
+      const sp = (k) => Math.max(...s.map(o => o[k])) - Math.min(...s.map(o => o[k]));
+      draws.push({ back: sp("back"), side: sp("side"), y: sp("y"),
+                   lowest: Math.min(...s.map(o => o.y)),
+                   highest: Math.max(...s.map(o => o.y)) });
+    }
+    const median = (k) => draws.map(d => d[k]).sort((p, q) => p - q)[draws.length >> 1];
+
+    return { n: a.length, backSpan: median("back"), sideSpan: median("side"),
+             ySpan: median("y"),
+             // Clearance is a hard invariant, not a distribution: the worst
+             // ball across every draw is the one that matters.
+             lowest: Math.min(...draws.map(d => d.lowest)),
+             highest: Math.max(...draws.map(d => d.highest)),
+             drift, carried, crownY: P.CROWN_Y, draws: draws.length };
   }, who);
 
     ok(r.n >= 5, who + ": only " + r.n + " were carried, too few to judge the spread");
     ok(r.backSpan > 0.12,
-       who + ": they all ride at the same depth (span " + r.backSpan.toFixed(3) + ") — still a line");
+       who + ": they all ride at the same depth (median span over " + r.draws +
+       " rebuilds: " + r.backSpan.toFixed(3) + ") — still a line");
     ok(r.sideSpan > 0.5, who + ": they barely spread sideways: " + r.sideSpan.toFixed(3));
     ok(r.ySpan > 0.35, who + ": they sit at nearly one height: span " + r.ySpan.toFixed(3));
     // The widest projectile here is about 0.5 across at carry scale, so its
@@ -1898,6 +1928,71 @@ test("characters: the telekinetic's level buys carry capacity", async (pg) => {
 
   eq(r.lv5 - r.lv1, 4, "four levels should buy four more objects; got " + (r.lv5 - r.lv1));
   ok(r.pyro <= r.lv1, "the pyromancer's level is leaking into carry capacity");
+});
+
+test("unlocks: the roster is earned, and every run pays into it", async (pg) => {
+  // Fifteen characters handed over in the first second is a paralysing menu
+  // and spends the whole game at once. They are priced in best-wave-reached —
+  // a number the profile already kept — so a run that dies early still buys
+  // something. This guards the three properties that makes true: a fresh
+  // profile opens only the free ones, the ladder opens exactly what has been
+  // paid for, and the run that crosses a price is CREDITED with it.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const free = [], priced = [];
+    for (const k in P.CHARS) (P.charUnlockAt(k) ? priced : free).push(k);
+
+    // A brand new profile.
+    P.PROFILE.bestWave = 1;
+    const openAtStart = Object.keys(P.CHARS).filter(k => P.charUnlocked(k));
+    const firstPrize = P.nextUnlock();
+
+    // Partway up the ladder: everything at or below the wave, nothing above.
+    P.PROFILE.bestWave = 10;
+    const openAt10 = Object.keys(P.CHARS).filter(k => P.charUnlocked(k));
+    const wrongAt10 = Object.keys(P.CHARS)
+      .filter(k => P.charUnlocked(k) !== (P.charUnlockAt(k) <= 10));
+
+    // A run that reaches wave 4 from a standing start has to be credited with
+    // everything it passed, not merely the last one.
+    P.PROFILE.bestWave = 1;
+    P.S.wave = 4; P.S.score = 10; P.S.kills = 1;
+    const beat = P.recordRun();
+
+    // ...and a second run that beats nothing must not re-award them.
+    P.S.wave = 2;
+    const again = P.recordRun();
+
+    return {
+      free: free.sort(), priced: priced.length,
+      openAtStart: openAtStart.sort(),
+      firstPrize: firstPrize && firstPrize.at,
+      openAt10: openAt10.length, wrongAt10,
+      earned: beat.unlocked.slice().sort(), earnedAgain: again.unlocked,
+      bestWaveAfter: P.PROFILE.bestWave,
+    };
+  });
+
+  ok(r.free.length >= 2,
+     "a locked roster still has to open with a CHOICE; only " + r.free.length + " is free");
+  ok(r.priced >= 10, "only " + r.priced + " characters are behind the ladder — too little to chase");
+  eq(r.openAtStart.join(","), r.free.join(","),
+     "a fresh profile opens [" + r.openAtStart.join(",") + "], expected exactly the free ones [" +
+     r.free.join(",") + "]");
+  ok(r.firstPrize > 1, "the first prize is priced at wave " + r.firstPrize +
+     ", which a player already has — nothing to reach for");
+  eq(r.wrongAt10.length, 0,
+     "at wave 10 these are on the wrong side of the ladder: " + r.wrongAt10.join(", "));
+  ok(r.openAt10 > r.free.length,
+     "ten waves of progress opened nothing beyond the free roster");
+
+  // The payout, which is the whole reason the ladder exists.
+  eq(r.bestWaveAfter, 4, "the run did not record its wave");
+  ok(r.earned.length >= 2,
+     "a run from wave 1 to wave 4 passed at least two prices but was credited with " +
+     r.earned.length + " — an early run has to visibly buy something");
+  eq(r.earnedAgain.length, 0,
+     "a worse run re-awarded " + r.earnedAgain.join(", ") + " — the payout is not a one-off");
 });
 
 test("menu: the whole roster fits, and Begin stays above the fold", async (pg) => {

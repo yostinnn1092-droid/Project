@@ -5068,6 +5068,38 @@ function charLevel(key) {
   return Math.max(1, Math.min(CHAR_MAX_LV, raw | 0));
 }
 function charLv() { return charLevel(CHAR.key); }
+
+// The roster IS the game's content, and handing all fifteen over in the first
+// second spends it in one go: fifteen names a new player knows nothing about
+// is a paralysing menu rather than a choice, and nothing is left to come back
+// for. They arrive on a ladder instead, priced in the best wave ever reached —
+// a number the profile already keeps, so every run pays into it, including the
+// ones that end early. Two are free, because a roster of one is not a choice.
+//
+// The order is by how much the kit asks of you, not by power: blades and a
+// chain before a fuse you have to time or a turret you have to place. The gaps
+// widen on purpose — early unlocks land almost every run, later ones are worth
+// a session.
+const CHAR_UNLOCK = {
+  telekinetic: 0, pyromancer: 0,
+  windmage: 2, hydromancer: 3, stormcaller: 4, frostbinder: 5, arcanist: 6,
+  scattershot: 8, plaguebearer: 10, splitter: 12, boomeranger: 14,
+  warden: 16, gravemind: 18, sentinel: 20, revenant: 22,
+};
+function charUnlockAt(key) { return CHAR_UNLOCK[key] | 0; }
+function charUnlocked(key) { return PROFILE.bestWave >= charUnlockAt(key); }
+
+// The nearest thing still locked, so the menu and the end screen can name what
+// the next wave is actually worth instead of saying "keep playing".
+function nextUnlock() {
+  let near = null;
+  for (const k in CHARS) {
+    if (charUnlocked(k)) continue;
+    const at = charUnlockAt(k);
+    if (!near || at < near.at) near = { key: k, at, name: CHARS[k].name };
+  }
+  return near;
+}
 // A caster is anyone whose ammunition rides on their back. The machinery asks
 // this rather than naming a character, so a third kit is a CHARS entry with a
 // `cast` spec and nothing else.
@@ -5141,11 +5173,18 @@ function levelCharacter() {
 
 // Returns what actually improved, so the end screen can call it out.
 function recordRun() {
-  const beat = { score:false, wave:false, rank:false };
-  PROFILE.runs++;
-  PROFILE.kills += S.kills;
+  const beat = { score:false, wave:false, rank:false, unlocked:[] };
+  // Taken BEFORE bestWave moves: afterwards every one of them reads as
+  // unlocked and the run gets no credit for the ones it actually earned.
+  const wasLocked = [];
+  for (const k in CHARS) if (!charUnlocked(k)) wasLocked.push(k);
+
+  if (!S.counted) { PROFILE.runs++; S.counted = true; }
+  PROFILE.kills += S.kills - S.bankedKills;
+  S.bankedKills = S.kills;
   if (S.score > PROFILE.best)      { PROFILE.best = S.score; beat.score = true; }
   if (S.wave  > PROFILE.bestWave)  { PROFILE.bestWave = S.wave; beat.wave = true; }
+  for (const k of wasLocked) if (charUnlocked(k)) beat.unlocked.push(CHARS[k].name);
   const ri = RANKS.findIndex(r => r.name === S.rank);
   const bi = RANKS.findIndex(r => r.name === PROFILE.bestRank);
   if (ri > bi) { PROFILE.bestRank = S.rank; beat.rank = true; }
@@ -6286,6 +6325,11 @@ function burst(pos, color) {
 const S = {
   phase:"menu", wave:1, kills:0, focus:1, shake:0, t:0,
   combo:0, comboT:0, score:0, recycleT:0, waveT:0, endless:false,
+  // Beating the Maw shows a summary and then offers to carry on, so ONE run
+  // can reach recordRun twice. These track what it has already banked, so the
+  // second visit records the progress made since without paying the career
+  // totals twice over.
+  bankedKills:0, counted:false,
   inReach:0, reachT:0, dryWarned:false, inZone:false,
   strain:0, overload:0, idleT:0, grabbed:0,
   style:0, styleT:0, rank:"D", recent:[],   // see addStyle
@@ -8365,12 +8409,25 @@ function runSummary() {
   const row = (label, val, isBest) =>
     `<div class="stat"><span>${label}</span><b class="${isBest ? "best" : ""}">${val}` +
     (isBest ? ' <i class="pb">best</i>' : '') + `</b></div>`;
+  // What the run BOUGHT, before what it scored. A run that ends early still
+  // has to be worth having played, or there is no reason to start another —
+  // and a name the player has never been allowed to use is a better reason
+  // than a number going up.
+  const nx = nextUnlock();
+  const earned = beat.unlocked.length
+    ? `<p class="rule won">Unlocked · <b>${beat.unlocked.join("</b> · <b>")}</b></p>`
+    : "";
+  const toGo = nx
+    ? `<p class="rule career">Wave ${nx.at} unlocks <b>${nx.name}</b>` +
+      ` — ${Math.max(0, nx.at - PROFILE.bestWave)} to go</p>`
+    : "";
   return `<div class="stats">
       ${row("Score", S.score.toLocaleString(), beat.score)}
       ${row("Wave reached", S.wave, beat.wave)}
       ${row("Style rank", S.rank, beat.rank)}
       ${row("Put down", S.kills, false)}
     </div>
+    ${earned}${toGo}
     <p class="rule career">Career · ${PROFILE.runs} run${PROFILE.runs === 1 ? "" : "s"}
        · ${PROFILE.kills.toLocaleString()} killed
        · best ${PROFILE.best.toLocaleString()} (wave ${PROFILE.bestWave}, rank ${PROFILE.bestRank})
@@ -8423,6 +8480,7 @@ function restart() {
   buildCastStack();
   S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0;
   S.style = 0; S.styleT = 0; S.rank = "D"; S.recent.length = 0; S.endless = false;
+  S.bankedKills = 0; S.counted = false;
   buildArena(ARENAS[0]);
   el("arena").textContent = ARENAS[0].name;
   S.kinetic = 0; endOverdrive();
@@ -8619,6 +8677,10 @@ loadProfile();
   let saved = "telekinetic";
   try { saved = localStorage.getItem("kinesis.char") || "telekinetic"; } catch (e) {}
   if (!CHARS[saved]) saved = "telekinetic";
+  // A profile can name a character it has not earned — a save copied between
+  // browsers, or a ladder that moved under an existing player. Fall back
+  // rather than handing it over.
+  if (!charUnlocked(saved)) saved = "telekinetic";
   setCharacter(saved);
   const box = el("charPick");
   if (!box) return;
@@ -8628,21 +8690,44 @@ loadProfile();
   // and it is the only number on this screen that the last run could change.
   const paint = () => {
     [...box.children].forEach(btn => {
-      const key = btn.dataset.char, lv = charLevel(key);
+      const key = btn.dataset.char, lv = charLevel(key), open = charUnlocked(key);
       btn.classList.toggle("on", key === CHAR.key);
-      btn.querySelector(".charLv").innerHTML =
-        (lv >= CHAR_MAX_LV ? "MAX" : "LV " + lv) + " · " +
-        "<s>" + CHARS[key].perk(lv) + "</s>";
+      btn.classList.toggle("lock", !open);
+      btn.disabled = !open;
+      // A locked card still shows its NAME and its price. Hiding the roster
+      // entirely would leave nothing to want; what is withheld is the kit, not
+      // the knowledge that it is there.
+      btn.querySelector(".charLv").innerHTML = open
+        ? (lv >= CHAR_MAX_LV ? "MAX" : "LV " + lv) + " · " +
+          "<s>" + CHARS[key].perk(lv) + "</s>"
+        : "<s>REACH WAVE " + charUnlockAt(key) + "</s>";
     });
+    // The reason to press Begin one more time, named rather than implied.
+    const n = el("nextUnlock");
+    if (n) {
+      const nx = nextUnlock();
+      n.innerHTML = nx
+        ? "Next: <b>" + nx.name + "</b> at wave " + nx.at +
+          " — best so far, wave " + PROFILE.bestWave
+        : "Every character unlocked.";
+      n.classList.add("show");
+    }
   };
 
-  for (const key in CHARS) {
+  // In the order they are EARNED, not the order they were written. Declaration
+  // order scatters the prices across the grid (2, 3, 6, 4, 10, 5, 16...), which
+  // reads as fifteen arbitrary locks; sorted, the same cards read as a ladder
+  // you are climbing, with the next rung sitting right after the last one you
+  // took.
+  const ladder = Object.keys(CHARS)
+    .sort((a, b) => charUnlockAt(a) - charUnlockAt(b) || (a < b ? -1 : 1));
+  for (const key of ladder) {
     const c = CHARS[key];
     const btn = document.createElement("button");
     btn.className = "diffBtn";
     btn.dataset.char = key;
     btn.innerHTML = '<b>' + c.name + '</b><i>' + c.desc + '</i><span class="charLv"></span>';
-    btn.onclick = () => { setCharacter(key); paint(); };
+    btn.onclick = () => { if (charUnlocked(key)) { setCharacter(key); paint(); } };
     box.appendChild(btn);
   }
   paint();

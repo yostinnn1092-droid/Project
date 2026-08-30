@@ -175,6 +175,12 @@
   .pb { font-style: normal; font-size: 8px; letter-spacing: .16em;
         text-transform: uppercase; color: var(--force); vertical-align: middle; }
   .career { margin-top: 10px; font-size: 10.5px; opacity: .7; line-height: 1.6; }
+  /* The one line on the death screen that is good news. It gets the accent and
+     full opacity; everything else there is a tally. */
+  .won { margin-top: 10px; font-family: var(--mono); font-size: 11px;
+         letter-spacing: .1em; text-transform: uppercase; color: var(--force);
+         text-shadow: 0 0 14px rgba(233,79,191,.5); }
+  .won b { color: var(--ink); font-weight: 600; }
   /* Condensed briefing. The old one ran long enough to push the difficulty
      picker and the Begin button below the fold on a laptop. */
   .brief { text-align: left; max-width: 600px; margin: 8px auto 0; }
@@ -216,6 +222,19 @@
      of height across fifteen of them. Name and level stay; the description is
      read once, below, for the one character that is actually chosen. */
   #charPick .diffBtn i { display: none; }
+  /* Locked cards stay legible rather than hidden: the point is to want them.
+     Dimmed and un-pressable, with the wave that buys them where the level
+     usually sits. */
+  #charPick .diffBtn.lock { opacity: .38; cursor: default; }
+  #charPick .diffBtn.lock:hover { border-color: rgba(232,228,240,.16); }
+  #charPick .diffBtn.lock .charLv { color: var(--dim); }
+  #nextUnlock {
+    display: none; font-family: var(--mono); font-size: 9.5px;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--dim);
+    margin-top: 9px;
+  }
+  #nextUnlock.show { display: block; }
+  #nextUnlock b { color: var(--force); font-weight: 600; }
   /* On a phone the cards stretch to their max and settle at two per row, which
      is eight rows of roster and puts Begin below the fold again. Capping them
      narrower fits three across the 350px the menu actually has. */
@@ -604,6 +623,7 @@
          for anyone who wants them. -->
     <p class="pickLabel">Character</p>
     <div id="charPick"></div>
+    <p id="nextUnlock"></p>
     <p class="pickLabel">Difficulty</p>
     <div id="diffPick"></div>
     <button id="startBtn">Begin</button>
