@@ -8438,8 +8438,11 @@ function nextWave() {
           <p class="rule">The Maw is down. Nothing walked away from you.</p>
           <button id="endless">Keep going</button>
           ${tryNewButton()}
-          <button id="again" class="ghost">Finish here</button>`);
+          <button id="again" class="ghost">Finish here</button>
+          <button id="share" class="ghost">Copy result</button>
+          <input id="shareText" class="shareBox" hidden readonly>`);
     el("again").onclick = restart;
+    el("share").onclick = copyResult;
     wireNewButton();
     el("endless").onclick = () => {
       S.endless = true;
@@ -8507,6 +8510,43 @@ function runSummary() {
 // The prize the run just bought, offered as the FIRST button rather than
 // mentioned in passing: the moment a player is most likely to start another
 // run is the moment they have just been handed something new to try.
+// A run people can hand to someone else. There is no link in it on purpose:
+// the game has no published address yet, and a placeholder URL in shipped code
+// is worse than none. When there is one, it goes on the end of this string.
+function shareLine() {
+  const total = Object.keys(CHARS).length;
+  const open = Object.keys(CHARS).filter(charUnlocked).length;
+  return "Kinesis — wave " + S.wave + " · " + S.score.toLocaleString() +
+         " · rank " + S.rank + " · " + CHAR.name +
+         " · " + open + "/" + total + " unlocked";
+}
+
+// Copying is best-effort by nature: the async clipboard needs a secure context
+// and a permission the page may not have, and both are outside our control.
+// Rather than a button that silently does nothing, every failure falls through
+// to putting the text on screen and SELECTING it, so the player can always
+// copy by hand.
+function copyResult() {
+  const text = shareLine();
+  const done = () => toast("Result copied", 1600);
+  const manual = () => {
+    const box = el("shareText");
+    if (!box) { toast("Could not copy — " + text, 5200); return; }
+    box.hidden = false;
+    box.value = text;
+    box.focus();
+    box.select();
+    toast("Copy it from the box", 2600);
+  };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, manual);
+      return;
+    }
+  } catch (e) { /* fall through */ }
+  manual();
+}
+
 function tryNewButton() {
   const key = lastUnlockedKeys[0];
   if (!key || !CHARS[key]) return "";
@@ -8523,8 +8563,11 @@ function gameOver() {
   show(`<h1>Overrun</h1>${runSummary()}
         <p class="rule">They got close enough to touch you.</p>
         ${tryNewButton()}
-        <button id="again" class="${lastUnlockedKeys.length ? "ghost" : ""}">Try again</button>`);
+        <button id="again" class="${lastUnlockedKeys.length ? "ghost" : ""}">Try again</button>
+        <button id="share" class="ghost">Copy result</button>
+        <input id="shareText" class="shareBox" hidden readonly>`);
   el("again").onclick = restart;
+  el("share").onclick = copyResult;
   wireNewButton();
 }
 

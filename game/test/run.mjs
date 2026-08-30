@@ -2024,6 +2024,57 @@ test("unlocks: the roster is earned, and every run pays into it", async (pg) => 
      pace.priced.join(", ") + ") — a stretch that long stops paying out");
 });
 
+test("share: a result can always be copied, even when the clipboard refuses", async (pg) => {
+  // Copying is best-effort by nature — the async clipboard needs a secure
+  // context and a permission the page may not have — so the interesting case
+  // is the FAILING one. A button that silently does nothing is worse than no
+  // button, so a refusal has to fall through to text the player can select.
+  const r = await pg.evaluate(async () => {
+    const P = window.__probe;
+    P.setCharacter("pyromancer");
+    P.PROFILE.bestWave = 4;
+    P.S.wave = 6; P.S.score = 1234; P.S.rank = "B"; P.S.kills = 20;
+
+    // Sampled AFTER the run is recorded, below. Reading it first understates
+    // the unlock count: this run reaches wave 6 from a best of 4, which buys
+    // two more characters, and the line the player copies has to be the state
+    // they just earned rather than the one they started with.
+
+    // Refuse the clipboard the way a locked-down context does.
+    const real = navigator.clipboard;
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: () => Promise.reject(new Error("denied")) },
+      configurable: true,
+    });
+    P.gameOver();
+    const line = P.shareLine();
+    const openNow = Object.keys(P.CHARS).filter(k => P.charUnlocked(k)).length;
+    document.querySelector("#share").click();
+    await new Promise(r2 => setTimeout(r2, 60));
+    const box = document.querySelector("#shareText");
+    const shown = box && !box.hidden ? box.value : null;
+    if (real) Object.defineProperty(navigator, "clipboard", { value: real, configurable: true });
+    return { line, shown, openNow, bestWave: P.PROFILE.bestWave };
+  });
+
+  ok(/wave 6/.test(r.line), "the result line does not carry the wave: " + r.line);
+  ok(/1,234/.test(r.line), "the result line does not carry the score: " + r.line);
+  ok(/Pyromancer/i.test(r.line), "the result line does not name the character: " + r.line);
+  ok(/\d+\/\d+ unlocked/.test(r.line),
+     "the result line does not carry unlock progress, which is the part worth " +
+     "showing someone else: " + r.line);
+  // The count has to be the one the run just earned. Reading it before the run
+  // is recorded shows the player fewer characters than they now have — which
+  // is the state they were bragging about escaping.
+  eq(r.bestWave, 6, "the run did not record its wave before the result was built");
+  ok(r.line.indexOf(r.openNow + "/") >= 0,
+     "the result claims a different unlock count than the player actually has (" +
+     r.openNow + "): " + r.line);
+  eq(r.shown, r.line,
+     "the clipboard refused and the player was left with nothing to copy " +
+     "(box showed " + JSON.stringify(r.shown) + ")");
+});
+
 test("save: a corrupt profile cannot lock the player out of the roster", async (pg) => {
   // The profile is JSON in localStorage — hand-editable, and a half-written or
   // older-build save can hold anything. That was cosmetic until the unlock

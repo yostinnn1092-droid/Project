@@ -542,6 +542,16 @@
     transition: transform .12s ease;
   }
   button:active { transform: translateY(1px); }
+  /* Only shown when copying fails, which is common enough to design for: the
+     async clipboard needs a secure context and a permission the page may not
+     have. The player selects out of this instead of being told nothing
+     happened. */
+  .shareBox {
+    display: block; width: 100%; margin-top: 12px;
+    font-family: var(--mono); font-size: 10.5px; text-align: center;
+    color: var(--ink); background: rgba(232,228,240,.06);
+    border: 1px solid rgba(232,228,240,.2); border-radius: 4px; padding: 9px 10px;
+  }
   :focus-visible { outline: 2px solid var(--blood); outline-offset: 3px; }
 </style>
 
