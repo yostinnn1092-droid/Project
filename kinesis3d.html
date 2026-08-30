@@ -10959,14 +10959,21 @@ function charLv() { return charLevel(CHAR.key); }
 // ones that end early. Two are free, because a roster of one is not a choice.
 //
 // The order is by how much the kit asks of you, not by power: blades and a
-// chain before a fuse you have to time or a turret you have to place. The gaps
-// widen on purpose — early unlocks land almost every run, later ones are worth
-// a session.
+// chain before a fuse you have to time or a turret you have to place.
+//
+// The prices are set against the SHAPE of the game, not spread evenly. There
+// are eleven authored waves and the Maw ends them; everything past that is
+// endless. A first pass at this put six of the thirteen prices beyond wave 11
+// and the last at 22 — twice the campaign — which would have gated half the
+// roster behind content most players never reach, turning a chase into dead
+// weight. Ten of them sit inside the campaign now, close enough together that
+// most runs end with something new, and three sit out in endless as the reason
+// to keep going after the Maw is down.
 const CHAR_UNLOCK = {
   telekinetic: 0, pyromancer: 0,
   windmage: 2, hydromancer: 3, stormcaller: 4, frostbinder: 5, arcanist: 6,
-  scattershot: 8, plaguebearer: 10, splitter: 12, boomeranger: 14,
-  warden: 16, gravemind: 18, sentinel: 20, revenant: 22,
+  scattershot: 7, plaguebearer: 8, splitter: 9, boomeranger: 10, warden: 11,
+  gravemind: 13, sentinel: 16, revenant: 20,
 };
 function charUnlockAt(key) { return CHAR_UNLOCK[key] | 0; }
 function charUnlocked(key) { return PROFILE.bestWave >= charUnlockAt(key); }

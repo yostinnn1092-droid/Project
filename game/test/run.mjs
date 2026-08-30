@@ -1993,6 +1993,35 @@ test("unlocks: the roster is earned, and every run pays into it", async (pg) => 
      r.earned.length + " — an early run has to visibly buy something");
   eq(r.earnedAgain.length, 0,
      "a worse run re-awarded " + r.earnedAgain.join(", ") + " — the payout is not a one-off");
+
+  // Pacing, against the shape of the game rather than a flat spread. The
+  // authored campaign is WAVES.length waves and the Maw ends it; past that is
+  // endless. A first pass put six of thirteen prices beyond the campaign and
+  // the last at wave 22, which would have parked half the roster behind
+  // content most players never see.
+  const pace = await pg.evaluate(() => {
+    const P = window.__probe;
+    const end = P.WAVES.length;
+    const priced = Object.keys(P.CHARS)
+      .map(k => P.charUnlockAt(k)).filter(v => v > 0).sort((a, b) => a - b);
+    let biggestGap = 0;
+    for (let i = 1; i < priced.length; i++)
+      biggestGap = Math.max(biggestGap, priced[i] - priced[i - 1]);
+    return { end, priced, top: priced[priced.length - 1],
+             inside: priced.filter(v => v <= end).length,
+             beyond: priced.filter(v => v > end).length, biggestGap };
+  });
+
+  ok(pace.inside >= pace.beyond * 2,
+     "only " + pace.inside + " of the roster is earnable inside the " + pace.end +
+     "-wave campaign against " + pace.beyond + " out in endless — most of the " +
+     "characters would be gated behind content most players never reach");
+  ok(pace.top <= pace.end * 2,
+     "the last character is priced at wave " + pace.top + ", more than twice the " +
+     pace.end + "-wave campaign — that is not a chase, it is dead content");
+  ok(pace.biggestGap <= 5,
+     "there is a " + pace.biggestGap + "-wave gap between unlocks (" +
+     pace.priced.join(", ") + ") — a stretch that long stops paying out");
 });
 
 test("menu: the whole roster fits, and Begin stays above the fold", async (pg) => {
