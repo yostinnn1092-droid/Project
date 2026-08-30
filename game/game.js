@@ -5147,6 +5147,12 @@ const PROFILE = {
   best: 0, bestWave: 1, runs: 0, kills: 0,
   bestRank: "D", seen: {},        // modifier ids the player has met
   charLv: {},                     // permanent per-character level, by CHARS key
+  // Furthest wave reached WITH each character. The unlock ladder runs out —
+  // once the roster is open it has nothing left to ask for — and a single
+  // global best only ever belongs to whichever kit you are strongest with.
+  // A record per character turns one chase into fifteen, and gives the kits
+  // you unlocked and never went back to a reason to be picked up.
+  charBest: {},
 };
 
 function loadProfile() {
@@ -5162,9 +5168,19 @@ function loadProfile() {
   // copy above replaces the whole charLv object rather than merging into it —
   // so seed every key AFTER the load, not in the defaults.
   if (!PROFILE.charLv || typeof PROFILE.charLv !== "object") PROFILE.charLv = {};
+  if (!PROFILE.charBest || typeof PROFILE.charBest !== "object") PROFILE.charBest = {};
   for (const k in CHARS) {
     if (typeof PROFILE.charLv[k] !== "number") PROFILE.charLv[k] = 1;
+    // Zero rather than one: "never taken out" has to be distinguishable from
+    // "taken out and died on the first wave", or the card claims a record the
+    // player never set.
+    if (typeof PROFILE.charBest[k] !== "number") PROFILE.charBest[k] = 0;
   }
+}
+
+function charBest(key) {
+  const raw = (PROFILE.charBest && PROFILE.charBest[key]) || 0;
+  return Math.max(0, raw | 0);
 }
 
 function saveProfile() {
@@ -5188,7 +5204,8 @@ function levelCharacter() {
 
 // Returns what actually improved, so the end screen can call it out.
 function recordRun() {
-  const beat = { score:false, wave:false, rank:false, unlocked:[], unlockedKeys:[] };
+  const beat = { score:false, wave:false, rank:false, charBest:false,
+                 unlocked:[], unlockedKeys:[] };
   // Taken BEFORE bestWave moves: afterwards every one of them reads as
   // unlocked and the run gets no credit for the ones it actually earned.
   const wasLocked = [];
@@ -5199,6 +5216,13 @@ function recordRun() {
   S.bankedKills = S.kills;
   if (S.score > PROFILE.best)      { PROFILE.best = S.score; beat.score = true; }
   if (S.wave  > PROFILE.bestWave)  { PROFILE.bestWave = S.wave; beat.wave = true; }
+  // The record for the kit that was actually played, which is a different
+  // question from the record overall — and the only one most of the roster
+  // can ever answer, since a global best belongs to one kit forever.
+  if (S.wave > charBest(CHAR.key)) {
+    PROFILE.charBest[CHAR.key] = S.wave;
+    beat.charBest = true;
+  }
   for (const k of wasLocked) {
     if (!charUnlocked(k)) continue;
     beat.unlocked.push(CHARS[k].name);
@@ -8452,7 +8476,7 @@ function runSummary() {
     : "";
   return `<div class="stats">
       ${row("Score", S.score.toLocaleString(), beat.score)}
-      ${row("Wave reached", S.wave, beat.wave)}
+      ${row("Wave reached", S.wave, beat.wave || beat.charBest)}
       ${row("Style rank", S.rank, beat.rank)}
       ${row("Put down", S.kills, false)}
     </div>
@@ -8743,8 +8767,13 @@ loadProfile();
       // A locked card still shows its NAME and its price. Hiding the roster
       // entirely would leave nothing to want; what is withheld is the kit, not
       // the knowledge that it is there.
+      // The kit's own record rides on the card once it has one. A kit never
+      // taken out shows nothing rather than a zero, so the blank is an
+      // invitation instead of a bad score.
+      const pb = charBest(key);
       btn.querySelector(".charLv").innerHTML = open
-        ? (lv >= CHAR_MAX_LV ? "MAX" : "LV " + lv) + " · " +
+        ? (lv >= CHAR_MAX_LV ? "MAX" : "LV " + lv) +
+          (pb ? " · <u>W" + pb + "</u>" : "") + " · " +
           "<s>" + CHARS[key].perk(lv) + "</s>"
         : "<s>REACH WAVE " + charUnlockAt(key) + "</s>";
     });
@@ -8752,10 +8781,20 @@ loadProfile();
     const n = el("nextUnlock");
     if (n) {
       const nx = nextUnlock();
-      n.innerHTML = nx
-        ? "Next: <b>" + nx.name + "</b> at wave " + nx.at +
-          " — best so far, wave " + PROFILE.bestWave
-        : "Every character unlocked.";
+      if (nx) {
+        n.innerHTML = "Next: <b>" + nx.name + "</b> at wave " + nx.at +
+                      " — best so far, wave " + PROFILE.bestWave;
+      } else {
+        // The ladder is finished, so it stops being the thing to point at.
+        // What is left is the kit that has never been taken out, or the
+        // record on the one in hand — a chase per character rather than one
+        // that ran out.
+        const untried = Object.keys(CHARS).filter(k => !charBest(k));
+        n.innerHTML = untried.length
+          ? "Whole roster unlocked · <b>" + untried.length + "</b> never taken out"
+          : "Whole roster unlocked · best as <b>" + CHAR.name + "</b>, wave " +
+            charBest(CHAR.key);
+      }
       n.classList.add("show");
     }
   };

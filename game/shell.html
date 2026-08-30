@@ -247,6 +247,9 @@
   .charLv { display: block; font-family: var(--mono); font-size: 9px;
             letter-spacing: .1em; color: var(--force); margin-top: 5px; }
   .charLv s { text-decoration: none; color: var(--dim); }
+  /* The kit's own furthest wave. Carried in <u> only because the card's markup
+     is a flat string; it is a record, not a link, so the underline goes. */
+  .charLv u { text-decoration: none; color: var(--ink); }
   .pickLabel { font-family: var(--mono); font-size: 8px; letter-spacing: .22em;
                color: var(--dim); text-transform: uppercase; margin-top: 12px; }
   /* Each character shows only the resource it actually has: kinetic strain

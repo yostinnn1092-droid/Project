@@ -2024,6 +2024,57 @@ test("unlocks: the roster is earned, and every run pays into it", async (pg) => 
      pace.priced.join(", ") + ") — a stretch that long stops paying out");
 });
 
+test("records: each character keeps its own furthest wave", async (pg) => {
+  // The unlock ladder RUNS OUT — once the roster is open it has nothing left
+  // to ask for — and a single global best belongs to whichever kit you are
+  // strongest with, forever. A record per character is what is left to chase,
+  // and it is the only thing that gives an unlocked-but-abandoned kit a reason
+  // to be picked up again.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.PROFILE.bestWave = 30;                 // whole roster open
+    for (const k in P.CHARS) P.PROFILE.charBest[k] = 0;
+
+    // Never taken out reads as no record at all, not as a record of zero.
+    P.setCharacter("pyromancer");
+    const freshBest = P.charBest ? P.charBest("pyromancer") : null;
+
+    // A run with the pyromancer sets the PYROMANCER's record only.
+    P.S.wave = 7; P.S.score = 100; P.S.kills = 3;
+    const first = P.recordRun();
+    const pyroAfter = P.PROFILE.charBest.pyromancer;
+    const windAfter = P.PROFILE.charBest.windmage;
+
+    // A worse run with the same kit does not lower it.
+    P.S.wave = 3;
+    P.recordRun();
+    const pyroKept = P.PROFILE.charBest.pyromancer;
+
+    // A different kit keeps its own book, even though the global best is high.
+    P.setCharacter("windmage");
+    P.S.wave = 5;
+    const second = P.recordRun();
+    return { freshBest, pyroAfter, windAfter, pyroKept,
+             windNow: P.PROFILE.charBest.windmage,
+             globalBest: P.PROFILE.bestWave,
+             flaggedFirst: first.charBest, flaggedSecond: second.charBest };
+  });
+
+  eq(r.freshBest, 0, "a character never taken out reports a record of " + r.freshBest);
+  eq(r.pyroAfter, 7, "the pyromancer's record read " + r.pyroAfter + " after a wave-7 run");
+  eq(r.windAfter, 0,
+     "a pyromancer run set the wind mage's record to " + r.windAfter + " — the books are shared");
+  eq(r.pyroKept, 7, "a worse run lowered the record to " + r.pyroKept);
+  eq(r.windNow, 5, "the wind mage's own run recorded " + r.windNow);
+  ok(r.globalBest >= 30,
+     "the global best moved to " + r.globalBest + "; a per-kit record must not rewrite it");
+  // The flag is what lets the end screen call a personal best out. Without it
+  // a run that beat the kit's own record but not the global one looks flat.
+  ok(r.flaggedSecond,
+     "a wave-5 run with a kit whose record was 0 was not flagged as a personal best, " +
+     "even though the global best (" + r.globalBest + ") could never be beaten");
+});
+
 test("unlocks: the run that earns a character offers to play it", async (pg) => {
   // "Try again" puts the player straight back in as whoever they just died as.
   // Without this the death screen names the character the run earned and then
