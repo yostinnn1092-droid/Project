@@ -5087,11 +5087,19 @@ function charLv() { return charLevel(CHAR.key); }
 // weight. Ten of them sit inside the campaign now, close enough together that
 // most runs end with something new, and three sit out in endless as the reason
 // to keep going after the Maw is down.
+//
+// The gravemind and the splitter trade places against measured throughput: a
+// fixed bot on one wave put the splitter at the top of the roster and the
+// gravemind at the bottom — by design, since PULL gathers rather than kills
+// and wins nothing on its own. A late rung should feel like a prize, so the
+// kit that reads as weak alone moves early and the one that reads as strong
+// moves late. That is a reward curve, not a balance change: neither kit's
+// numbers move.
 const CHAR_UNLOCK = {
   telekinetic: 0, pyromancer: 0,
   windmage: 2, hydromancer: 3, stormcaller: 4, frostbinder: 5, arcanist: 6,
-  scattershot: 7, plaguebearer: 8, splitter: 9, boomeranger: 10, warden: 11,
-  gravemind: 13, sentinel: 16, revenant: 20,
+  scattershot: 7, plaguebearer: 8, gravemind: 9, boomeranger: 10, warden: 11,
+  splitter: 13, sentinel: 16, revenant: 20,
 };
 function charUnlockAt(key) { return CHAR_UNLOCK[key] | 0; }
 function charUnlocked(key) { return PROFILE.bestWave >= charUnlockAt(key); }
