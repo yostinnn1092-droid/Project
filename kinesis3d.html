@@ -11052,6 +11052,23 @@ function loadProfile() {
   // A save written before a character existed carries no level for it, and the
   // copy above replaces the whole charLv object rather than merging into it —
   // so seed every key AFTER the load, not in the defaults.
+  // Scalars come off storage as whatever the JSON held: a hand-edited save, a
+  // half-written one, or a field an older build spelled differently. That used
+  // to be cosmetic — a wrong number on the menu. bestWave now GATES THE
+  // ROSTER, and a string there fails every `>=` comparison, which locks all
+  // fifteen characters including the two that are meant to be free and leaves
+  // the picker with nothing selectable at all. Coerce rather than trust.
+  const num = (v, dflt, min) => {
+    const n = typeof v === "number" ? v : parseFloat(v);
+    return Number.isFinite(n) ? Math.max(min, Math.floor(n)) : dflt;
+  };
+  PROFILE.bestWave = num(PROFILE.bestWave, 1, 1);
+  PROFILE.best     = num(PROFILE.best, 0, 0);
+  PROFILE.runs     = num(PROFILE.runs, 0, 0);
+  PROFILE.kills    = num(PROFILE.kills, 0, 0);
+  if (typeof PROFILE.bestRank !== "string") PROFILE.bestRank = "D";
+  if (!PROFILE.seen || typeof PROFILE.seen !== "object") PROFILE.seen = {};
+
   if (!PROFILE.charLv || typeof PROFILE.charLv !== "object") PROFILE.charLv = {};
   if (!PROFILE.charBest || typeof PROFILE.charBest !== "object") PROFILE.charBest = {};
   for (const k in CHARS) {

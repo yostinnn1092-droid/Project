@@ -19,7 +19,7 @@ window.__probe = {
   WARDEN, GRAVE, SPLIT, SPLIT_FRAGMENT, splitShot, pullToward,
   REVENANT, BOOMER, SENTINEL, SENTINEL_BOLT, SCATTER, spawnTurret, stepTurrets,
   CHAR_UNLOCK, charUnlockAt, charUnlocked, nextUnlock, recordRun, runSummary,
-  gameOver, charBest,
+  gameOver, charBest, loadProfile, saveProfile, SAVE_KEY,
   charNow() { return CHAR.key; },
   CROWN, CROWN_Y, crownState, crownUpgrade, buildCrown, stepCrown,
   judgeFrame, setQuality,

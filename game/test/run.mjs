@@ -2024,6 +2024,57 @@ test("unlocks: the roster is earned, and every run pays into it", async (pg) => 
      pace.priced.join(", ") + ") — a stretch that long stops paying out");
 });
 
+test("save: a corrupt profile cannot lock the player out of the roster", async (pg) => {
+  // The profile is JSON in localStorage — hand-editable, and a half-written or
+  // older-build save can hold anything. That was cosmetic until the unlock
+  // ladder made bestWave GATE THE ROSTER: a string there fails every `>=`, so
+  // all fifteen characters read as locked, including the two that are free,
+  // and the picker ends up with nothing the player can press. A save is not
+  // trusted input.
+  const bad = [
+    ["a string", { bestWave: "abc" }],
+    ["null", { bestWave: null }],
+    ["a negative", { bestWave: -5 }],
+    // JSON.stringify DROPS an undefined value, so this one is the
+    // field-missing case rather than a NaN — an older save that predates it.
+    ["an absent field", { bestWave: undefined }],
+    ["the wrong type entirely", { bestWave: { wave: 9 } }],
+    ["an array", { bestWave: [7] }],
+  ];
+
+  for (const [label, patch] of bad) {
+    const r = await pg.evaluate(({ patch }) => {
+      const P = window.__probe;
+      const before = P.PROFILE.bestWave;
+      localStorage.setItem(P.SAVE_KEY, JSON.stringify(
+        Object.assign({ best: 1, runs: 1, kills: 1, bestRank: "C" }, patch)));
+      P.loadProfile();
+      const free = Object.keys(P.CHARS).filter(k => P.charUnlockAt(k) === 0);
+      const out = {
+        bestWave: P.PROFILE.bestWave,
+        finite: Number.isFinite(P.PROFILE.bestWave),
+        freeOpen: free.every(k => P.charUnlocked(k)),
+        anyOpen: Object.keys(P.CHARS).some(k => P.charUnlocked(k)),
+        before,
+      };
+      // Leave the profile sane for whatever runs next.
+      localStorage.removeItem(P.SAVE_KEY);
+      P.PROFILE.bestWave = 1;
+      return out;
+    }, { patch });
+
+    ok(r.finite,
+       label + ": bestWave loaded as " + JSON.stringify(r.bestWave) +
+       ", which is not a number — every `>=` against it is false");
+    ok(r.bestWave >= 1,
+       label + ": bestWave loaded as " + r.bestWave + ", below the first wave");
+    ok(r.anyOpen,
+       label + ": every character read as locked — the picker has nothing to press");
+    ok(r.freeOpen,
+       label + ": the characters that are meant to be free came back locked");
+  }
+});
+
 test("records: each character keeps its own furthest wave", async (pg) => {
   // The unlock ladder RUNS OUT — once the roster is open it has nothing left
   // to ask for — and a single global best belongs to whichever kit you are
