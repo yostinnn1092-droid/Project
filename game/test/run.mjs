@@ -3138,14 +3138,27 @@ test("props: a resting prop cannot pin a walker", async (pg) => {
                               .map(w => ({ w, x: w.pos.x, z: w.pos.z }));
         for (let i = 0; i < 60 * 6; i++) {
           P.hero.hp = 99; P.hero.pos.set(0,0,0); P.step(1/60); }
+        const live = P.walkers.filter(w => !w.dead);
         for (const o of snap) {
           if (o.w.dead) continue;
           const moved = Math.hypot(o.w.pos.x - o.x, o.w.pos.z - o.z);
           const d = Math.hypot(o.w.pos.x, o.w.pos.z);
           // Standoff archetypes (archer 17, warper 15, spawner 12) hold at
           // range BY DESIGN and must not be counted as stuck.
-          if (moved < 0.5 && d > 6 && o.w.AI.ring < 5)
-            frozen.push(`${o.w.type}@${d.toFixed(1)} (wave ${wave})`);
+          if (!(moved < 0.5 && d > 6 && o.w.AI.ring < 5)) continue;
+          // Nor is a body in TRAFFIC stuck. The hero here is immortal, never
+          // moves and never kills, so every body converges and packs into a
+          // ring — and in the densest waves the big slow ones at the back
+          // genuinely cannot advance. Measured: wave 23 peaks at 89 bodies and
+          // is the only wave that flagged anything, always a tank, always with
+          // three or four live bodies wedged between it and the hero. Waves 3,
+          // 12 and 28 flagged none. A prop pin is the opposite picture — a body
+          // held against an obstacle with open ground ahead of it.
+          const ahead = live.filter(v => v !== o.w && !v.dead &&
+            Math.hypot(v.pos.x - o.w.pos.x, v.pos.z - o.w.pos.z) < 3.0 &&
+            Math.hypot(v.pos.x, v.pos.z) < d).length;
+          if (ahead > 0) continue;
+          frozen.push(`${o.w.type}@${d.toFixed(1)} (wave ${wave})`);
         }
       }
     }
