@@ -2149,6 +2149,52 @@ test("share: a result can always be copied, even when the clipboard refuses", as
      "(box showed " + JSON.stringify(r.shown) + ")");
 });
 
+test("save: the game still runs where storage is refused outright", async (pg) => {
+  // Not hypothetical: a private window, a browser set to block site data, or
+  // an embed in a sandboxed iframe with an opaque origin all make every
+  // localStorage call THROW rather than return null. Verified by hand — the
+  // game booted inside `sandbox="allow-scripts"`, got WebGL, dealt all fifteen
+  // cards and started a run with zero console errors.
+  //
+  // The ladder cannot persist there, and that is fine; what must not happen is
+  // an exception escaping and taking the run with it.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const real = Object.getOwnPropertyDescriptor(window, "localStorage");
+    const boom = () => { throw new Error("storage refused"); };
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() { return { getItem: boom, setItem: boom, removeItem: boom }; },
+    });
+
+    const errs = [];
+    const guard = (label, fn) => { try { fn(); } catch (e) { errs.push(label + ": " + e.message); } };
+
+    guard("loadProfile", () => P.loadProfile());
+    guard("saveProfile", () => P.saveProfile());
+    guard("setCharacter", () => P.setCharacter("pyromancer"));
+    guard("claimWave", () => { P.PROFILE.bestWave = 1; P.S.unlockedThisRun.length = 0; P.claimWave(2); });
+    guard("recordRun", () => { P.S.wave = 3; P.S.score = 10; P.S.kills = 1; P.recordRun(); });
+    guard("gameOver", () => P.gameOver());
+    guard("toMenu", () => P.toMenu());
+    guard("step", () => { for (let i = 0; i < 30; i++) P.step(1 / 60); });
+
+    const after = { bestWave: P.PROFILE.bestWave, who: P.charNow(),
+                    cards: document.querySelectorAll("#charPick > *").length };
+    if (real) Object.defineProperty(window, "localStorage", real);
+    return { errs, after, chars: Object.keys(P.CHARS).length };
+  });
+
+  eq(r.errs.length, 0,
+     "storage being refused threw out of: " + r.errs.join(" | ") +
+     " — a player in a private window loses the run, not just the save");
+  ok(Number.isFinite(r.after.bestWave) && r.after.bestWave >= 1,
+     "with storage refused the wave record came back as " + r.after.bestWave);
+  eq(r.after.cards, r.chars,
+     "the picker rebuilt with " + r.after.cards + " cards for " + r.chars +
+     " characters when storage was refused");
+});
+
 test("save: a corrupt profile cannot lock the player out of the roster", async (pg) => {
   // The profile is JSON in localStorage — hand-editable, and a half-written or
   // older-build save can hold anything. That was cosmetic until the unlock
