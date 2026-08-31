@@ -2251,6 +2251,53 @@ test("records: each character keeps its own furthest wave", async (pg) => {
      "even though the global best (" + r.globalBest + ") could never be beaten");
 });
 
+test("end screens: exactly one button is lit, and it is the one to press", async (pg) => {
+  // Both end screens carry the same offer to play a character the run just
+  // earned, but it does not mean the same thing on each. Dead, it is the thing
+  // to press. Alive after beating the Maw, taking it THROWS AWAY a won run, so
+  // carrying on has to be the lit one — and it was not: Keep going and Play as
+  // Wind Mage sat side by side at full strength, two equally loud calls to
+  // action pointing opposite ways.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const lit = () => [...document.querySelectorAll("#card button")]
+      .filter(b => !b.classList.contains("ghost")).map(b => b.textContent.trim());
+    const all = () => [...document.querySelectorAll("#card button")]
+      .map(b => b.textContent.trim());
+
+    P.PROFILE.bestWave = 1;
+    P.restart();
+    P.S.unlockedThisRun.length = 0;
+    for (let w = 2; w <= 5; w++) P.claimWave(w);
+
+    P.S.wave = 5; P.S.score = 100; P.S.kills = 4;
+    P.gameOver();
+    const dead = { lit: lit(), all: all() };
+
+    // And the same run, having beaten the campaign instead.
+    P.S.wave = P.WAVES.length; P.S.endless = false;
+    P.nextWave();
+    const won = { lit: lit(), all: all() };
+    return { dead, won };
+  });
+
+  ok(r.dead.all.some(t => /^Play as /.test(t)),
+     "the death screen did not offer the earned character: " + r.dead.all.join(" | "));
+  eq(r.dead.lit.length, 1,
+     "the death screen lit " + r.dead.lit.length + " buttons (" + r.dead.lit.join(", ") +
+     ") — one screen, one obvious thing to press");
+  ok(/^Play as /.test(r.dead.lit[0]),
+     "the death screen's lit button is '" + r.dead.lit[0] +
+     "' rather than the character the run just earned");
+
+  eq(r.won.lit.length, 1,
+     "the Survived screen lit " + r.won.lit.length + " buttons (" + r.won.lit.join(", ") +
+     ") — two lit buttons pointing opposite ways, one of which discards a won run");
+  eq(r.won.lit[0], "Keep going",
+     "the Survived screen's lit button is '" + r.won.lit[0] +
+     "' — the run is still alive, so carrying on is the thing to press");
+});
+
 test("rotate: the portrait wall's instruction is readable", async (pg) => {
   // A phone held upright gets a full-screen wall, and one line of text on it
   // is the entire instruction — the first thing a mobile player ever sees.

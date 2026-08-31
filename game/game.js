@@ -8487,7 +8487,7 @@ function nextWave() {
     show(`<h1>Survived</h1>${runSummary()}
           <p class="rule">The Maw is down. Nothing walked away from you.</p>
           <button id="endless">Keep going</button>
-          ${tryNewButton()}
+          ${tryNewButton(true)}
           <button id="again" class="ghost">Finish here</button>
           <button id="share" class="ghost">Copy result</button>
           <input id="shareText" class="shareBox" hidden readonly>`);
@@ -8600,10 +8600,17 @@ function copyResult() {
   manual();
 }
 
-function tryNewButton() {
+// `quiet` demotes it to a ghost. On the death screen this is the thing to
+// press and there is nothing to lose by pressing it. On the Survived screen
+// there is: the run is still alive and the player has just beaten the Maw, so
+// carrying on is the primary and taking a new character means throwing that
+// away. Two lit buttons side by side asked the player to choose between two
+// equally loud things, one of which discards a won run.
+function tryNewButton(quiet) {
   const key = lastUnlockedKeys[0];
   if (!key || !CHARS[key]) return "";
-  return `<button id="playNew">Play as ${CHARS[key].name}</button>`;
+  return `<button id="playNew"${quiet ? ' class="ghost"' : ""}>` +
+         `Play as ${CHARS[key].name}</button>`;
 }
 function wireNewButton() {
   const b = el("playNew");
