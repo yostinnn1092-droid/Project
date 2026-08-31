@@ -2149,6 +2149,65 @@ test("share: a result can always be copied, even when the clipboard refuses", as
      "(box showed " + JSON.stringify(r.shown) + ")");
 });
 
+test("touch: the on-screen buttons actually drive the game", async (pg) => {
+  // A phone has nothing else. Every earlier check on these was about how they
+  // LOOK — present, dimmed on a mouse, not overflowing — and none of them
+  // would notice a button that no longer does anything, which would leave the
+  // game unplayable for every mobile visitor while looking perfect.
+  //
+  // Driven by hand on an 844x390 phone with real touch first: Jump lifted the
+  // hero to y 0.98, Force spent a charge and put a shot in the air, Dash set a
+  // 1.23s cooldown, and dragging the stick moved the hero 2.60 units. This
+  // pins the same four through their bound handler (pointerdown).
+  const r = await pg.evaluate(async () => {
+    const P = window.__probe;
+    P.setCharacter("pyromancer");
+    P.parkWalkers(); P.stripProps();
+    P.castState.held = 2; P.buildCastStack();
+    P.S.phase = "play";
+    P.hero.pos.set(0, 0, 0);
+
+    const press = (id) => {
+      const el = document.querySelector("#" + id);
+      if (!el) return false;
+      el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+      return true;
+    };
+    const settle = (n) => { for (let i = 0; i < n; i++) P.step(1 / 60); };
+
+    const found = {};
+    found.jump = press("jump");
+    settle(6);
+    const airborne = P.hero.pos.y;
+
+    // Land again before asking for a dash, so the two do not confound.
+    settle(90);
+    const heldBefore = P.castState.held, shotsBefore = P.castState.shots.length;
+    found.force = press("force");
+    settle(6);
+    const spent = heldBefore - P.castState.held;
+    const launched = P.castState.shots.length - shotsBefore;
+
+    found.dash = press("dash");
+    settle(4);
+    const dashCd = P.S.dashCd || 0;
+
+    return { found, airborne: +airborne.toFixed(2), spent, launched,
+             dashCd: +dashCd.toFixed(2) };
+  });
+
+  ok(r.found.jump && r.found.force && r.found.dash,
+     "a touch button is missing from the page entirely: " + JSON.stringify(r.found));
+  ok(r.airborne > 0.2,
+     "pressing Jump left the hero at y " + r.airborne + " — the button does nothing");
+  eq(r.spent, 1,
+     "pressing Force spent " + r.spent + " charges; a phone has no other way to attack");
+  ok(r.launched >= 1,
+     "pressing Force put " + r.launched + " shots in the air");
+  ok(r.dashCd > 0,
+     "pressing Dash left the cooldown at " + r.dashCd + " — it never fired");
+});
+
 test("audio: every sound the game plays actually reaches the audio graph", async (pg) => {
   // Audio fails SILENTLY. A refactor that breaks the context, or a name that
   // stops matching, leaves a game that looks perfect and makes no noise — and
