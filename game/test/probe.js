@@ -21,6 +21,11 @@ window.__probe = {
   CHAR_UNLOCK, charUnlockAt, charUnlocked, nextUnlock, recordRun, runSummary,
   gameOver, charBest, loadProfile, saveProfile, SAVE_KEY, shareLine, toMenu,
   claimWave, startNextWave, toast, offerDraft, nextWave, SFX, audioInit,
+  setDifficulty, DIFFS,
+  // DIFF is reassigned by setDifficulty, so it has to be read through a
+  // getter — exporting the binding's value would freeze whichever one was
+  // current when the probe was built.
+  diffNow() { return DIFF; },
   charNow() { return CHAR.key; },
   CROWN, CROWN_Y, crownState, crownUpgrade, buildCrown, stepCrown,
   judgeFrame, setQuality,

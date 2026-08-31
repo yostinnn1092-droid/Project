@@ -2149,6 +2149,59 @@ test("share: a result can always be copied, even when the clipboard refuses", as
      "(box showed " + JSON.stringify(r.shown) + ")");
 });
 
+test("difficulty: nightmare delivers what the card promises", async (pg) => {
+  // The picker makes four specific claims — "elite-heavy", "little to throw",
+  // "faster", "strain bites" — and nothing checked any of them. A difficulty
+  // that reads harder and plays identically is a worse lie than not offering
+  // one, because the player picks it deliberately.
+  //
+  // Measured over six waves each: elites 30 -> 78 (2.60x against a configured
+  // 2.6), props 434 -> 193, average speed 2.62 -> 3.11, strain 1 -> 1.45.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const ELITE = /^Elite |Frenzied|Armored Tank|Void |Telekinetic Elite|Explosive Elite/;
+    const sample = (key) => {
+      P.setDifficulty(key);
+      let elites = 0, bodies = 0, props = 0, speed = 0;
+      for (const wave of [8, 10, 12, 14, 16, 18]) {
+        // The elite roll reads S.wave, NOT the argument to buildWave. Leaving
+        // it at 1 gates every elite out and makes both difficulties look
+        // identical — which is exactly the false negative this case exists to
+        // avoid reporting.
+        P.S.wave = wave;
+        P.buildWave(wave);
+        const live = P.walkers.filter(w => !w.dead);
+        bodies += live.length;
+        // Marked by NAME, not a flag: the promotion renames the archetype.
+        elites += live.filter(w => w.E && ELITE.test(w.E.name)).length;
+        for (const w of live) speed += (w.E ? w.E.speed : 0);
+        props += P.rocks.filter(o => !o.gone).length;
+      }
+      const d = P.diffNow();
+      return { elites, bodies, props, speed: +(speed / Math.max(1, bodies)).toFixed(2),
+               strain: d.strain, stock: d.stock };
+    };
+    const normal = sample("normal");
+    const night = sample("night");
+    P.setDifficulty("normal");
+    return { normal, night };
+  });
+
+  ok(r.normal.bodies > 50 && r.night.bodies > 50,
+     "too few bodies sampled to compare (" + r.normal.bodies + " / " + r.night.bodies + ")");
+  ok(r.night.elites > r.normal.elites * 1.5,
+     "nightmare dealt " + r.night.elites + " elites against normal's " + r.normal.elites +
+     " — the card says ELITE-HEAVY and it is not");
+  ok(r.night.props < r.normal.props * 0.8,
+     "nightmare left " + r.night.props + " props against normal's " + r.normal.props +
+     " — the card says LITTLE TO THROW");
+  ok(r.night.speed > r.normal.speed,
+     "nightmare bodies average " + r.night.speed + " speed against normal's " +
+     r.normal.speed + " — the card says FASTER");
+  ok(r.night.strain > r.normal.strain,
+     "nightmare strain multiplier is " + r.night.strain + " — the card says STRAIN BITES");
+});
+
 test("unlocks: what a run earns is still there after closing the tab", async (pg) => {
   // The guarantee the whole ladder rests on, and the one thing none of the
   // other unlock cases touch: they all check state inside a single page life.
