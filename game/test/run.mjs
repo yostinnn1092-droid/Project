@@ -2390,6 +2390,74 @@ test("toast: a routine notice cannot bury news of something earned", async (pg) 
      "the unlock was buried by a later routine notice: " + JSON.stringify(r.stillHeld));
 });
 
+test("unlocks: the first rung is reachable in the first minute of play", async (pg) => {
+  // The whole ladder rests on the first prize landing before a new player has
+  // decided to leave. That was priced from the game's STRUCTURE — eleven
+  // authored waves, the Maw at the end — with no idea what a wave costs in
+  // seconds. Measured with a bot at level 1: wave 1 clears in about 16s and
+  // wave 2 in about 17, so the first two characters land inside the first
+  // minute. This guards that premise, not the exact numbers.
+  //
+  // The bot is immortal, stands still and never dodges, so these are FLOOR
+  // times — a real player is slower.
+  //
+  // HONEST LIMIT on the time bound below: it has not been seen to fail. Wave
+  // 1's clear time turns out not to be driven by the caster's damage at all —
+  // crippled to dmg 6 / blastDmg 3, the bot still cleared all twenty bodies in
+  // 23.8s having fired ten shots, which is two kills per shot at six damage
+  // and cannot be the fireball. Something else is finishing wave 1, and until
+  // that is understood no damage mutation can turn this into a slog. The
+  // ceiling stands as a canary rather than a proven guard; the price
+  // assertion below IS verified.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("pyromancer");
+    P.PROFILE.charLv.pyromancer = 1;
+    P.restart();
+    P.stripProps();                    // barrels must not do the work for us
+    P.castState.held = P.castCap(1);
+    P.buildCastStack();
+
+    const CAP = 60 * 120;
+    let frames = 0;
+    while (frames < CAP) {
+      // Held in play: clearing a wave hands the game to the draft overlay,
+      // which stops stepping the enemies. Without this the loop sits on a
+      // paused sim and reports a timeout that means nothing.
+      P.S.phase = "play";
+      P.hero.hp = 99; P.hero.pos.set(0, 0, 0);
+      let near = null, nd = 1e9;
+      for (const w of P.walkers) {
+        if (w.dead) continue;
+        const d = w.pos.x * w.pos.x + w.pos.z * w.pos.z;
+        if (d < nd) { nd = d; near = w; }
+      }
+      // A wave is not over while pulses are still queued to arrive; breaking
+      // on "nothing alive right now" catches the gap between them instead.
+      if (!near && P.spawnQ.length === 0) break;
+      if (near) {
+        P.cam.yaw = Math.atan2(near.pos.x, near.pos.z);
+        if (P.castState.held > 0) P.castFire();
+      }
+      P.step(1 / 60); frames++;
+    }
+    return { seconds: +(frames / 60).toFixed(1), cleared: frames < CAP,
+             kills: P.S.kills, firstRung: P.nextUnlock() && P.nextUnlock().at };
+  });
+
+  eq(r.firstRung, 2,
+     "the first prize is priced at wave " + r.firstRung +
+     "; this case measures the cost of reaching wave 2");
+  ok(r.cleared,
+     "an immortal bot could not clear the opening wave inside two simulated " +
+     "minutes — a new player meets a slog before they meet a reward");
+  ok(r.kills > 0, "the opening wave was 'cleared' without killing anything");
+  ok(r.seconds < 60,
+     "the opening wave took " + r.seconds + "s for a bot that never dodges and " +
+     "cannot die. The first character is meant to land before a new player has " +
+     "decided whether to stay");
+});
+
 test("unlocks: a rung is claimed the moment it is reached, not when the run ends", async (pg) => {
   // The ladder used to settle up only in recordRun, so crossing a price at
   // wave 8 went unannounced until the player died several minutes later. The
