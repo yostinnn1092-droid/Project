@@ -473,7 +473,15 @@
     height: 100%; background: var(--force);
     transform-origin: left center; transform: scaleX(0);
   }
-  @media (pointer: fine) { #stick, #force { opacity: .3; } }
+  /* Redundant once there is a keyboard under the hands. The stick and Force
+     were already dimmed here; Jump, Dash and Push were not, so a desktop
+     player got two faded controls and three at full strength sitting over the
+     arena — measured at 0.3, 0.3, 1, 1, 1. Dimmed rather than hidden, because
+     a hybrid laptop has both a mouse and a touchscreen and the buttons still
+     have to work. */
+  @media (pointer: fine) {
+    #stick, #force, #jump, #dash, #rep { opacity: .3; }
+  }
 
   #toast {
     position: fixed; left: 50%; bottom: 12%; transform: translateX(-50%);

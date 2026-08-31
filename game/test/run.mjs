@@ -2251,6 +2251,38 @@ test("records: each character keeps its own furthest wave", async (pg) => {
      "even though the global best (" + r.globalBest + ") could never be beaten");
 });
 
+test("touch: the on-screen controls recede together on a mouse device", async (pg) => {
+  // They exist for a thumb. With a keyboard under the hands they are clutter
+  // over the arena, and the sheet already said so — but only for two of the
+  // five, so a desktop player got the stick and Force faded and Jump, Dash and
+  // Push at full strength beside them. Measured: 0.3, 0.3, 1, 1, 1.
+  //
+  // Dimmed rather than hidden on purpose: a hybrid laptop matches `pointer:
+  // fine` and still has a touchscreen, so the buttons have to keep working.
+  const r = await pg.evaluate(() => {
+    const ids = ["stick", "force", "jump", "dash", "rep"];
+    const op = {}, hittable = {};
+    for (const id of ids) {
+      const e = document.querySelector("#" + id);
+      if (!e) { op[id] = "missing"; continue; }
+      const cs = getComputedStyle(e);
+      op[id] = cs.opacity;
+      hittable[id] = cs.display !== "none" && cs.pointerEvents !== "none";
+    }
+    return { op, hittable, fine: matchMedia("(pointer: fine)").matches };
+  });
+
+  ok(r.fine, "this page is not matching `pointer: fine`, so the rule under test is not live");
+  const loud = Object.entries(r.op).filter(([, v]) => parseFloat(v) > 0.5).map(([k]) => k);
+  eq(loud.length, 0,
+     "with a mouse attached these on-screen controls are still at full strength: " +
+     loud.join(", ") + " (all five read " + JSON.stringify(r.op) + ")");
+  const dead = Object.entries(r.hittable).filter(([, v]) => !v).map(([k]) => k);
+  eq(dead.length, 0,
+     "receding is not the same as leaving: " + dead.join(", ") +
+     " can no longer be pressed, which breaks a hybrid laptop's touchscreen");
+});
+
 test("toast: a routine notice cannot bury news of something earned", async (pg) => {
   // One channel carries both "you have just unlocked a character" and "effects
   // reduced to keep it smooth". The quality system announces a downgrade when
