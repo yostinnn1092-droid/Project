@@ -2408,13 +2408,22 @@ test("unlocks: the first rung is reachable in the first minute of play", async (
   // and never fires kills nothing in sixty seconds — twenty bodies alive,
   // zero kills — so the player's attack is doing the work.
   //
-  // What is NOT: with the fireball crippled to dmg 6 / blastDmg 3, the bot
-  // still cleared all twenty in 23.8s off ten shots. Ninety-odd points of
-  // damage should not kill twenty bodies. It is not the exploder death-blast
-  // either — wave 1 is { walker: 5 } and carries none. So damage magnitude
-  // matters far less here than it should, cause unknown, and until it is
-  // understood no damage mutation can make this case fail. The ceiling stands
-  // as a canary, not a proven guard. The price assertion below IS verified.
+  // What is NOT: why crippling the fireball barely slows the wave. Traced on a
+  // single walker (185 hp), one shot produces TWO damage events —
+  //
+  //   full spec     f=14  185 -> -45   (230: 170 direct + blast falloff)
+  //   dmg 6/blast 3 f=14  185 -> 177   (8, exactly what the spec says)
+  //                 f=53  177 -> 28    (149, about 0.65s later)
+  //
+  // So the shot itself is honest: cripple the numbers and the hit drops to 8.
+  // The second event is the one that clears waves, it is worth ~149 whatever
+  // the kit is set to, and it lands at distance 10 as readily as in contact,
+  // so it is not the hero. It is not the exploder death-blast either — wave 1
+  // is { walker: 5 } and carries none. Source unidentified.
+  //
+  // Until that is understood no damage mutation can make this case fail, so
+  // the ceiling stands as a canary, not a proven guard. The price assertion
+  // below IS verified.
   const r = await pg.evaluate(() => {
     const P = window.__probe;
     P.setCharacter("pyromancer");
