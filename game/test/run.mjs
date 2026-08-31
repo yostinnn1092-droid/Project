@@ -2415,15 +2415,23 @@ test("unlocks: the first rung is reachable in the first minute of play", async (
   //   dmg 6/blast 3 f=14  185 -> 177   (8, exactly what the spec says)
   //                 f=53  177 -> 28    (149, about 0.65s later)
   //
-  // So the shot itself is honest: cripple the numbers and the hit drops to 8.
-  // The second event is the one that clears waves, it is worth ~149 whatever
-  // the kit is set to, and it lands at distance 10 as readily as in contact,
-  // so it is not the hero. It is not the exploder death-blast either — wave 1
-  // is { walker: 5 } and carries none. Source unidentified.
+  // The second event is CRUSH. runBlast launches any body it catches with
+  // fall > 0.35 (launchWalker, speed 12-30), and a launched body that lands
+  // above LAUNCH_MIN takes damageWalker(w, sp3 * 5, "crush") — about 150,
+  // computed from landing speed and completely independent of the kit's
+  // numbers. Removing the fireball's knockback did not remove it; it made it
+  // BIGGER (260), because the body stayed nearer the blast centre and launched
+  // harder. That is why crippling dmg barely slows wave 1.
   //
-  // Until that is understood no damage mutation can make this case fail, so
-  // the ceiling stands as a canary, not a proven guard. The price assertion
-  // below IS verified.
+  // Worth knowing beyond this case: only two kits reach that path at all —
+  // the pyromancer (blastR 4.4) and the warden (fuse r 6.2). The other eleven
+  // have no blast, so they never launch a body and never collect the ~150.
+  // The spec table reads as though dmg is the whole story; for those two it is
+  // roughly half of it.
+  //
+  // No damage mutation can make the ceiling below fail while crush is doing
+  // the work, so it stands as a canary, not a proven guard. The price
+  // assertion IS verified.
   const r = await pg.evaluate(() => {
     const P = window.__probe;
     P.setCharacter("pyromancer");
