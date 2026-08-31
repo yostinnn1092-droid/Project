@@ -1812,7 +1812,17 @@ test("characters: the wind mage's blade cuts a line and spares the bystanders", 
 
       P.cam.yaw = Math.PI / 2;               // aim down +X
       P.hero.pos.set(0, 0, 0);
-      const live = P.walkers.filter(w => !w.dead).slice(0, 6);
+      // Bodies that do not detonate when they die. Wave 6's roster carries two
+      // Exploders, which have onDeath: "blast" — so cutting one with the blade
+      // sets off a blast the BLADE did not make, and the bystander 3.4 off the
+      // line takes it. That reads here as "the blade is detonating", which is
+      // the opposite of true: measured, the blade's reach against that
+      // bystander is 2.03-2.13 depending on the archetype dealt, and never
+      // comes close to 3.4. Whether an exploder landed in the four-body line
+      // decided the run, which is why this failed about half the time.
+      const live = P.walkers
+        .filter(w => !w.dead && !(w.E && w.E.onDeath === "blast"))
+        .slice(0, 6);
       if (live.length < 6) return { short: live.length };
       const line = live.slice(0, 4);
       const near = live[4], far = live[5];
