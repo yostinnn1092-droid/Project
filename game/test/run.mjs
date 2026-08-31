@@ -2251,6 +2251,32 @@ test("records: each character keeps its own furthest wave", async (pg) => {
      "even though the global best (" + r.globalBest + ") could never be beaten");
 });
 
+test("rotate: the portrait wall's instruction is readable", async (pg) => {
+  // A phone held upright gets a full-screen wall, and one line of text on it
+  // is the entire instruction — the first thing a mobile player ever sees.
+  // It was set in .sub: the 9px pink caption that sits under the title on the
+  // menu, where it is decoration and nothing depends on reading it.
+  const r = await pg.evaluate(() => {
+    const p = document.querySelector("#rotate .sub");
+    if (!p) return { missing: true };
+    const cs = getComputedStyle(p);
+    const menu = document.querySelector("#overlay .sub");
+    return {
+      text: p.textContent.trim(),
+      size: parseFloat(cs.fontSize),
+      color: cs.color,
+      // The menu caption is free to stay small; this is about the wall only.
+      menuSize: menu ? parseFloat(getComputedStyle(menu).fontSize) : null,
+    };
+  });
+
+  ok(!r.missing, "the portrait wall has no instruction on it at all");
+  ok(/rotate/i.test(r.text), "the wall's line does not say what to do: " + JSON.stringify(r.text));
+  ok(r.size >= 12,
+     "the only instruction on a full-screen wall is set at " + r.size +
+     "px — that is a caption size, and it is the first thing a phone player sees");
+});
+
 test("touch: the on-screen controls recede together on a mouse device", async (pg) => {
   // They exist for a thumb. With a keyboard under the hands they are clutter
   // over the arena, and the sheet already said so — but only for two of the

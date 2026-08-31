@@ -501,6 +501,14 @@
     background: rgba(6,5,13,.95);
   }
   #rotate.show { display: grid; }
+  /* This line is the ONLY instruction on a wall that blocks the whole screen,
+     and on a phone held upright it is the first thing anyone sees. It was
+     borrowing .sub — the 9px pink label that sits under the title on the menu,
+     where it is a secondary caption and nothing depends on reading it. Given
+     its own size and the foreground colour here. */
+  #rotate .sub {
+    font-size: 13px; letter-spacing: .2em; color: var(--ink); margin: 0;
+  }
   #rotate .ph {
     width: 54px; height: 92px; border: 2.5px solid var(--force);
     border-radius: 8px; margin: 0 auto 22px;
