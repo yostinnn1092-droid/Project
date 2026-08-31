@@ -5219,6 +5219,31 @@ function levelCharacter() {
   SFX.rankUp ? SFX.rankUp(3) : SFX.overload();
 }
 
+// Reaching a wave is what buys the rung, and it buys it THE MOMENT it is
+// reached. The ladder used to settle up only in recordRun, so crossing a price
+// at wave 8 went unannounced until the player died several minutes later: the
+// reward arrived detached from the thing that earned it, which is the opposite
+// of what makes someone start another run. Saved on the spot too — the whole
+// point of a per-run payout is that dying afterwards does not take it back.
+function claimWave(n) {
+  if (!(n > PROFILE.bestWave)) return;
+  const wasLocked = [];
+  for (const k in CHARS) if (!charUnlocked(k)) wasLocked.push(k);
+
+  PROFILE.bestWave = n;
+  S.beatWave = true;
+  const won = wasLocked.filter(k => charUnlocked(k));
+  for (const k of won) if (!S.unlockedThisRun.includes(k)) S.unlockedThisRun.push(k);
+  saveProfile();
+
+  if (!won.length) return;
+  banner(CHARS[won[0]].name.toUpperCase() + " UNLOCKED");
+  toast(won.length === 1
+    ? CHARS[won[0]].name + " unlocked — yours from now on"
+    : won.length + " characters unlocked", 3400);
+  if (SFX.rankUp) SFX.rankUp(3);
+}
+
 // Returns what actually improved, so the end screen can call it out.
 function recordRun() {
   const beat = { score:false, wave:false, rank:false, charBest:false,
@@ -5233,6 +5258,9 @@ function recordRun() {
   S.bankedKills = S.kills;
   if (S.score > PROFILE.best)      { PROFILE.best = S.score; beat.score = true; }
   if (S.wave  > PROFILE.bestWave)  { PROFILE.bestWave = S.wave; beat.wave = true; }
+  // claimWave may already have promoted the record mid-run, which would leave
+  // the end screen showing no new best for a run that plainly set one.
+  if (S.beatWave) beat.wave = true;
   // The record for the kit that was actually played, which is a different
   // question from the record overall — and the only one most of the roster
   // can ever answer, since a global best belongs to one kit forever.
@@ -5242,6 +5270,14 @@ function recordRun() {
   }
   for (const k of wasLocked) {
     if (!charUnlocked(k)) continue;
+    beat.unlocked.push(CHARS[k].name);
+    beat.unlockedKeys.push(k);
+  }
+  // Anything the run already claimed on the way up. Without this the end
+  // screen credits a run with nothing, because claimWave unlocked it earlier
+  // and the sweep above only sees what is STILL locked.
+  for (const k of S.unlockedThisRun) {
+    if (beat.unlockedKeys.includes(k)) continue;
     beat.unlocked.push(CHARS[k].name);
     beat.unlockedKeys.push(k);
   }
@@ -6390,6 +6426,10 @@ const S = {
   // second visit records the progress made since without paying the career
   // totals twice over.
   bankedKills:0, counted:false,
+  // Rungs of the unlock ladder taken during THIS run, and whether it moved the
+  // wave record. Both are run-scoped: the end screen reports what the run did,
+  // which is no longer the same question as what is still locked.
+  unlockedThisRun:[], beatWave:false,
   inReach:0, reachT:0, dryWarned:false, inZone:false,
   strain:0, overload:0, idleT:0, grabbed:0,
   style:0, styleT:0, rank:"D", recent:[],   // see addStyle
@@ -8457,6 +8497,9 @@ function nextWave() {
 function startNextWave() {
   el("card").classList.remove("wide");
   S.wave++;
+  // Before the wave is built, so the announcement lands on the quiet moment
+  // between waves rather than under a fresh crowd.
+  claimWave(S.wave);
   el("overlay").classList.add("hide");
   ["hud","touch","cross"].forEach(i => el(i).classList.remove("hide"));
   buildWave(S.wave);
@@ -8613,6 +8656,7 @@ function restart() {
   S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0;
   S.style = 0; S.styleT = 0; S.rank = "D"; S.recent.length = 0; S.endless = false;
   S.bankedKills = 0; S.counted = false;
+  S.unlockedThisRun.length = 0; S.beatWave = false;
   buildArena(ARENAS[0]);
   el("arena").textContent = ARENAS[0].name;
   S.kinetic = 0; endOverdrive();

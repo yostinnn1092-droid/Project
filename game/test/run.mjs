@@ -2228,6 +2228,53 @@ test("records: each character keeps its own furthest wave", async (pg) => {
      "even though the global best (" + r.globalBest + ") could never be beaten");
 });
 
+test("unlocks: a rung is claimed the moment it is reached, not when the run ends", async (pg) => {
+  // The ladder used to settle up only in recordRun, so crossing a price at
+  // wave 8 went unannounced until the player died several minutes later. The
+  // reward has to land on the wave that earned it, and it has to SURVIVE the
+  // rest of the run — including a death — or it is not a payout at all.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.PROFILE.bestWave = 1;
+    P.restart();
+    P.S.unlockedThisRun.length = 0;
+
+    // Walk up the ladder a wave at a time, noting where each rung lands.
+    const claimedAt = {};
+    for (let w = 2; w <= 6; w++) {
+      const before = P.S.unlockedThisRun.slice();
+      P.claimWave(w);
+      for (const k of P.S.unlockedThisRun)
+        if (!before.includes(k)) claimedAt[k] = w;
+    }
+    const midRun = P.S.unlockedThisRun.slice();
+    const savedMidRun = JSON.parse(localStorage.getItem(P.SAVE_KEY) || "{}").bestWave;
+
+    // Now die. The end screen must still credit the run with what it took on
+    // the way up, even though none of it is locked any more.
+    P.S.wave = 6; P.S.score = 100; P.S.kills = 5;
+    const beat = P.recordRun();
+
+    const wrongRung = midRun.filter(k => claimedAt[k] !== P.charUnlockAt(k));
+    return { midRun, claimedAt, savedMidRun, wrongRung,
+             credited: beat.unlockedKeys.slice().sort(),
+             flaggedWave: beat.wave };
+  });
+
+  ok(r.midRun.length >= 3,
+     "walking from wave 1 to 6 claimed only " + r.midRun.length + " rungs mid-run");
+  eq(r.wrongRung.length, 0,
+     "claimed on the wrong wave: " + r.wrongRung.map(k => k + " at " + r.claimedAt[k]).join(", "));
+  ok(r.savedMidRun >= 6,
+     "the record was not written to storage mid-run (saw " + r.savedMidRun +
+     ") — a payout that a later crash takes back is not a payout");
+  eq(r.credited.join(","), r.midRun.slice().sort().join(","),
+     "the end screen credited [" + r.credited.join(",") + "] but the run took [" +
+     r.midRun.slice().sort().join(",") + "]");
+  ok(r.flaggedWave,
+     "the run set a new wave record mid-run and the end screen did not call it out");
+});
+
 test("unlocks: the run that earns a character offers to play it", async (pg) => {
   // "Try again" puts the player straight back in as whoever they just died as.
   // Without this the death screen names the character the run earned and then

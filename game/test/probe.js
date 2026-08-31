@@ -20,6 +20,7 @@ window.__probe = {
   REVENANT, BOOMER, SENTINEL, SENTINEL_BOLT, SCATTER, spawnTurret, stepTurrets,
   CHAR_UNLOCK, charUnlockAt, charUnlocked, nextUnlock, recordRun, runSummary,
   gameOver, charBest, loadProfile, saveProfile, SAVE_KEY, shareLine, toMenu,
+  claimWave, startNextWave,
   charNow() { return CHAR.key; },
   CROWN, CROWN_Y, crownState, crownUpgrade, buildCrown, stepCrown,
   judgeFrame, setQuality,
