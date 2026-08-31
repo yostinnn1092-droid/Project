@@ -3053,6 +3053,14 @@ test("wounds: skin darkens as health drops, bosses excluded", async (pg) => {
   const r = await pg.evaluate(() => {
     const P = window.__probe;
     P.parkWalkers();
+    // Barrels, chem and rolling props damage bodies on their own, and this
+    // case sets a body's health by hand and reads the tint back. A prop
+    // landing between the two reads is not hypothetical: the tint only
+    // repaints when health moves more than 0.02, so a prop that drags the
+    // body to roughly the fraction the second read is about to set makes the
+    // update be SKIPPED and both reads return the same glow — which is the
+    // failure seen once in a full suite and never in ten isolated runs.
+    P.stripProps();
     P.spawnWalker("walker", P.hero.pos.x + 6, P.hero.pos.z);
     const w = P.walkers[P.walkers.length - 1];
     // Drive the sim directly instead of sleeping. The tint is applied in the
@@ -3061,10 +3069,14 @@ test("wounds: skin darkens as health drops, bosses excluded", async (pg) => {
     // on an idle machine and zero under load, which is exactly how this case
     // went red while the code it covers was correct. It was the last
     // wall-clock-dependent case in the suite.
+    // The health actually in force when the tint was read comes back too, so a
+    // future failure says whether the body was still at the fraction the test
+    // set or something moved it underneath the measurement.
     const read = f => {
       w.hp = w.maxHp * f;
       for (let i = 0; i < 6; i++) P.step(1 / 60);
-      return { hex: w.skinM.color.getHexString(), glow: w.skinM.emissiveIntensity };
+      return { hex: w.skinM.color.getHexString(), glow: w.skinM.emissiveIntensity,
+               want: f, got: +(w.hp / w.maxHp).toFixed(3) };
     };
     const full = read(1.0), hurt = read(0.12);
     P.spawnMaw(P.hero.pos.x, P.hero.pos.z - 30);
@@ -3073,7 +3085,15 @@ test("wounds: skin darkens as health drops, bosses excluded", async (pg) => {
   });
   ok(r.full.hex !== r.hurt.hex,
      "a body at 12% health looks identical to a healthy one, so the execute window is invisible");
-  ok(r.hurt.glow > r.full.glow, "the wound glow does not open as health drops");
+  eq(r.full.got, r.full.want,
+     "something moved the body's health during the healthy read (" + r.full.got +
+     " rather than " + r.full.want + "), so the tint was measured against the wrong number");
+  eq(r.hurt.got, r.hurt.want,
+     "something moved the body's health during the wounded read (" + r.hurt.got +
+     " rather than " + r.hurt.want + ")");
+  ok(r.hurt.glow > r.full.glow,
+     "the wound glow does not open as health drops (healthy " + r.full.glow +
+     " vs wounded " + r.hurt.glow + ")");
   ok(!r.bossHasSkinM, "the boss got a wound tint; its plates already carry that information");
 });
 
