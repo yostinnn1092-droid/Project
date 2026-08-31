@@ -2149,6 +2149,55 @@ test("share: a result can always be copied, even when the clipboard refuses", as
      "(box showed " + JSON.stringify(r.shown) + ")");
 });
 
+test("keys: the keyboard the menu advertises actually drives the game", async (pg) => {
+  // The menu promises "WASD move · Space jump · Shift dash · R push · F fire".
+  // Nothing checked that any of it was wired, and a keyboard is the whole
+  // input surface on a desktop — the same exposure the touch case covers for
+  // phones, from the other side.
+  //
+  // Driven through a real browser keyboard first: W moved the hero, Space
+  // lifted him to y 0.68, F spent a charge and put a shot up, Shift set a
+  // 1.23s cooldown and slid him from z -0.25 to -1.99.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.setCharacter("pyromancer");
+    P.parkWalkers(); P.stripProps();
+    P.castState.held = 2; P.buildCastStack();
+    P.S.phase = "play";
+    P.hero.pos.set(0, 0, 0);
+
+    const key = (code, type) =>
+      window.dispatchEvent(new KeyboardEvent(type, { code, bubbles: true, cancelable: true }));
+    const settle = (n) => { for (let i = 0; i < n; i++) { P.S.phase = "play"; P.step(1 / 60); } };
+
+    // Movement integrates while the key is HELD, so hold it across frames.
+    const from = { x: P.hero.pos.x, z: P.hero.pos.z };
+    key("KeyW", "keydown"); settle(30); key("KeyW", "keyup");
+    const moved = Math.hypot(P.hero.pos.x - from.x, P.hero.pos.z - from.z);
+
+    settle(60);                                   // land before jumping
+    key("Space", "keydown"); key("Space", "keyup"); settle(6);
+    const airborne = P.hero.pos.y;
+
+    settle(90);
+    const heldBefore = P.castState.held, shotsBefore = P.castState.shots.length;
+    key("KeyF", "keydown"); key("KeyF", "keyup"); settle(6);
+    const spent = heldBefore - P.castState.held;
+    const launched = P.castState.shots.length - shotsBefore;
+
+    key("ShiftLeft", "keydown"); key("ShiftLeft", "keyup"); settle(4);
+    return { moved: +moved.toFixed(2), airborne: +P.hero.pos.y.toFixed(2),
+             jumpY: +airborne.toFixed(2), spent, launched,
+             dashCd: +(P.S.dashCd || 0).toFixed(2) };
+  });
+
+  ok(r.moved > 0.1, "holding W moved the hero " + r.moved + " units — WASD is not wired");
+  ok(r.jumpY > 0.2, "Space left the hero at y " + r.jumpY + " — jump is not wired");
+  eq(r.spent, 1, "F spent " + r.spent + " charges — the fire key is not wired");
+  ok(r.launched >= 1, "F put " + r.launched + " shots in the air");
+  ok(r.dashCd > 0, "Shift left the dash cooldown at " + r.dashCd + " — dash is not wired");
+});
+
 test("touch: the on-screen buttons actually drive the game", async (pg) => {
   // A phone has nothing else. Every earlier check on these was about how they
   // LOOK — present, dimmed on a mouse, not overflowing — and none of them
