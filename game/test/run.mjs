@@ -2024,6 +2024,57 @@ test("unlocks: the roster is earned, and every run pays into it", async (pg) => 
      pace.priced.join(", ") + ") — a stretch that long stops paying out");
 });
 
+test("menu: the picker comes back after a run, exactly once", async (pg) => {
+  // show() overwrites the card, and the menu lives in the card — so pressing
+  // Begin destroyed the character picker for the rest of the page's life.
+  // Fifteen characters, a ladder that keeps handing out more, and the only way
+  // to switch to one you unlocked earlier was a browser reload.
+  //
+  // The duplication check is not hypothetical: the wiring APPENDS cards, and
+  // the restored markup already carries a full set, so re-running it over them
+  // deals the roster twice.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.PROFILE.bestWave = 30;                 // whole roster open
+    P.S.wave = 3; P.S.score = 10; P.S.kills = 1;
+    P.gameOver();
+
+    const routeOut = !!document.querySelector("#toMenu");
+    P.toMenu();
+
+    const cards = [...document.querySelectorAll("#charPick > *")];
+    const diffs = [...document.querySelectorAll("#diffPick > *")];
+    const start = document.querySelector("#startBtn");
+
+    // The restored picker has to actually WORK, not just be present.
+    const target = cards.find(c => c.dataset.char && c.dataset.char !== P.charNow());
+    const before = P.charNow();
+    if (target) target.click();
+    const after = P.charNow();
+
+    // ...and a second restore must not stack another roster on top.
+    P.gameOver();
+    P.toMenu();
+    const twice = document.querySelectorAll("#charPick > *").length;
+
+    return { routeOut, cards: cards.length, diffs: diffs.length,
+             chars: Object.keys(P.CHARS).length, hasStart: !!start,
+             before, after, twice, phase: P.S.phase };
+  });
+
+  ok(r.routeOut, "the end screen offers no way back to the character picker");
+  eq(r.cards, r.chars,
+     "the restored picker shows " + r.cards + " cards for " + r.chars +
+     " characters — the roster was dealt twice, or not at all");
+  ok(r.diffs >= 2, "the restored menu lost its difficulty picker (" + r.diffs + ")");
+  ok(r.hasStart, "the restored menu has no Begin button, so it is a dead end");
+  ok(r.after !== r.before,
+     "a card in the restored picker did not change the character (still " + r.before + ")");
+  eq(r.twice, r.chars,
+     "restoring the menu a second time left " + r.twice + " cards — the wiring stacks");
+  eq(r.phase, "menu", "the restored menu left the game in phase '" + r.phase + "'");
+});
+
 test("share: a result can always be copied, even when the clipboard refuses", async (pg) => {
   // Copying is best-effort by nature — the async clipboard needs a secure
   // context and a permission the page may not have — so the interesting case

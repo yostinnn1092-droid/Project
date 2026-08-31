@@ -8564,10 +8564,12 @@ function gameOver() {
         <p class="rule">They got close enough to touch you.</p>
         ${tryNewButton()}
         <button id="again" class="${lastUnlockedKeys.length ? "ghost" : ""}">Try again</button>
+        <button id="toMenu" class="ghost">Change character</button>
         <button id="share" class="ghost">Copy result</button>
         <input id="shareText" class="shareBox" hidden readonly>`);
   el("again").onclick = restart;
   el("share").onclick = copyResult;
+  el("toMenu").onclick = toMenu;
   wireNewButton();
 }
 
@@ -8803,7 +8805,7 @@ el("startBtn").addEventListener("click", () => { audioInit(); start(); });
 // off storage. Painting first would show everyone level 1 on a fresh page.
 loadProfile();
 
-(function initCharacter() {
+function wireCharacterPicker() {
   let saved = "telekinetic";
   try { saved = localStorage.getItem("kinesis.char") || "telekinetic"; } catch (e) {}
   if (!CHARS[saved]) saved = "telekinetic";
@@ -8814,6 +8816,10 @@ loadProfile();
   setCharacter(saved);
   const box = el("charPick");
   if (!box) return;
+  // Cleared first: this runs again when the menu is restored, and the restored
+  // markup already carries a full set of cards. Appending onto them would deal
+  // the roster twice.
+  box.innerHTML = "";
 
   // Each card carries the permanent level as well as the name, because the
   // level is the reason to pick one character over the other on a given day —
@@ -8876,15 +8882,16 @@ loadProfile();
     box.appendChild(btn);
   }
   paint();
-})();
+}
 
-(function initDifficulty() {
+function wireDifficulty() {
   let saved = "normal";
   try { saved = localStorage.getItem("kinesis.diff") || "normal"; } catch (e) {}
   if (!DIFFS[saved]) saved = "normal";
   setDifficulty(saved);
   const box = el("diffPick");
   if (!box) return;
+  box.innerHTML = "";
   for (const key in DIFFS) {
     const btn = document.createElement("button");
     btn.className = "diffBtn" + (key === saved ? " on" : "");
@@ -8896,7 +8903,38 @@ loadProfile();
     };
     box.appendChild(btn);
   }
-})();
+}
+
+function paintMenuBest() {
+  if (!(PROFILE.runs > 0)) return;
+  const m = el("menuBest");
+  if (!m) return;
+  m.innerHTML = `Best ${PROFILE.best.toLocaleString()} · wave ${PROFILE.bestWave}` +
+                ` · rank ${PROFILE.bestRank} · ${PROFILE.kills.toLocaleString()} put down`;
+  m.classList.add("show");
+}
+
+// show() overwrites the card, which is where the menu lives — so pressing
+// Begin used to DESTROY the character picker for the rest of the page's life.
+// With fifteen characters and a ladder that keeps handing out more, that made
+// switching to one you unlocked three runs ago a browser reload. The markup is
+// kept here and put back on demand; the wiring is re-run because the handlers
+// went with the old nodes.
+let MENU_HTML = "";
+
+function toMenu() {
+  S.phase = "menu";
+  el("card").innerHTML = MENU_HTML;
+  wireCharacterPicker();
+  wireDifficulty();
+  paintMenuBest();
+  const b = el("startBtn");
+  if (b) b.addEventListener("click", () => { audioInit(); start(); });
+  el("modName2").classList.remove("show");
+  el("bossBar").classList.remove("show");
+  el("overlay").classList.remove("hide");
+  ["hud","touch","cross"].forEach(i => el(i).classList.add("hide"));
+}
 
 // The module-level declarations create the meshes; nothing is placed until
 // here, so the opening arena goes through exactly the same path as every
@@ -8904,14 +8942,13 @@ loadProfile();
 buildArena(ARENAS[0]);
 el("arena").textContent = ARENAS[0].name;
 
-if (PROFILE.runs > 0) {
-  const m = el("menuBest");
-  if (m) {
-    m.innerHTML = `Best ${PROFILE.best.toLocaleString()} · wave ${PROFILE.bestWave}` +
-                  ` · rank ${PROFILE.bestRank} · ${PROFILE.kills.toLocaleString()} put down`;
-    m.classList.add("show");
-  }
-}
+wireCharacterPicker();
+wireDifficulty();
+paintMenuBest();
+// Captured after the pickers are built so the restored markup is complete;
+// the wiring functions clear their boxes before filling them, so re-running
+// them against those cards replaces rather than duplicates.
+MENU_HTML = el("card").innerHTML;
 resize();
 requestAnimationFrame(frame);
 })();
