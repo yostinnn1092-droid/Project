@@ -2149,6 +2149,45 @@ test("share: a result can always be copied, even when the clipboard refuses", as
      "(box showed " + JSON.stringify(r.shown) + ")");
 });
 
+test("audio: every sound the game plays actually reaches the audio graph", async (pg) => {
+  // Audio fails SILENTLY. A refactor that breaks the context, or a name that
+  // stops matching, leaves a game that looks perfect and makes no noise — and
+  // nothing else in this suite would notice. Counted at the Web Audio API
+  // rather than trusted: each SFX entry has to produce real nodes.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return { noApi: true };
+
+    // Count nodes by wrapping the prototype the live context already uses.
+    let osc = 0, buf = 0;
+    const proto = AC.prototype;
+    const realOsc = proto.createOscillator, realBuf = proto.createBufferSource;
+    proto.createOscillator = function () { osc++; return realOsc.apply(this, arguments); };
+    proto.createBufferSource = function () { buf++; return realBuf.apply(this, arguments); };
+
+    const names = Object.keys(P.SFX || {}).filter(k => typeof P.SFX[k] === "function");
+    const silent = [], threw = [];
+    for (const name of names) {
+      const before = osc + buf;
+      try { P.SFX[name](1); } catch (e) { threw.push(name + ": " + e.message); continue; }
+      if (osc + buf === before) silent.push(name);
+    }
+
+    proto.createOscillator = realOsc;
+    proto.createBufferSource = realBuf;
+    return { names: names.length, osc, buf, silent, threw };
+  });
+
+  ok(!r.noApi, "this browser exposes no Web Audio API, so the case proves nothing");
+  ok(r.names >= 6, "only " + r.names + " sounds found on SFX — the table looks empty");
+  eq(r.threw.length, 0, "sounds threw when played: " + r.threw.join(" | "));
+  eq(r.silent.length, 0,
+     "these made no audio nodes at all, so they are silent: " + r.silent.join(", "));
+  ok(r.osc + r.buf >= r.names,
+     "only " + (r.osc + r.buf) + " nodes for " + r.names + " sounds");
+});
+
 test("save: the game still runs where storage is refused outright", async (pg) => {
   // Not hypothetical: a private window, a browser set to block site data, or
   // an embed in a sandboxed iframe with an opaque origin all make every
