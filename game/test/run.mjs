@@ -2099,13 +2099,23 @@ test("share: a result can always be copied, even when the clipboard refuses", as
     });
     P.gameOver();
     const line = P.shareLine();
+
+    // Before anything is clicked the fallback box must not be on screen. It
+    // was: `display: block` on the class beats the UA stylesheet's
+    // `[hidden] { display: none }`, so an empty bordered field sat open on
+    // every end screen. Offsets rather than the attribute, because the
+    // attribute was set correctly the whole time — it was the CSS that ignored
+    // it, which is exactly what an attribute check would have missed.
+    P.gameOver();
+    const idleBox = document.querySelector("#shareText");
+    const idleVisible = !!(idleBox && idleBox.offsetWidth + idleBox.offsetHeight);
     const openNow = Object.keys(P.CHARS).filter(k => P.charUnlocked(k)).length;
     document.querySelector("#share").click();
     await new Promise(r2 => setTimeout(r2, 60));
     const box = document.querySelector("#shareText");
     const shown = box && !box.hidden ? box.value : null;
     if (real) Object.defineProperty(navigator, "clipboard", { value: real, configurable: true });
-    return { line, shown, openNow, bestWave: P.PROFILE.bestWave };
+    return { line, shown, idleVisible, openNow, bestWave: P.PROFILE.bestWave };
   });
 
   ok(/wave 6/.test(r.line), "the result line does not carry the wave: " + r.line);
@@ -2121,6 +2131,9 @@ test("share: a result can always be copied, even when the clipboard refuses", as
   ok(r.line.indexOf(r.openNow + "/") >= 0,
      "the result claims a different unlock count than the player actually has (" +
      r.openNow + "): " + r.line);
+  eq(r.idleVisible, false,
+     "the copy-fallback box is on screen before anything was clicked — an empty " +
+     "bordered field on every end screen");
   eq(r.shown, r.line,
      "the clipboard refused and the player was left with nothing to copy " +
      "(box showed " + JSON.stringify(r.shown) + ")");

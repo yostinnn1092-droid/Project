@@ -546,6 +546,11 @@
      async clipboard needs a secure context and a permission the page may not
      have. The player selects out of this instead of being told nothing
      happened. */
+  /* `display: block` below beats the UA stylesheet's `[hidden] { display: none }`
+     on specificity, so without this the fallback box — which exists only for
+     the case where copying is refused — sat open and empty on every end
+     screen. Attribute selector to win the specificity back. */
+  .shareBox[hidden] { display: none; }
   .shareBox {
     display: block; width: 100%; margin-top: 12px;
     font-family: var(--mono); font-size: 10.5px; text-align: center;
