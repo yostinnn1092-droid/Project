@@ -2251,6 +2251,40 @@ test("records: each character keeps its own furthest wave", async (pg) => {
      "even though the global best (" + r.globalBest + ") could never be beaten");
 });
 
+test("toast: a routine notice cannot bury news of something earned", async (pg) => {
+  // One channel carries both "you have just unlocked a character" and "effects
+  // reduced to keep it smooth". The quality system announces a downgrade when
+  // the device is struggling, which on a phone is the same moment a wave ends
+  // and a rung is taken — rendered, the unlock came out reading as the quality
+  // notice, and nothing told the player what they had won.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const text = () => document.querySelector("#toast").textContent;
+
+    P.PROFILE.bestWave = 1;
+    P.restart();
+    P.S.unlockedThisRun.length = 0;
+    P.claimWave(2);                     // the earned message
+    const earned = text();
+    P.toast("Detail reduced to keep it smooth");   // a routine notice, right after
+    const afterRoutine = text();
+
+    // The protection is time-boxed, not permanent: once it has had its run the
+    // channel goes back to whoever wants it.
+    P.toast("later notice", 1500);
+    const stillHeld = text();
+    return { earned, afterRoutine, stillHeld };
+  });
+
+  ok(/unlocked/i.test(r.earned),
+     "claiming a rung did not announce it (toast read " + JSON.stringify(r.earned) + ")");
+  eq(r.afterRoutine, r.earned,
+     "a routine notice overwrote the unlock with " + JSON.stringify(r.afterRoutine) +
+     " — the player is told the renderer got slower instead of what they just won");
+  eq(r.stillHeld, r.earned,
+     "the unlock was buried by a later routine notice: " + JSON.stringify(r.stillHeld));
+});
+
 test("unlocks: a rung is claimed the moment it is reached, not when the run ends", async (pg) => {
   // The ladder used to settle up only in recordRun, so crossing a price at
   // wave 8 went unannounced until the player died several minutes later. The

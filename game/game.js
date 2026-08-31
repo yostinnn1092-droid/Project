@@ -5214,7 +5214,7 @@ function levelCharacter() {
   PROFILE.charLv[CHAR.key] = lv + 1;
   saveProfile();
   banner(CHAR.name + " · LEVEL " + (lv + 1));
-  toast(CHAR.perk(lv + 1) + " — kept between runs", 3200);
+  toast(CHAR.perk(lv + 1) + " — kept between runs", 3200, true);
   if (isCaster()) buildCastStack();
   SFX.rankUp ? SFX.rankUp(3) : SFX.overload();
 }
@@ -5240,7 +5240,7 @@ function claimWave(n) {
   banner(CHARS[won[0]].name.toUpperCase() + " UNLOCKED");
   toast(won.length === 1
     ? CHARS[won[0]].name + " unlocked — yours from now on"
-    : won.length + " characters unlocked", 3400);
+    : won.length + " characters unlocked", 3400, true);
   if (SFX.rankUp) SFX.rankUp(3);
 }
 
@@ -6704,12 +6704,22 @@ function updateMeters() {
   el("kinWrap").classList.toggle("full", OD.on);
 }
 
-let toastT = 0;
-function toast(msg, ms = 1900) {
+let toastT = 0, toastHold = 0;
+// `hold` marks a message the player actually needs to read — something
+// permanent was earned — and protects it for its own duration. Routine
+// notices share this one channel, and the quality system announces a
+// downgrade exactly when the device is struggling, which on a phone is the
+// same moment a wave ends and a character unlocks. Rendered, that came out as
+// the player being told "effects reduced to keep it smooth" instead of that
+// they had just won the Wind Mage.
+function toast(msg, ms = 1900, hold = false) {
+  const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+  if (!hold && now < toastHold) return;
   const t = el("toast");
   t.textContent = msg; t.classList.add("show");
   clearTimeout(toastT);
   toastT = setTimeout(() => t.classList.remove("show"), ms);
+  if (hold) toastHold = now + ms;
 }
 
 // ─────────────────────────────────────────────────────────── modes
