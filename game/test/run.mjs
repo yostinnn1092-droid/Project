@@ -2149,6 +2149,67 @@ test("share: a result can always be copied, even when the clipboard refuses", as
      "(box showed " + JSON.stringify(r.shown) + ")");
 });
 
+test("unlocks: what a run earns is still there after closing the tab", async (pg) => {
+  // The guarantee the whole ladder rests on, and the one thing none of the
+  // other unlock cases touch: they all check state inside a single page life.
+  // If a save does not survive a reload, every rung is a lie — the player
+  // earns the Stormcaller, comes back tomorrow, and has two characters again.
+  //
+  // Verified by hand first: fresh 1/2 open, earn to wave 6 for 7 open playing
+  // the stormcaller, reload, and it comes back 6 / 7 / stormcaller with the
+  // menu reading "Next: SCATTERSHOT at wave 7".
+  const earned = await pg.evaluate(() => {
+    const P = window.__probe;
+    localStorage.clear();
+    P.loadProfile();
+    const fresh = Object.keys(P.CHARS).filter(k => P.charUnlocked(k)).length;
+
+    P.restart();
+    P.S.unlockedThisRun.length = 0;
+    for (let w = 2; w <= 6; w++) P.claimWave(w);
+    P.setCharacter("stormcaller");
+    return { fresh,
+             bestWave: P.PROFILE.bestWave,
+             open: Object.keys(P.CHARS).filter(k => P.charUnlocked(k)).length,
+             who: P.charNow(),
+             written: !!localStorage.getItem(P.SAVE_KEY) };
+  });
+
+  // Closing the tab and coming back.
+  await pg.reload({ timeout: 90000 });
+  await pg.waitForFunction(() => window.__probe, null, { timeout: 90000 });
+
+  const back = await pg.evaluate(() => {
+    const P = window.__probe;
+    const cards = [...document.querySelectorAll("#charPick > *")];
+    const out = {
+      bestWave: P.PROFILE.bestWave,
+      open: Object.keys(P.CHARS).filter(k => P.charUnlocked(k)).length,
+      who: P.charNow(),
+      litCards: cards.filter(c => !c.classList.contains("lock")).length,
+    };
+    localStorage.clear();          // leave nothing behind for later cases
+    return out;
+  });
+
+  eq(earned.fresh, 2, "a cleared profile opened " + earned.fresh + " characters, not the two free ones");
+  ok(earned.written, "claiming rungs wrote nothing to storage, so nothing could survive");
+  ok(earned.open > earned.fresh, "the run earned nothing to test with");
+
+  eq(back.bestWave, earned.bestWave,
+     "the wave record came back as " + back.bestWave + " instead of " + earned.bestWave +
+     " — every rung the player earned is gone");
+  eq(back.open, earned.open,
+     "after a reload " + back.open + " characters are open, not the " + earned.open +
+     " the run earned");
+  eq(back.who, earned.who,
+     "the player came back as the " + back.who + " rather than the " + earned.who +
+     " they chose");
+  eq(back.litCards, earned.open,
+     "the picker drew " + back.litCards + " unlocked cards for " + earned.open +
+     " earned characters");
+});
+
 test("keys: the keyboard the menu advertises actually drives the game", async (pg) => {
   // The menu promises "WASD move · Space jump · Shift dash · R push · F fire".
   // Nothing checked that any of it was wired, and a keyboard is the whole
