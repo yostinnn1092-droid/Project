@@ -2401,14 +2401,20 @@ test("unlocks: the first rung is reachable in the first minute of play", async (
   // The bot is immortal, stands still and never dodges, so these are FLOOR
   // times — a real player is slower.
   //
-  // HONEST LIMIT on the time bound below: it has not been seen to fail. Wave
-  // 1's clear time turns out not to be driven by the caster's damage at all —
-  // crippled to dmg 6 / blastDmg 3, the bot still cleared all twenty bodies in
-  // 23.8s having fired ten shots, which is two kills per shot at six damage
-  // and cannot be the fireball. Something else is finishing wave 1, and until
-  // that is understood no damage mutation can turn this into a slog. The
-  // ceiling stands as a canary rather than a proven guard; the price
-  // assertion below IS verified.
+  // HONEST LIMIT on the time bound below: it has not been seen to fail, and
+  // the reason is not understood.
+  //
+  // What IS established: wave 1 does not clear itself. A bot that stands there
+  // and never fires kills nothing in sixty seconds — twenty bodies alive,
+  // zero kills — so the player's attack is doing the work.
+  //
+  // What is NOT: with the fireball crippled to dmg 6 / blastDmg 3, the bot
+  // still cleared all twenty in 23.8s off ten shots. Ninety-odd points of
+  // damage should not kill twenty bodies. It is not the exploder death-blast
+  // either — wave 1 is { walker: 5 } and carries none. So damage magnitude
+  // matters far less here than it should, cause unknown, and until it is
+  // understood no damage mutation can make this case fail. The ceiling stands
+  // as a canary, not a proven guard. The price assertion below IS verified.
   const r = await pg.evaluate(() => {
     const P = window.__probe;
     P.setCharacter("pyromancer");
