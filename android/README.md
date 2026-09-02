@@ -5,7 +5,8 @@ touch controls (stick, Jump, Dash, Push, Force, Mode) and asks for landscape, so
 the app adds only what a browser tab cannot: landscape lock, immersive
 full-screen, and keeping the screen awake.
 
-    ./android/build.sh        # -> android/build/kinesis.apk
+    ./android/build.sh        # -> android/build/kinesis.apk   (sideload / testing)
+    ./android/build.sh --aab  # -> android/build/kinesis.aab   (Play Store upload)
 
 ## Requirements
 
@@ -19,16 +20,61 @@ Install the SDK pieces with:
 sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
 ```
 
+`--aab` also needs bundletool, which is not part of the SDK and is 32MB, so it
+is not vendored here:
+
+```bash
+curl -sSL -o bundletool.jar \
+  https://github.com/google/bundletool/releases/download/1.17.2/bundletool-all-1.17.2.jar
+export BUNDLETOOL=$PWD/bundletool.jar     # or drop it at /opt/bundletool/bundletool.jar
+```
+
+## Publishing to Play
+
+`--aab` produces the format Play requires for new apps. Two things still stand
+between that file and a live listing, and neither is a code change:
+
+**The upload key.** The APK is signed with a throwaway local key — it only has
+to install on a phone with unknown sources allowed. Play identifies your app by
+its key *forever*, so `build.sh` never invents one: pass your own through the
+environment and keep it somewhere that is not this repository.
+
+```bash
+KINESIS_KEYSTORE=~/keys/kinesis-upload.jks \
+KINESIS_KS_PASS=... KINESIS_KEY_ALIAS=upload \
+  ./android/build.sh --aab
+```
+
+Without those it signs with the debug key and says so loudly. That build is for
+verifying the bundle end to end, not for uploading — Play will reject it. Enrol
+in Play App Signing so a lost upload key can be reset; a lost *app signing* key
+cannot, and ends the app's ability to update.
+
+**`targetSdkVersion` is 34.** Play enforces a rolling minimum for new
+submissions that rises about every August. Check the current bar in the Play
+Console before uploading — raising it means editing `AndroidManifest.xml` and
+`build.sh` together, and installing the matching `platforms;android-NN`.
+
+Also required by Play, none of which live in this repo: a 512x512 icon, a
+1024x500 feature graphic, screenshots, a content rating questionnaire, a Data
+Safety declaration (this app requests no permissions and never touches the
+network, so it is the trivial case), and a privacy policy URL. New *individual*
+developer accounts additionally need a closed test with 12 testers held for 14
+continuous days before production access opens.
+
 ## Why there is no Gradle here
 
 The app is one Java file and one HTML asset. The Android Gradle Plugin would
 download a dependency tree larger than the game to run the same
 `aapt2` → `javac` → `d8` → `zipalign` → `apksigner` sequence `build.sh` runs
-directly. The script is ~60 lines and has no network dependency beyond the SDK.
+directly. The bundle path swaps the last two steps for `bundletool` →
+`jarsigner` and changes one flag earlier on (`aapt2 link --proto-format`);
+everything before that is shared. No network dependency beyond the SDK and the
+one bundletool jar.
 
-`build.sh` rebuilds `kinesis3d.html` from `game/` before packaging, so the APK
-can never ship a stale bundle — that is the one mistake this layout could
-otherwise make silently.
+`build.sh` rebuilds `kinesis3d.html` from `game/` before packaging, in both
+modes, so neither output can ship a stale bundle — that is the one mistake this
+layout could otherwise make silently.
 
 ## Installing on a phone
 
