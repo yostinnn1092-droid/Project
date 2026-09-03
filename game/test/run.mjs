@@ -1940,6 +1940,57 @@ test("characters: the telekinetic's level buys carry capacity", async (pg) => {
   ok(r.pyro <= r.lv1, "the pyromancer's level is leaking into carry capacity");
 });
 
+test("cards: a toast from the wave does not survive onto the card", async (pg) => {
+  // Both the draft and the end screens take the play view down, and both used
+  // to leave the toast up. It keeps full opacity, and at 844x390 it sits at
+  // 343px — directly under the buttons — so ending a run just after a wave
+  // condition was announced printed "EVERYTHING IS PLATED. BLASTS IGNORE
+  // PLATE." across the bottom of the death screen.
+  await pg.setViewportSize({ width: 844, height: 390 });
+  const seen = [];
+
+  for (const screen of ["gameOver", "offerDraft"]) {
+    const r = await pg.evaluate(async (screen) => {
+      const P = window.__probe;
+      const t = document.getElementById("toast");
+      P.S.wave = 3;
+      // Measured on the CLASS, not on computed opacity. The fade is a CSS
+      // transition, and under headless software GL it does not advance
+      // reliably — sampled 600ms into a 300ms transition it still reported
+      // "running" at opacity 1 with the class already gone. The class is what
+      // the game controls and what actually decides whether the toast shows.
+      P.toast("EVERYTHING IS PLATED. BLASTS IGNORE PLATE.", 9000);
+      await new Promise(r2 => setTimeout(r2, 200));
+      const during = t.classList.contains("show");
+
+      P[screen]();
+      await new Promise(r2 => setTimeout(r2, 200));
+      const after = t.classList.contains("show");
+
+      // A held toast must not carry its silence into the next run: the window
+      // suppresses everything below it, including the next run's opening hint.
+      P.toast("UNLOCKED", 9000, true);
+      P[screen]();
+      await new Promise(r2 => setTimeout(r2, 50));
+      P.toast("TAP FIRE TO THROW", 3000);
+      const nextHeard = document.getElementById("toast").textContent.trim();
+
+      return { during, after, nextHeard };
+    }, screen);
+    seen.push(screen + " during=" + r.during + " after=" + r.after);
+
+    eq(r.during, true,
+       screen + ": the toast never went up during play, so this case is not " +
+       "measuring what it thinks it is");
+    eq(r.after, false,
+       screen + ": the toast is still showing over the card — it lands at 343px " +
+       "of a 390px screen, directly under the buttons");
+    eq(r.nextHeard, "TAP FIRE TO THROW",
+       screen + ": after a HELD toast the next run's hint was swallowed (screen " +
+       "shows '" + r.nextHeard + "') — the hold window outlived the run");
+  }
+});
+
 test("unlocks: the roster is earned, and every run pays into it", async (pg) => {
   // Fifteen characters handed over in the first second is a paralysing menu
   // and spends the whole game at once. They are priced in best-wave-reached —

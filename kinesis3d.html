@@ -10800,10 +10800,7 @@ function offerDraft() {
                         SFX.pick(); startNextWave(); };
     box.appendChild(b);
   });
-  el("modName2").classList.remove("show");
-  el("bossBar").classList.remove("show");
-  el("overlay").classList.remove("hide");
-  ["hud","touch","cross"].forEach(i => el(i).classList.add("hide"));
+  leavePlayView();
 }
 
 // ─────────────────────────────────────────────────────────── characters
@@ -14549,12 +14546,30 @@ function gameOver() {
   wireNewButton();
 }
 
-function show(html) {
-  el("card").innerHTML = html;
+// Everything that has to come down when a card goes up. The draft and the end
+// screens both did this inline, four identical lines each, and both forgot the
+// same fifth: a toast raised during the wave keeps its full opacity over the
+// card. On a phone in landscape it lands at 343px of a 390px screen — directly
+// under the buttons — so a run ended right after a wave condition was
+// announced put "EVERYTHING IS PLATED. BLASTS IGNORE PLATE." across the bottom
+// of the death screen. Written once here so the next card cannot forget it.
+function leavePlayView() {
+  clearTimeout(toastT);
+  el("toast").classList.remove("show");
+  // The hold window has to go with it. It suppresses lower-priority toasts
+  // until it expires, so a run ended moments after an unlock announcement
+  // would carry that silence into the NEXT run and swallow its opening hint —
+  // trading a visible bug for an invisible one.
+  toastHold = 0;
   el("modName2").classList.remove("show");
   el("bossBar").classList.remove("show");
   el("overlay").classList.remove("hide");
   ["hud","touch","cross"].forEach(i => el(i).classList.add("hide"));
+}
+
+function show(html) {
+  el("card").innerHTML = html;
+  leavePlayView();
 }
 
 function restart() {
