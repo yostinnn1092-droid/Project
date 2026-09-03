@@ -2004,6 +2004,66 @@ test("cards: a toast from the wave does not survive onto the card", async (pg) =
   }
 });
 
+test("hud: the boss bar tracks the fight it is describing", async (pg) => {
+  // The two-bar design exists so the player can see the fight has two phases
+  // before anyone explains it. Nothing on the damage path repainted it —
+  // only kills and wave events called updateHUD — so the bar froze at
+  // whatever it read when the last body died. That is invisible while adds
+  // are dying and wrong in the one moment that matters: alone with the boss
+  // at the end, breaking plates against a bar still reading ARMOURED at 100%.
+  //
+  // Everything else is parked and nothing dies here on purpose, because a
+  // kill repaints the HUD and would mask exactly this.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const bar = () => ({
+      name: document.getElementById("bossName").textContent,
+      plate: document.getElementById("bossPlate").style.width,
+      core: document.getElementById("bossCore").style.width,
+      open: document.getElementById("bossBar").classList.contains("open"),
+    });
+    P.buildWave(5); P.parkWalkers();
+    for (const o of P.rocks) o.gone = true;
+    // The boss the BAR tracks. Wave 5 already brings one, so spawning another
+    // and damaging that reports on a boss the bar never looked at — which is
+    // how the first version of this measurement fooled itself.
+    const w = P.walkers.find(x => x.boss && !x.dead);
+    if (!w) return { none: true };
+    P.updateHUD();
+    const start = bar();
+
+    P.damageWalker(w, 500, null, 0, "impact");
+    const afterOnePlate = bar();
+
+    for (let n = 0; n < 40 && w.platesLeft; n++) P.damageWalker(w, 500, null, 0, "impact");
+    const afterPlates = bar();
+
+    // Core damage, which leaves by a different exit than a plate hit does.
+    const hp0 = w.hp;
+    P.damageWalker(w, w.maxHp * 0.5, null, 0, "impact");
+    const afterCore = bar();
+
+    return { start, afterOnePlate, afterPlates, afterCore,
+             platesLeft: w.platesLeft, tookCore: w.hp < hp0 };
+  });
+
+  ok(!r.none, "wave 5 brought no boss, so this measured nothing");
+  eq(r.start.plate, "100%", "the bar did not start whole (" + r.start.plate + ")");
+  ok(r.afterOnePlate.plate !== "100%",
+     "one plate broke and the plate bar still read " + r.afterOnePlate.plate +
+     " — plate hits leave the damage path by an early return, which is most of the fight");
+  eq(r.platesLeft, 0, "the plates did not all break, so the phase change is untested");
+  eq(r.afterPlates.plate, "0%",
+     "every plate is gone and the bar reads " + r.afterPlates.plate);
+  eq(r.afterPlates.open, true,
+     "the core is exposed but the bar is not showing it as open");
+  ok(/EXPOSED/.test(r.afterPlates.name),
+     "the bar still reads '" + r.afterPlates.name + "' with no plates left");
+  ok(r.tookCore, "the core took no damage, so the last assertion proves nothing");
+  ok(r.afterCore.core !== "100%",
+     "the core took damage and its bar still reads " + r.afterCore.core);
+});
+
 test("hud: the health pips follow the hero's health, up and down", async (pg) => {
   // The pips are drawn by updateHUD, and nothing on the damage path called it:
   // step() does not, and hurtHero did not either. So a hit left the display

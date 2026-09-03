@@ -12122,7 +12122,27 @@ function hurtHero() {
   updateHUD();
 }
 
+// A boss carries a bar, and NOTHING on the damage path repainted it: only
+// kills and wave events called updateHUD. So the plates and the core froze at
+// whatever they read when the last body died — and the moment that matters is
+// precisely the one with no bodies left, alone with the boss at the end of the
+// fight. Measured: breaking all four plates and taking the core to 45% left
+// the bar reading ARMOURED at 100%/100%, and a manual updateHUD immediately
+// corrected it to EXPOSED at 0%/45%.
+//
+// Wrapped rather than patched at the exits. There are THREE — two inside the
+// plate branch, which absorbs the hit and returns early, and the ordinary one
+// at the bottom — and a first attempt that only covered the bottom missed
+// every plate hit, which is most of the fight. Guarded on `boss` because
+// updateHUD walks the walker list and a zombie taking a chip does not need
+// that; a boss does, and there is at most one.
 function damageWalker(w, amount, dir, knock, kind) {
+  const isBoss = !!(w && w.boss && !w.dead);
+  damageWalkerFrom(w, amount, dir, knock, kind);
+  if (isBoss) updateHUD();
+}
+
+function damageWalkerFrom(w, amount, dir, knock, kind) {
   if (w.dead) return;
   // Whatever landed last is what the kill gets credited to. Recorded before
   // the damage resolves so killWalker can read it without another argument
