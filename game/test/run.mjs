@@ -2004,6 +2004,69 @@ test("cards: a toast from the wave does not survive onto the card", async (pg) =
   }
 });
 
+test("hud: the health pips follow the hero's health, up and down", async (pg) => {
+  // The pips are drawn by updateHUD, and nothing on the damage path called it:
+  // step() does not, and hurtHero did not either. So a hit left the display
+  // showing the health you had BEFORE it, until something else happened to
+  // repaint — in practice the next kill. That hides it in a busy fight and
+  // leaves it wrong in the one moment it matters, surrounded and killing
+  // nothing. The leech heal had the same gap in the other direction, where an
+  // unrepainted pip makes the revenant's whole payoff invisible.
+  //
+  // Nothing is killed here on purpose: a kill repaints the HUD and would mask
+  // exactly the bug this is looking for.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    const pips = () => [...document.querySelectorAll("#hp i")]
+      .map(i => (i.classList.contains("off") ? "." : "#")).join("");
+    P.setCharacter("telekinetic");
+    P.buildWave(3); P.parkWalkers(); P.stripProps();
+    P.MOD.hpBonus = 0;
+    P.hero.hp = P.CFG.maxHealth;
+    P.updateHUD();
+
+    const down = [{ hp: P.hero.hp, pips: pips() }];
+    for (let n = 0; n < 3; n++) {
+      P.hurtHero();
+      for (let i = 0; i < 20; i++) P.step(1 / 60);   // no kills in this window
+      down.push({ hp: P.hero.hp, pips: pips() });
+    }
+
+    // And back up, through the revenant's bank rather than by assignment.
+    P.setCharacter("revenant");
+    P.PROFILE.charLv.revenant = 8;
+    P.buildCastStack();
+    const hpBefore = P.hero.hp;
+    P.castState.leech = P.REVENANT.leech.per;      // one heart already banked
+    const w = P.walkers.find(x => !x.dead && x.AI && x.AI.ring < 5);
+    const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
+    const pin = () => { P.parkWalkers(); P.arrows.length = 0;
+      w.pos.set(f.x * 12, 0, f.z * 12); w.aggro = false; w.cool = 999; w.hp = 99999; };
+    pin();
+    P.castState.held = Math.max(1, P.castState.held);
+    P.S.lock = w; P.castFire();
+    for (let i = 0; i < 90; i++) { pin(); P.hero.pos.set(0, 0, 0); P.step(1 / 60); }
+    const healed = { hp: P.hero.hp, pips: pips(), was: hpBefore };
+    P.setCharacter("telekinetic");
+    return { down, healed, max: P.CFG.maxHealth };
+  });
+
+  // Each step down must be reflected the moment it happens.
+  for (const s of r.down) {
+    const lit = (s.pips.match(/#/g) || []).length;
+    eq(lit, s.hp,
+       "at " + s.hp + " health the HUD lit " + lit + " pips (" + s.pips + ") — the " +
+       "display is showing health the hero no longer has");
+    eq(s.pips.length, r.max, "the pip row is " + s.pips.length + " long, not " + r.max);
+  }
+  ok(r.healed.hp > r.healed.was,
+     "the leech never paid out, so the healing half of this is untested");
+  eq((r.healed.pips.match(/#/g) || []).length, r.healed.hp,
+     "after healing to " + r.healed.hp + " the HUD lit " +
+     (r.healed.pips.match(/#/g) || []).length + " pips (" + r.healed.pips + ") — the " +
+     "heart the revenant just bought is invisible");
+});
+
 test("daily: the same day deals the same waves, however differently it is played", async (pg) => {
   // The point of a daily is that the score is comparable, which needs the
   // waves to be identical for everyone. Seeding once at the START of a run

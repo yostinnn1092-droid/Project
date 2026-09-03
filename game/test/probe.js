@@ -20,7 +20,7 @@ window.__probe = {
   REVENANT, BOOMER, SENTINEL, SENTINEL_BOLT, SCATTER, spawnTurret, stepTurrets,
   CHAR_UNLOCK, charUnlockAt, charUnlocked, nextUnlock, recordRun, runSummary,
   gameOver, charBest, loadProfile, saveProfile, SAVE_KEY, shareLine, toMenu,
-  startDaily, todaySeed, dailyNumber, waveSeed, withSeed, mulberry32,
+  startDaily, todaySeed, dailyNumber, waveSeed, withSeed, mulberry32, updateHUD,
   claimWave, startNextWave, toast, offerDraft, nextWave, SFX, audioInit,
   setDifficulty, DIFFS,
   // DIFF is reassigned by setDifficulty, so it has to be read through a

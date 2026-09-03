@@ -3186,6 +3186,10 @@ function stepCast(dt) {
               castState.leech -= s.spec.leech.per;
               if (hero.hp < cap) {
                 hero.hp++;
+                // Same gap on the way up, and worse here: this is the
+                // revenant's whole payoff, and an unrepainted pip means the
+                // heart it just bought is invisible until something dies.
+                updateHUD();
                 banner("SANGUINE");
                 SFX.rankUp ? SFX.rankUp(1) : null;
               }
@@ -6183,6 +6187,12 @@ function hurtHero() {
     SFX.rankUp(3);
   }
   damageFlash();
+  // The pips are drawn by updateHUD, and NOTHING on the damage path called it:
+  // step() does not, and hurtHero did not either, so a hit left the health
+  // display showing the health you had BEFORE it. It self-corrected on the
+  // next kill, which hides it in a busy fight and leaves it wrong in exactly
+  // the moment that matters — surrounded, taking hits, killing nothing.
+  updateHUD();
 }
 
 function damageWalker(w, amount, dir, knock, kind) {
