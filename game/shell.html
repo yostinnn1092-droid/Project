@@ -235,6 +235,15 @@
   }
   #nextUnlock.show { display: block; }
   #nextUnlock b { color: var(--force); font-weight: 600; }
+  /* Today's run, under its button. Reads as a standing invitation before it
+     is played and as a score to beat afterwards. */
+  #dailyLine {
+    display: none; font-family: var(--mono); font-size: 9.5px;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--dim);
+    margin-top: 8px;
+  }
+  #dailyLine.show { display: block; }
+  #dailyLine b { color: var(--force); font-weight: 600; }
   /* On a phone the cards stretch to their max and settle at two per row, which
      is eight rows of roster and puts Begin below the fold again. Capping them
      narrower fits three across the 350px the menu actually has. */
@@ -661,6 +670,8 @@
     <p class="pickLabel">Difficulty</p>
     <div id="diffPick"></div>
     <button id="startBtn">Begin</button>
+    <button id="dailyBtn" class="ghost">Daily run</button>
+    <p id="dailyLine"></p>
 
     <div class="brief">
       <p class="kin"><b>FORCE</b> gathers what is in reach; the button becomes <b>SHOOT</b> until the wheel

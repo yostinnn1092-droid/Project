@@ -235,6 +235,15 @@
   }
   #nextUnlock.show { display: block; }
   #nextUnlock b { color: var(--force); font-weight: 600; }
+  /* Today's run, under its button. Reads as a standing invitation before it
+     is played and as a score to beat afterwards. */
+  #dailyLine {
+    display: none; font-family: var(--mono); font-size: 9.5px;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--dim);
+    margin-top: 8px;
+  }
+  #dailyLine.show { display: block; }
+  #dailyLine b { color: var(--force); font-weight: 600; }
   /* On a phone the cards stretch to their max and settle at two per row, which
      is eight rows of roster and puts Begin below the fold again. Capping them
      narrower fits three across the 350px the menu actually has. */
@@ -661,6 +670,8 @@
     <p class="pickLabel">Difficulty</p>
     <div id="diffPick"></div>
     <button id="startBtn">Begin</button>
+    <button id="dailyBtn" class="ghost">Daily run</button>
+    <p id="dailyLine"></p>
 
     <div class="brief">
       <p class="kin"><b>FORCE</b> gathers what is in reach; the button becomes <b>SHOOT</b> until the wheel
@@ -11066,6 +11077,10 @@ const PROFILE = {
   // A record per character turns one chase into fifteen, and gives the kits
   // you unlocked and never went back to a reason to be picked up.
   charBest: {},
+  // The first attempt at a given day's run, and only the first: a daily is a
+  // score people compare, so a retry that overwrote it would make the number
+  // meaningless. Replays are still allowed, they just do not rewrite this.
+  daily: { day: 0, wave: 0, score: 0, no: 0 },
 };
 
 function loadProfile() {
@@ -11097,6 +11112,9 @@ function loadProfile() {
   if (typeof PROFILE.bestRank !== "string") PROFILE.bestRank = "D";
   if (!PROFILE.seen || typeof PROFILE.seen !== "object") PROFILE.seen = {};
 
+  if (!PROFILE.daily || typeof PROFILE.daily !== "object") PROFILE.daily = {};
+  for (const k of ["day", "wave", "score", "no"])
+    PROFILE.daily[k] = num(PROFILE.daily[k], 0, 0);
   if (!PROFILE.charLv || typeof PROFILE.charLv !== "object") PROFILE.charLv = {};
   if (!PROFILE.charBest || typeof PROFILE.charBest !== "object") PROFILE.charBest = {};
   for (const k in CHARS) {
@@ -11180,6 +11198,15 @@ function recordRun() {
   if (S.wave > charBest(CHAR.key)) {
     PROFILE.charBest[CHAR.key] = S.wave;
     beat.charBest = true;
+  }
+  // The day's run, recorded once. A daily is a number people compare, so a
+  // second attempt must not overwrite the first — but the SAME run continuing
+  // into endless should still improve it, which is what dailyOwned tracks.
+  if (S.seed !== null && S.seed !== undefined) {
+    if (PROFILE.daily.day !== S.seed || S.dailyOwned) {
+      PROFILE.daily = { day: S.seed, no: S.dailyNo, wave: S.wave, score: S.score };
+      S.dailyOwned = true;
+    }
   }
   for (const k of wasLocked) {
     if (!charUnlocked(k)) continue;
@@ -12339,6 +12366,9 @@ const S = {
   // second visit records the progress made since without paying the career
   // totals twice over.
   bankedKills:0, counted:false,
+  // null for a normal run; the day's number for a daily. Only buildWave reads
+  // it, so nothing else in the game has to know a run is seeded.
+  seed:null, dailyNo:0, dailyOwned:false,
   // Rungs of the unlock ladder taken during THIS run, and whether it moved the
   // wave record. Both are run-scoped: the end screen reports what the run did,
   // which is no longer the same question as what is still locked.
@@ -12395,7 +12425,62 @@ function resetObstacles() {
   }
 }
 
+// ─────────────────────────────────────────────────────────── seeded runs
+// A daily has to deal every player the same waves, and seeding once at the
+// start does NOT achieve that: the moment two players fight differently they
+// draw different amounts of randomness, and by wave 9 their modifiers have
+// come apart. Particles alone would do it.
+//
+// So the seed is applied per WAVE rather than per run, derived from (seed,
+// wave number), around the one function that builds content. Everything
+// outside that window — crits, sparks, whatever the fight happens to look
+// like — draws from the normal stream and cannot push the content out of
+// step. Wave 9 is wave 9 for everyone, however they got there.
+//
+// Math.random is swapped rather than every call site rewritten: there are 48
+// of them, most in visual code where determinism is neither needed nor
+// wanted, and the swap is restored in a finally so a throw inside cannot
+// leave the game deterministic for the rest of the session.
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function waveSeed(seed, n) {
+  return (Math.imul(seed ^ 0x9E3779B9, 2654435761) ^ Math.imul(n + 1, 40503)) | 0;
+}
+
+function withSeed(seed, fn) {
+  const real = Math.random;
+  Math.random = mulberry32(seed);
+  try { return fn(); } finally { Math.random = real; }
+}
+
+// The day itself is the seed, in UTC so the world plays the same run rather
+// than a new one rolling over timezone by timezone.
+function todaySeed(d) {
+  d = d || new Date();
+  return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+}
+// A short human number for the share line. Counted from the day this shipped.
+function dailyNumber(d) {
+  d = d || new Date();
+  const epoch = Date.UTC(2026, 8, 1);
+  return Math.max(1, Math.floor((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(),
+    d.getUTCDate()) - epoch) / 86400000) + 1);
+}
+
 function buildWave(n) {
+  // A normal run stays as random as it ever was.
+  if (S.seed === null || S.seed === undefined) return buildWaveFrom(n);
+  return withSeed(waveSeed(S.seed, n), () => buildWaveFrom(n));
+}
+
+function buildWaveFrom(n) {
   clearAll();
   rollModifier(n);
   // Only re-lay the world when the place actually changes; re-laying 210
@@ -14480,6 +14565,13 @@ function runSummary() {
 // the game has no published address yet, and a placeholder URL in shipped code
 // is worse than none. When there is one, it goes on the end of this string.
 function shareLine() {
+  // A daily is comparable, so it leads with the thing another player can
+  // answer. A plain score is a number about you; "wave 12 on daily #4" is an
+  // invitation.
+  if (S.seed !== null && S.seed !== undefined) {
+    return "Kinesis daily #" + S.dailyNo + " — wave " + S.wave +
+           " · " + S.score.toLocaleString() + " · " + CHAR.name;
+  }
   const total = Object.keys(CHARS).length;
   const open = Object.keys(CHARS).filter(charUnlocked).length;
   return "Kinesis — wave " + S.wave + " · " + S.score.toLocaleString() +
@@ -14604,6 +14696,9 @@ function restart() {
   S.wave = 1; S.kills = 0; S.score = 0; hero.hp = CFG.maxHealth; S.modeCd = 0;
   S.style = 0; S.styleT = 0; S.rank = "D"; S.recent.length = 0; S.endless = false;
   S.bankedKills = 0; S.counted = false;
+  // Try again leaves the daily behind: it is one attempt on a fixed set of
+  // waves, so a retry is an ordinary run rather than a second go at today's.
+  S.seed = null; S.dailyNo = 0; S.dailyOwned = false;
   S.unlockedThisRun.length = 0; S.beatWave = false;
   buildArena(ARENAS[0]);
   el("arena").textContent = ARENAS[0].name;
@@ -14784,6 +14879,18 @@ function start() {
 // the run is where the context is created.
 el("startBtn").addEventListener("click", () => { audioInit(); start(); });
 
+// Today's run. Same waves, same conditions, same order, for everyone who
+// plays it — which is what makes the score worth telling someone.
+function startDaily() {
+  audioInit();
+  restart();                 // clears any previous run, and its seed
+  S.seed = todaySeed();
+  S.dailyNo = dailyNumber();
+  S.dailyOwned = false;
+  buildWave(S.wave);         // rebuild wave 1 now that the seed is set
+  toast("Daily #" + S.dailyNo + " — same waves for everyone", 3400, true);
+}
+
 // Difficulty picker on the menu. Remembered between sessions.
 // Remembered zoom, restored before the first frame.
 (function initZoom() {
@@ -14897,6 +15004,22 @@ function wireDifficulty() {
   }
 }
 
+// Today's line under the daily button: an invitation before it is played, a
+// score afterwards. Painted alongside the rest of the menu so a restored menu
+// gets it too.
+function paintDaily() {
+  const line = el("dailyLine"), btn = el("dailyBtn");
+  const no = dailyNumber(), today = todaySeed();
+  if (btn) btn.textContent = "Daily run #" + no;
+  if (!line) return;
+  const d = PROFILE.daily;
+  line.innerHTML = (d && d.day === today && d.wave)
+    ? "Today: <b>wave " + d.wave + "</b> · " + (d.score || 0).toLocaleString() +
+      " — same waves for everyone"
+    : "One fixed run a day · everybody gets the same waves";
+  line.classList.add("show");
+}
+
 function paintMenuBest() {
   if (!(PROFILE.runs > 0)) return;
   const m = el("menuBest");
@@ -14920,8 +15043,11 @@ function toMenu() {
   wireCharacterPicker();
   wireDifficulty();
   paintMenuBest();
+  paintDaily();
   const b = el("startBtn");
   if (b) b.addEventListener("click", () => { audioInit(); start(); });
+  const d = el("dailyBtn");
+  if (d) d.addEventListener("click", startDaily);
   el("modName2").classList.remove("show");
   el("bossBar").classList.remove("show");
   el("overlay").classList.remove("hide");
@@ -14937,6 +15063,8 @@ el("arena").textContent = ARENAS[0].name;
 wireCharacterPicker();
 wireDifficulty();
 paintMenuBest();
+paintDaily();
+el("dailyBtn").addEventListener("click", startDaily);
 // Captured after the pickers are built so the restored markup is complete;
 // the wiring functions clear their boxes before filling them, so re-running
 // them against those cards replaces rather than duplicates.

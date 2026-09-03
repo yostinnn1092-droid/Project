@@ -2004,6 +2004,134 @@ test("cards: a toast from the wave does not survive onto the card", async (pg) =
   }
 });
 
+test("daily: the same day deals the same waves, however differently it is played", async (pg) => {
+  // The point of a daily is that the score is comparable, which needs the
+  // waves to be identical for everyone. Seeding once at the START of a run
+  // does not achieve that: two players who fight differently draw different
+  // amounts of randomness, and by wave 8 their modifiers have come apart.
+  // Each wave is seeded from (seed, wave number) instead, so wave 9 is wave 9
+  // however you got there.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    // A fingerprint of everything a player would notice as "the same run":
+    // the condition, the whole roster including what is still queued, and how
+    // much is lying around to throw.
+    const fingerprint = (wave) => {
+      const roster = {};
+      for (const w of P.walkers) if (!w.dead) roster[w.type] = (roster[w.type] || 0) + 1;
+      for (const p of P.spawnQ) for (const t of p.types) roster[t] = (roster[t] || 0) + 1;
+      return wave + ":" + (P.WMOD.name || "-") + ":" +
+             Object.keys(roster).sort().map(k => k + roster[k]).join(",") +
+             ":props" + P.rocks.filter(o => !o.gone).length;
+    };
+    const play = (seed, churn) => {
+      P.S.seed = seed;
+      const out = [];
+      for (let wave = 1; wave <= 8; wave++) {
+        // A different fight burns a different amount of the normal stream.
+        for (let i = 0; i < churn; i++) Math.random();
+        P.buildWave(wave);
+        out.push(fingerprint(wave));
+      }
+      return out;
+    };
+
+    const a = play(20260903, 0);
+    const b = play(20260903, 977);        // same day, played differently
+    const other = play(20260904, 0);      // a different day
+
+    // An ordinary run must stay random — if the seam leaked, every run in the
+    // game would deal the same waves forever, which is a far worse bug than
+    // the one this feature fixes.
+    P.S.seed = null;
+    const free1 = [], free2 = [];
+    for (let wave = 1; wave <= 8; wave++) { P.buildWave(wave); free1.push(fingerprint(wave)); }
+    for (let wave = 1; wave <= 8; wave++) { P.buildWave(wave); free2.push(fingerprint(wave)); }
+
+    // ...and Math.random must be the real one again afterwards, checked by
+    // IDENTITY. Two weaker versions of this failed to catch a swap that was
+    // never restored: counting distinct values does not work because a leaked
+    // generator also returns 200 different numbers, and comparing the draws
+    // after two identical seeded waves does not work either because the arena
+    // is only rebuilt when it CHANGES, so the second pass consumes fewer draws
+    // and the sequences differ anyway. The contract is simply that the global
+    // is put back, so that is what is measured.
+    const realRandom = Math.random;
+    P.S.seed = 20260903;
+    P.buildWave(3);
+    const restored = Math.random === realRandom;
+    P.S.seed = null;
+
+    return {
+      sameDay: a.filter((x, i) => x === b[i]).length, waves: a.length,
+      otherDay: a.filter((x, i) => x === other[i]).length,
+      freeRepeats: free1.filter((x, i) => x === free2[i]).length,
+      restored,
+      sample: a[2],
+    };
+  });
+
+  eq(r.sameDay, r.waves,
+     "two players on the same day got " + r.sameDay + " of " + r.waves +
+     " waves alike — the run is not comparable, so the score means nothing");
+  ok(r.otherDay < r.waves,
+     "a different day dealt an identical run (" + r.otherDay + " of " + r.waves +
+     " waves) — every daily would be the same one");
+  ok(r.freeRepeats < r.waves,
+     "an unseeded run repeated itself exactly (" + r.freeRepeats + " of " + r.waves +
+     " waves) — the seed has leaked into ordinary play");
+  eq(r.restored, true,
+     "Math.random was not the real one after a seeded wave — the swap leaked, and " +
+     "the whole game is now running on the daily's generator");
+});
+
+test("daily: today's run is recorded once, and a retry cannot rewrite it", async (pg) => {
+  // A daily score is only worth telling someone if it stands. Retrying until
+  // the number is good would make it meaningless — but the SAME run carrying
+  // on into endless should still improve it, which is the distinction here.
+  const r = await pg.evaluate(() => {
+    const P = window.__probe;
+    P.PROFILE.daily = { day: 0, wave: 0, score: 0, no: 0 };
+
+    const attempt = (wave, score) => {
+      P.S.seed = P.todaySeed(); P.S.dailyNo = P.dailyNumber();
+      P.S.dailyOwned = false;
+      P.S.wave = wave; P.S.score = score; P.S.kills = 5;
+      P.recordRun();
+      return JSON.parse(JSON.stringify(P.PROFILE.daily));
+    };
+
+    const first = attempt(6, 3300);
+    const better = attempt(11, 9000);     // a second, better attempt
+    const worse  = attempt(2, 100);       // and a worse one
+
+    // The same run continuing past the Maw, which recordRun sees twice.
+    P.PROFILE.daily = { day: 0, wave: 0, score: 0, no: 0 };
+    P.S.seed = P.todaySeed(); P.S.dailyNo = P.dailyNumber(); P.S.dailyOwned = false;
+    P.S.wave = 11; P.S.score = 5000; P.recordRun();
+    P.S.wave = 17; P.S.score = 9900; P.recordRun();   // endless, same run
+    const endless = JSON.parse(JSON.stringify(P.PROFILE.daily));
+
+    // A normal run must never touch the daily record.
+    P.S.seed = null; P.S.wave = 30; P.S.score = 99999; P.recordRun();
+    const afterNormal = JSON.parse(JSON.stringify(P.PROFILE.daily));
+
+    return { first, better, worse, endless, afterNormal, today: P.todaySeed() };
+  });
+
+  eq(r.first.wave, 6, "the first attempt was not recorded (wave " + r.first.wave + ")");
+  eq(r.first.day, r.today, "the record is not stamped with today");
+  eq(r.better.wave, 6,
+     "a second, better attempt rewrote the record to wave " + r.better.wave +
+     " — a daily you can retry is not a score anyone can compare");
+  eq(r.worse.wave, 6, "a worse attempt rewrote the record to wave " + r.worse.wave);
+  eq(r.endless.wave, 17,
+     "the same run carrying into endless stopped at wave " + r.endless.wave +
+     " — continuing is not a retry and should still count");
+  eq(r.afterNormal.wave, 17,
+     "an ordinary run overwrote the daily record (wave " + r.afterNormal.wave + ")");
+});
+
 test("unlocks: the roster is earned, and every run pays into it", async (pg) => {
   // Fifteen characters handed over in the first second is a paralysing menu
   // and spends the whole game at once. They are priced in best-wave-reached —
