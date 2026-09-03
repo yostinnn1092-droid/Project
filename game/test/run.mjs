@@ -3221,6 +3221,16 @@ test("boss: the Warden closes, throws, and its plates gate the core", async (pg)
     // Closes and throws. Props deliberately kept: throwing needs something to
     // pick up, and the arena is where it finds one.
     P.buildWave(5); P.parkWalkers(); P.hero.pos.set(0, 0, 0);
+    // ...but not the ones that DETONATE. A barrel chain catching the Warden as
+    // it walks the arena took it from full health to 761 of 1300 gone in the
+    // worst of fourteen sampled runs, and further out in that tail it died —
+    // which is what made this case fail in a full suite now and then. It is
+    // not modifier-specific: VOLATILE runs lost anywhere from 0% to 58%.
+    // Removing only the explosive props leaves 34-38 inert ones to throw and
+    // drops the damage to zero in nine runs of ten, without touching either
+    // behaviour under test (closes 23.4-24.2 of 26, throws every time).
+    for (const o of P.rocks)
+      if (o.def && (o.def.explode || o.def.puddle)) o.gone = true;
     P.spawnWalker("boss", 0, -26);
     const w = P.walkers[P.walkers.length - 1];
     let minD = 26, hostile = 0;
