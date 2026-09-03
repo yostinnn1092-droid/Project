@@ -1424,7 +1424,15 @@ test("characters: the revenant pays out WHOLE hearts and never overfills", async
     P.parkWalkers();
 
     const cap = P.CFG.maxHealth + P.MOD.hpBonus;
-    const w = P.walkers.find(x => !x.dead);
+    // A target that CLOSES, never one that shoots. This took whatever body the
+    // wave dealt first, and when that was an archer the case pinned it twelve
+    // units in front of a hero pinned at the origin and let it shoot him for
+    // the whole run: measured across eight runs, every archer target ended the
+    // hero on 0 or -1 health and every walker or runner ended him on 3. The
+    // hero's health IS the measurement here, so anything that can spend it
+    // falsifies the result rather than adding noise. Standoff archetypes are
+    // the ones holding at range by design — archer 17, warper 15, spawner 12.
+    const w = P.walkers.find(x => !x.dead && x.AI && x.AI.ring < 5);
     const f = { x: Math.sin(P.cam.yaw), z: Math.cos(P.cam.yaw) };
     // Everything parked every frame, then the one target put back. The hero
     // is sitting on two hearts and his health is the measurement, so a
@@ -1433,6 +1441,11 @@ test("characters: the revenant pays out WHOLE hearts and never overfills", async
     // of this case reported "never healed" for a mechanic that works.
     const pin = () => {
       P.parkWalkers();
+      // Arrows outlive the archer that loosed them. Thirty seconds of stack
+      // filling happen before the measurement, and shafts still in the air
+      // when it starts land on a hero who is pinned at the origin — one point
+      // of damage cancels the heart exactly and reads as "never healed".
+      P.arrows.length = 0;
       w.pos.set(f.x * 12, 0, f.z * 12); w.aggro = false; w.cool = 999; w.hp = 99999;
     };
 
