@@ -97,14 +97,50 @@ The design rests on one trade: **attacks commit, but input never gets eaten.**
 - The wolf's **telegraph is the contract**: see the crouch, and you have time.
   Shorten it and the enemy becomes cheap rather than hard.
 
+## Naming
+
+Wear a creature down and it **collapses** instead of dying — helpless for a few
+seconds. Walk over and press `F` and it is yours, permanently, under the name you
+give it.
+
+The difficulty is not the fight. It is **stopping**. Hit it again while it is down
+and it dies, and attacks in this game commit — so a greedy third swing is exactly
+how you lose the wolf you wanted. That is the same weight the combat is built on,
+seen from the other side.
+
+Two limits keep a name meaningful. **Will** is spent per name and returns slowly,
+so you cannot clear a forest and adopt all of it. **Capacity** caps how many you
+hold at once, so eventually the roster is a question of who is worth a place.
+
+A named creature keeps fighting like itself. `Familiar` decides only where to be
+and what to fight; the creature's own brain still decides how. A named Minotaur
+should feel nothing like a large wolf, and that is enforced by the split rather
+than by remembering to be careful.
+
+### Scene setup for it
+
+**Player** — add `FamilyRoster` and `NamingInteractor`.
+
+**Wolf** — add `MonsterIdentity` and `Subduable`. On `Subduable`, drag the
+`WolfAI` component into **Brain**. Set the wolf's layer in
+`NamingInteractor → Monster Layers` and `Familiar → Hostile Layers`.
+
+Hostile Layers on a familiar must **not** include the player or the family, or
+your own wolf will pick a fight with you.
+
+`pendingName` on `NamingInteractor` is a placeholder for a text field — whatever
+is typed there is the name given. `Prompt` is a string the HUD can display; there
+is deliberately no UI yet.
+
+### Orders
+
+`FamilyRoster.OrderAll(...)` takes **Follow**, **Hold**, **Attack**, **Wait**.
+Nothing is bound to a key yet — orders exist as an API, not an interface.
+
 ## What comes next
 
-Once the feel is right, in order:
+1. **Pack leaders** — a wolf leader whose pack scatters or rallies with it.
+2. **Emergent class** — track what the player actually does, have NPCs notice.
+3. **Saving** — names do not survive a restart yet, which they must.
 
-1. **Subdue instead of kill** — a body left alive at low health, approachable.
-2. **Naming** — name that body and it becomes yours. The heart of the whole idea.
-3. **Pack leaders** — a wolf leader whose pack scatters or rallies with it.
-4. **Emergent class** — track what the player actually does, have NPCs notice.
-
-Nothing above matters if step 0 is not fun, which is why it is the whole of this
-first slice.
+Nothing above matters if the combat is not fun, which is why that was step 0.

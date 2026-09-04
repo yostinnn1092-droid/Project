@@ -49,6 +49,15 @@ namespace Rpg.Combat
         /// <summary>Set by the owner while dodging, or during a boss's armoured phase.</summary>
         public bool Invulnerable { get; set; }
 
+        /// <summary>
+        /// While true, a blow that would kill leaves a sliver instead. Set by
+        /// <see cref="Monsters.Subduable"/> on anything that can be taken alive,
+        /// and cleared the moment it goes down — so the NEXT blow finishes it.
+        /// That switch is the entire tension of taming: the creature breaks, and
+        /// then it is on the player to stop.
+        /// </summary>
+        public bool PreventDeath { get; set; }
+
         private float _poise;
         private float _quietFor;
 
@@ -79,6 +88,17 @@ namespace Rpg.Combat
             _poise -= blow.Impact;
             _quietFor = 0f;
 
+            // Caught before the events fire, not after. A creature that can be
+            // subdued must be left ALIVE by the blow that breaks it, and it must
+            // already be alive by the time OnHit runs — that is where Subduable
+            // decides to collapse it, and it will not collapse something it has
+            // been told is dead.
+            //
+            // Without this, a heavy weapon taking a wolf from a fifth of its
+            // health straight to zero would kill it outright and the player would
+            // simply never see the window they are meant to be watching for.
+            if (Health <= 0f && PreventDeath) Health = Mathf.Max(1f, maxHealth * 0.02f);
+
             bool staggered = _poise <= 0f;
             if (staggered) _poise = maxPoise;
 
@@ -95,6 +115,33 @@ namespace Rpg.Combat
         {
             if (IsDead) return;
             Health = Mathf.Min(maxHealth, Health + Mathf.Max(0f, amount));
+        }
+
+        /// <summary>
+        /// Kill outright, ignoring invulnerability. Exists for the finishing blow
+        /// on a subdued creature: it is made untouchable while it is down so a
+        /// stray hit from elsewhere cannot rob the player of a naming, but a
+        /// deliberate strike still has to be able to end it.
+        /// </summary>
+        public void Kill()
+        {
+            if (IsDead) return;
+            Health = 0f;
+            Invulnerable = false;
+            OnDeath?.Invoke();
+        }
+
+        /// <summary>
+        /// Scale up a creature that has just been named. Applied to the ceiling
+        /// as well as the current value, so a familiar is permanently stronger
+        /// rather than briefly overhealed.
+        /// </summary>
+        public void ScaleMaxHealth(float multiplier)
+        {
+            if (multiplier <= 0f) return;
+            float ratio = maxHealth > 0f ? Health / maxHealth : 1f;
+            maxHealth *= multiplier;
+            Health = maxHealth * ratio;
         }
     }
 
