@@ -87,7 +87,8 @@ namespace Rpg.Monsters
         public Familiar Name(MonsterIdentity identity, string name, out string reason)
         {
             if (!CanName(identity, out reason)) return null;
-            if (!identity.Bestow(name)) { reason = "That name will not do."; return null; }
+            name = (name ?? string.Empty).Trim();
+            if (name.Length == 0) { reason = "It needs a name."; return null; }
 
             Will -= identity.NamingCost;
 
@@ -102,6 +103,13 @@ namespace Rpg.Monsters
 
             _family.Add(familiar);
             if (health != null) health.OnDeath.AddListener(() => Forget(familiar));
+
+            // The name goes on LAST, deliberately. Bestow raises the event a pack
+            // listens to, and an earlier version named the creature first — so a
+            // pack heard its leader's name, went looking for the roster to bind
+            // its members to, and found nothing there yet. The whole pack would
+            // have joined masterless.
+            identity.Bestow(name);
 
             OnNamed?.Invoke(familiar);
             reason = null;

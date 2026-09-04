@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace Rpg.Monsters
@@ -39,6 +40,12 @@ namespace Rpg.Monsters
         public float NamingCost => namingCost;
         public float NamedPowerMultiplier => namedPowerMultiplier;
 
+        /// <summary>
+        /// Raised the once, when a name is given. A pack listens for its
+        /// leader's, which is how naming one wolf brings six.
+        /// </summary>
+        public event Action<MonsterIdentity> Named;
+
         /// <summary>Empty until named. Set once and never changed.</summary>
         public string GivenName { get; private set; }
         public bool IsNamed => !string.IsNullOrEmpty(GivenName);
@@ -57,6 +64,7 @@ namespace Rpg.Monsters
             name = (name ?? string.Empty).Trim();
             if (name.Length == 0) return false;
             GivenName = name;
+            Named?.Invoke(this);
             return true;
         }
     }

@@ -53,6 +53,7 @@ namespace Rpg.Monsters
         private IMonsterBrain _brain;
         private Damageable _health;
         private Transform _holdAt;
+        private Transform _anchorOverride;
         private float _nextThink;
         private readonly Collider[] _nearby = new Collider[24];
         private Transform _holdMarker;
@@ -73,7 +74,14 @@ namespace Rpg.Monsters
         {
             Master = master;
             Order = FamiliarOrder.Follow;
-            _brain?.SetHome(master != null ? master.transform : null, leash);
+            _brain?.SetHome(AnchorPoint(), leash);
+
+            // Anything that has joined you dies like anything else. Subduable
+            // arms this on every creature that can be taken alive and only
+            // clears it when one actually collapses — so a pack member that
+            // joined with its leader, having never gone down itself, would have
+            // been quietly unkillable for the rest of the game.
+            if (_health != null) _health.PreventDeath = false;
         }
 
         public void Command(FamiliarOrder order, Transform target = null)
@@ -111,7 +119,7 @@ namespace Rpg.Monsters
                     _holdAt = null;
                     CurrentTarget = null;
                     _brain?.SetTarget(null);
-                    _brain?.SetHome(Master != null ? Master.transform : null, leash);
+                    _brain?.SetHome(AnchorPoint(), leash);
                     break;
             }
         }
@@ -161,10 +169,23 @@ namespace Rpg.Monsters
             if (CurrentTarget == null) AcquireNearby();
         }
 
-        /// <summary>The point it is tethered to — the master, or the ground it holds.</summary>
+        /// <summary>
+        /// Keep station on something other than the master. A pack member is
+        /// anchored to its LEADER, so the chain runs player to leader to pack —
+        /// which is the hierarchy the fiction promises and the reason a leader
+        /// costs one slot rather than the pack costing six.
+        /// </summary>
+        public void SetAnchor(Transform anchor)
+        {
+            _anchorOverride = anchor;
+            if (Order == FamiliarOrder.Follow) _brain?.SetHome(AnchorPoint(), leash);
+        }
+
+        /// <summary>The point it is tethered to — its anchor, or the ground it holds.</summary>
         private Transform AnchorPoint()
         {
             if (Order == FamiliarOrder.Hold && _holdAt != null) return _holdAt;
+            if (_anchorOverride != null) return _anchorOverride;
             return Master != null ? Master.transform : null;
         }
 

@@ -137,10 +137,53 @@ is deliberately no UI yet.
 `FamilyRoster.OrderAll(...)` takes **Follow**, **Hold**, **Attack**, **Wait**.
 Nothing is bound to a key yet — orders exist as an API, not an interface.
 
+## Packs and leaders
+
+Six identical wolves is an endurance test, and the only decision in it is which
+one happens to be closest. Put a **leader** among them and the fight acquires a
+question — spend yourself reaching the dangerous one, or grind through the
+escort — and answering it right is paid out in the pack coming apart.
+
+Morale gives that shape:
+
+| What happens to the leader | What the pack does |
+| --- | --- |
+| Collapses (down, alive) | **Hesitates** for a few seconds — it can still be rallied, and this is your window to walk over and name it |
+| Dies | **Routs**, scattering away from where it fell |
+| Is named | **Joins you**, anchored to the leader rather than to you |
+
+The last row is the payoff the whole naming system was building toward. A named
+leader brings its **entire pack for one place on the roster**, because the pack
+follows the leader and the leader follows you. That is the fiction's own
+hierarchy, and it is what makes hunting a leader worth the risk rather than just
+fighting a tougher wolf. Members are deliberately not named themselves and
+cannot be — one name, one slot, six wolves.
+
+Routing is a reprieve, not a win. A scattered wolf recovers its nerve and then
+simply asks the ordinary question of whether anything is still close enough to
+notice — so breaking a pack buys you the seconds to finish the leader or to
+leave, and standing there admiring your work does not.
+
+### Scene setup for a pack
+
+Put the leader and its members under one parent object and add **`MonsterPack`**
+to the parent. Leave **Leader** and **Members** empty and it takes the first
+child `MonsterIdentity` marked **Is Leader** and everything else beneath it.
+
+On the leader's `MonsterIdentity`, tick **Is Leader** and raise **Naming Cost** —
+it is worth several wolves, and the price should say so. Members need nothing
+beyond the usual `MonsterIdentity` + `Subduable`; the pack anchors them to their
+leader itself, which is what makes them read as a pack rather than as six animals
+standing near each other.
+
+`MonsterPack.Adopt(...)` adds a creature at runtime, for a leader that calls for
+help or a den that keeps producing them.
+
 ## What comes next
 
-1. **Pack leaders** — a wolf leader whose pack scatters or rallies with it.
-2. **Emergent class** — track what the player actually does, have NPCs notice.
-3. **Saving** — names do not survive a restart yet, which they must.
+1. **Emergent class** — track what the player actually does, have NPCs notice.
+2. **Saving** — names do not survive a restart yet, which they must.
+3. **A second species** — the wolf is the only proof that `IMonsterBrain` keeps
+   a named creature fighting like itself. One more would make it a fact.
 
 Nothing above matters if the combat is not fun, which is why that was step 0.

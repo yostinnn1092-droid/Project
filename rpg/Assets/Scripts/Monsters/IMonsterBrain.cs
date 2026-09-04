@@ -34,6 +34,13 @@ namespace Rpg.Monsters
         /// </summary>
         void Tame();
 
+        /// <summary>
+        /// Break and run from a point, for a while. Used when a pack loses its
+        /// leader — the difference between an enemy that dies and a fight that
+        /// is WON is whether the rest of them break.
+        /// </summary>
+        void Rout(Vector3 awayFrom, float seconds);
+
         /// <summary>Currently fighting something.</summary>
         bool Engaged { get; }
     }

@@ -76,10 +76,13 @@ namespace Rpg.Monsters
                 return;
             }
 
-            // A creature already named is family and cannot be re-taken; and a
-            // leader is worth more alive, but that is a balance question for the
-            // identity, not a special case here.
-            if (_identity.IsNamed) return;
+            // Family is not prey. Named creatures obviously, but also pack
+            // members, who joined under their leader and so carry no name of
+            // their own. Without the second half, a wolf that came with its
+            // leader would still collapse in fights — and every recovery
+            // re-arms the death guard, leaving a familiar that flops over
+            // repeatedly and cannot be killed for the rest of the game.
+            if (IsSpokenFor) return;
 
             if (_health.Health <= _health.MaxHealth * collapseAt) Collapse();
         }
@@ -145,7 +148,18 @@ namespace Rpg.Monsters
             if (brain != null) brain.enabled = true;
         }
 
-        /// <summary>True if a player standing here could name it right now.</summary>
-        public bool CanBeNamed => IsDown && !_health.IsDead && !_identity.IsNamed;
+        /// <summary>
+        /// True if a player standing here could name it right now.
+        ///
+        /// A creature that already answers to someone is excluded even though it
+        /// has no name of its own: pack members join under their leader, so
+        /// without this the player could tame a leader for one slot and then
+        /// name each of its wolves individually, which is precisely the rule the
+        /// pack design exists to enforce.
+        /// </summary>
+        public bool CanBeNamed => IsDown && !_health.IsDead && !IsSpokenFor;
+
+        /// <summary>Already belongs to someone, named or not.</summary>
+        private bool IsSpokenFor => _identity.IsNamed || GetComponent<Familiar>() != null;
     }
 }

@@ -24,7 +24,7 @@ namespace Rpg.AI
     [RequireComponent(typeof(Damageable))]
     public class WolfAI : MonoBehaviour, IMonsterBrain
     {
-        private enum State { Idle, Chase, Circle, Telegraph, Lunge, Recover, Stagger, Dead }
+        private enum State { Idle, Chase, Circle, Telegraph, Lunge, Recover, Stagger, Routing, Dead }
 
         [Header("Allegiance")]
         [Tooltip("Wild wolves hunt whatever they notice. Turned off when the wolf " +
@@ -62,6 +62,12 @@ namespace Rpg.AI
 
         [Header("Reactions")]
         [SerializeField] private float staggerDuration = 0.5f;
+        [Tooltip("How fast it runs when it breaks. Faster than it chases — a rout " +
+                 "should read as panic, not a tactical withdrawal.")]
+        [SerializeField] private float routSpeed = 6.5f;
+        [Tooltip("How often a wild wolf with nothing to fight looks for something, " +
+                 "in seconds. Only runs while it is empty-handed.")]
+        [SerializeField] private float reacquireEvery = 0.5f;
 
         [Header("Refs")]
         [SerializeField] private HitBox jaws;
@@ -78,6 +84,10 @@ namespace Rpg.AI
         private int _circleDir = 1;
         private float _circleUntil;
         private Coroutine _act;
+        private Vector3 _routFrom;
+        private float _routUntil;
+        private Transform _player;
+        private float _nextLookAt;
 
         public bool Engaged => _target != null &&
                                _state != State.Idle && _state != State.Dead;
@@ -99,6 +109,19 @@ namespace Rpg.AI
             _leash = Mathf.Max(0.5f, leash);
         }
 
+        public void Rout(Vector3 awayFrom, float seconds)
+        {
+            if (_state == State.Dead) return;
+            // Breaks out of a committed lunge, unlike every other order. Panic is
+            // exactly the thing that should interrupt an attack already underway.
+            if (_act != null) { StopCoroutine(_act); _act = null; }
+            if (jaws != null) jaws.Close();
+            _target = null;
+            _routFrom = awayFrom;
+            _routUntil = Time.time + Mathf.Max(0.1f, seconds);
+            _state = State.Routing;
+        }
+
         private void Awake()
         {
             _controller = GetComponent<CharacterController>();
@@ -113,11 +136,7 @@ namespace Rpg.AI
         {
             // A wild wolf finds its own quarrel. A named one waits to be told,
             // and BindTo will have handed it a home before this runs.
-            if (wild && _target == null)
-            {
-                var player = GameObject.FindGameObjectWithTag("Player");
-                if (player != null) _target = player.transform;
-            }
+            if (wild && _target == null) _target = Player();
         }
 
         /// <summary>Called when this wolf is named, so it stops hunting its new master.</summary>
@@ -132,6 +151,29 @@ namespace Rpg.AI
         {
             if (_state == State.Dead) { Fall(); return; }
 
+            if (_state == State.Routing)
+            {
+                if (Time.time >= _routUntil)
+                {
+                    // Composure returns, and whether it hunts again is then the
+                    // ordinary question of whether anything is still close enough
+                    // to notice. So scattering a pack buys the player the seconds
+                    // to finish the leader or leave — not a permanent pacification.
+                    _state = State.Idle;
+                }
+                else
+                {
+                    Vector3 away = transform.position - _routFrom;
+                    away.y = 0f;
+                    if (away.sqrMagnitude < 0.0001f) away = -transform.forward;
+                    away.Normalize();
+                    FaceToward(transform.position + away);
+                    MovePlanar(away * routSpeed);
+                    Animate(1f);
+                }
+                return;
+            }
+
             // Committed states run their own coroutine and must not be steered.
             if (_state == State.Telegraph || _state == State.Lunge ||
                 _state == State.Recover || _state == State.Stagger)
@@ -143,8 +185,14 @@ namespace Rpg.AI
             if (_target == null || _target.gameObject.activeInHierarchy == false)
             {
                 _target = null;
-                GoHome();
-                return;
+                // A wild wolf keeps its nose up. Without this, every way of
+                // clearing a target is permanent: a wolf that lost its quarry,
+                // and worse, a pack that routed, would stand in its territory
+                // for the rest of the game. That would make scattering a pack
+                // strictly better than killing its leader, which is the exact
+                // opposite of what the morale system is for.
+                if (wild) Reacquire();
+                if (_target == null) { GoHome(); return; }
             }
 
             float dist = PlanarDistanceTo(_target);
@@ -185,6 +233,41 @@ namespace Rpg.AI
             }
 
             Animate();
+        }
+
+        /// <summary>
+        /// Looks for something worth hunting. Only the player for now: there is
+        /// nothing else in the world a wolf would pick a fight with, and a full
+        /// threat sweep per wolf is the kind of cost that is invisible with three
+        /// of them and eats a frame with fifty.
+        /// </summary>
+        private void Reacquire()
+        {
+            if (Time.time < _nextLookAt) return;
+            _nextLookAt = Time.time + Mathf.Max(0.1f, reacquireEvery);
+
+            Transform player = Player();
+            if (player == null) return;
+
+            var health = player.GetComponent<Damageable>();
+            if (health != null && health.IsDead) return;
+
+            // Deliberately gated on noticeRange rather than taken unconditionally,
+            // which is what keeps a rout meaningful — run the wolf off and walk
+            // away and it stays run off.
+            if (PlanarDistanceTo(player) <= noticeRange) _target = player;
+        }
+
+        /// <summary>
+        /// The player, found once and remembered. Re-finds them if the reference
+        /// goes stale, so this survives a respawn.
+        /// </summary>
+        private Transform Player()
+        {
+            if (_player != null && _player.gameObject.activeInHierarchy) return _player;
+            var go = GameObject.FindGameObjectWithTag("Player");
+            _player = go != null ? go.transform : null;
+            return _player;
         }
 
         /// <summary>
