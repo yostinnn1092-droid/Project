@@ -5,10 +5,14 @@ swings, dodges, and a wolf that circles and lunges at him. Everything else in th
 design — naming monsters into a family, emergent classes, skill trees, the demon
 king — is built on top of this feeling right first.
 
-**None of this code has been compiled.** It was written in an environment with no
-Unity and no C# toolchain, so treat the first build as a spelling test: paste any
-compiler errors back and they will be fixed. Nothing here is clever, precisely
-because it could not be verified.
+**This code compiles, but has never run.** It was written without Unity, so
+`tools/check.sh` builds it against real UnityEngine assemblies pulled from NuGet
+— that catches typos, wrong argument counts and misremembered Unity APIs, which
+is most of what goes wrong when code is written blind.
+
+It says nothing about the runtime. Null references, inspector wiring, execution
+order and whether any of it is fun to play are all still unknown. Nothing here is
+clever, precisely because only half of it can be verified.
 
 ## Setting the project up
 
