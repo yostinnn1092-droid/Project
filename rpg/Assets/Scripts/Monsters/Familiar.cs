@@ -50,6 +50,15 @@ namespace Rpg.Monsters
         public FamilyRoster Master { get; private set; }
         public Transform CurrentTarget { get; private set; }
 
+        /// <summary>
+        /// Actually belongs to someone. The component can sit on a wild creature
+        /// long before that — a scene wants to configure which layers it will
+        /// fight for you without deciding that it already has — so everything
+        /// that asks "is this one of ours?" must ask THIS, not whether the
+        /// component exists.
+        /// </summary>
+        public bool IsBound => Master != null;
+
         private IMonsterBrain _brain;
         private Damageable _health;
         private Transform _holdAt;
@@ -82,6 +91,12 @@ namespace Rpg.Monsters
             // joined with its leader, having never gone down itself, would have
             // been quietly unkillable for the rest of the game.
             if (_health != null) _health.PreventDeath = false;
+
+            // Its weapons change sides with it. hostileLayers is already this
+            // familiar's own statement of what is fair game, so pointing its
+            // jaws at the same mask keeps one answer in one place.
+            foreach (var box in GetComponentsInChildren<HitBox>(true))
+                box.HitLayers = hostileLayers;
         }
 
         public void Command(FamiliarOrder order, Transform target = null)
@@ -135,6 +150,7 @@ namespace Rpg.Monsters
 
         private void OnHurt(Blow blow)
         {
+            if (!IsBound) return;
             if (Order == FamiliarOrder.Wait) return;
             if (blow.Source == null) return;
             if (blow.Source.GetComponent<Familiar>() != null) return;   // never the family
@@ -144,6 +160,11 @@ namespace Rpg.Monsters
 
         private void Update()
         {
+            // Inert until it has a master. Otherwise a wild wolf carrying this
+            // component for its settings would start hunting down the layers it
+            // is one day meant to fight FOR you — which, since those layers
+            // include the other monsters, means the pack attacking itself.
+            if (!IsBound) return;
             if (_health != null && _health.IsDead) return;
             if (Time.time < _nextThink) return;
             _nextThink = Time.time + rethinkEvery;

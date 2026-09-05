@@ -159,7 +159,21 @@ namespace Rpg.Monsters
         /// </summary>
         public bool CanBeNamed => IsDown && !_health.IsDead && !IsSpokenFor;
 
-        /// <summary>Already belongs to someone, named or not.</summary>
-        private bool IsSpokenFor => _identity.IsNamed || GetComponent<Familiar>() != null;
+        /// <summary>
+        /// Already belongs to someone, named or not. An UNBOUND Familiar does
+        /// not count: a scene may put the component on a wild creature to
+        /// configure it, and treating that as allegiance would make every such
+        /// creature impossible to subdue and impossible to name — which is to
+        /// say, it would switch the whole mechanic off.
+        /// </summary>
+        private bool IsSpokenFor
+        {
+            get
+            {
+                if (_identity.IsNamed) return true;
+                var familiar = GetComponent<Familiar>();
+                return familiar != null && familiar.IsBound;
+            }
+        }
     }
 }

@@ -35,6 +35,19 @@ namespace Rpg.Combat
         /// <summary>Whose swing this is; never hits its own owner.</summary>
         public GameObject Owner { get; set; }
 
+        /// <summary>
+        /// What this swing can connect with. Settable because allegiance is not
+        /// fixed: a wolf that joins the player must stop being able to bite
+        /// them, and the alternative — leaving its jaws pointed at the player's
+        /// layer — means your own familiar chews on you, which reads as a bug
+        /// no matter how it is explained.
+        /// </summary>
+        public LayerMask HitLayers
+        {
+            get => hitLayers;
+            set => hitLayers = value;
+        }
+
         private bool _open;
         private Blow _template;
         private readonly HashSet<Damageable> _alreadyHit = new HashSet<Damageable>();

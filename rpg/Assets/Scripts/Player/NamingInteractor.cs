@@ -35,6 +35,18 @@ namespace Rpg.Player
         /// every frame so it follows the naming window's countdown.
         /// </summary>
         public string Prompt { get; private set; } = string.Empty;
+
+        /// <summary>
+        /// The name the next confirmation will give. Exposed so a HUD can offer
+        /// a way to change it — naming every creature you ever take the same
+        /// thing, because the only way to change it is to stop and edit the
+        /// inspector, empties the mechanic of the one decision it is about.
+        /// </summary>
+        public string PendingName
+        {
+            get => pendingName;
+            set => pendingName = value;
+        }
         /// <summary>The creature currently in reach and down, if any.</summary>
         public Subduable Candidate { get; private set; }
 

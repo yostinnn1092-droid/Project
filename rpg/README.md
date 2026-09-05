@@ -5,59 +5,44 @@ swings, dodges, and a wolf that circles and lunges at him. Everything else in th
 design — naming monsters into a family, emergent classes, skill trees, the demon
 king — is built on top of this feeling right first.
 
-**This code compiles, but has never run.** It was written without Unity, so
-`tools/check.sh` builds it against real UnityEngine assemblies pulled from NuGet
-— that catches typos, wrong argument counts and misremembered Unity APIs, which
-is most of what goes wrong when code is written blind.
+**None of this has run yet.** It was written without Unity, so `tools/check.sh`
+builds it against real UnityEngine and UnityEditor assemblies pulled from NuGet.
+That catches typos, wrong argument counts and misremembered APIs — most of what
+goes wrong when code is written blind, and it has caught plenty. It says nothing
+about null references, execution order, or whether any of it is fun. Nothing here
+is clever, precisely because only half of it can be verified.
 
-It says nothing about the runtime. Null references, inspector wiring, execution
-order and whether any of it is fun to play are all still unknown. Nothing here is
-clever, precisely because only half of it can be verified.
+## Playing it
 
-## Setting the project up
+You need **Unity 6 LTS** (via Unity Hub) and about ten minutes.
 
-1. **Unity 6 LTS**, template **3D (URP)**.
-   URP, not HDRP: the reference screenshot is a mobile-grade RPG look, which URP
-   reaches comfortably and which keeps Android open. HDRP would be prettier on a
-   desktop and would close that door.
+1. **New project → 3D (URP).**
+   URP rather than HDRP: the look this is aiming at is mobile-grade, which URP
+   reaches comfortably and which keeps Android open. HDRP is prettier on a
+   desktop and closes that door.
 
-2. **Project Settings → Player → Active Input Handling → `Both`.**
-   These scripts use the old Input Manager (`Input.GetAxisRaw`, `Fire1`). If this
-   is left on the new Input System only, every script throws on the first frame.
-   This is the single most likely reason for "nothing works".
+2. **Copy `Assets/` from this folder into your new project's `Assets/`.**
+   Both `Scripts` and `Editor`. Wait for Unity to finish compiling.
 
-3. Copy `Assets/Scripts/` into your project's `Assets/`.
+3. **Tools ▸ RPG ▸ Build Test Scene.**
 
-## Building the test scene
+4. If it says input handling was changed, **restart Unity** and run the menu item
+   again. Then press **Play**.
 
-A capsule is enough. Bought art changes nothing below.
+That is the whole setup. The menu item creates the layers, fixes the input
+setting, builds the ground, the player rig, the camera, a training dummy and a
+wolf pack, wires every reference, and saves the result to
+`Assets/Scenes/Arena.unity`.
 
-**Ground** — a big Plane or Cube.
+### Why the scene is a script
 
-**Player**
-- Capsule, tagged **`Player`** (the camera and the wolf both find it by tag).
-- Add: `CharacterController`, `Damageable`, `KnockbackReceiver`,
-  `PlayerLocomotion`, `PlayerCombat`.
-- Child empty called `Weapon`, sitting roughly where a blade would be, with a
-  `HitBox` on it. Drag that into `PlayerCombat → Weapon Hit Box`.
-- Put the player on its own layer, e.g. **`Player`**.
-
-**Camera**
-- On the Main Camera add `OrbitCamera`.
-- Set **Collide With** to exclude the `Player` layer, or the camera will fight the
-  head it is following.
-
-**Wolf**
-- Capsule on a layer like **`Enemy`**.
-- Add: `CharacterController`, `Damageable`, `KnockbackReceiver`, `WolfAI`.
-- Child empty called `Jaws` with a `HitBox`. Drag into `WolfAI → Jaws`.
-
-**Hit layers** — on each `HitBox`, set **Hit Layers** to the layer it should be
-able to strike (player's weapon hits `Enemy`, wolf's jaws hit `Player`). Getting
-this wrong is the second most likely reason for "my sword does nothing".
-
-**Hitstop** — one empty object in the scene with the `Hitstop` component. Without
-it nothing breaks; hits just feel flat.
+There is no scene and no prefab checked in here, deliberately. A Unity scene is
+opaque YAML that cannot be reviewed or written correctly by anything but Unity,
+and the alternative — a page of instructions ending in "now drag the WolfAI
+component into the Brain slot" — is about forty chances to make a mistake that
+shows up as a silent nothing an hour later. As code the scene is reviewable,
+repeatable, and when a field gets renamed it fails loudly instead of leaving an
+empty slot. Run the menu item as often as you like; it is idempotent.
 
 ## Controls
 
@@ -68,19 +53,48 @@ it nothing breaks; hits just feel flat.
 | Attack | `Left Mouse` |
 | Dodge | `Space` |
 | Look | Mouse |
+| Name a downed beast | `F` |
+| Pick a different name | `Tab` |
 
-## What to judge on the first run
+## What to do on the first run
+
+**Hit the dummy first.** It is seven metres ahead and cannot fight back, which is
+the point — it isolates what a swing feels like from what a fight feels like.
+Left mouse three times for the chain. The third is the heavy one.
+
+**Then walk north to the pack.** Four wolves and a leader, the big dark one with
+the gold crest. They notice you at about fourteen metres.
 
 Ignore how it looks. The questions are:
 
-- Does a swing feel like it has **weight**, or like waving a stick?
-- When you press attack during a swing, does the next one come out when it should?
+- Does a swing have **weight**, or does it feel like waving a stick?
+- Press attack during a swing — does the next one come out when it should?
 - Can you see the wolf's crouch in time to roll it?
 - Does getting bitten feel like being hit?
+
+**Then try to take one alive.** Wear a wolf down and it collapses instead of
+dying. Walk over and press **F**. The hard part is stopping — attacks commit, so
+the greedy third swing is exactly how you lose the wolf you wanted.
+
+**Then go for the leader.** Name it and the whole pack comes with it, for one
+place on the roster. That is the payoff the naming system was built for, and it
+is the first thing worth judging in the design rather than the feel.
 
 Everything is tuned from the inspector — `AttackStep` timings on `PlayerCombat`,
 `telegraph` on `WolfAI`, `hitstopOnDamage` on `Damageable`. Those numbers are
 first guesses by someone who could not play it. **Expect to change them.**
+
+## Known rough edges
+
+- **Wild wolves can clip each other** when a lunge passes through a packmate.
+  Their jaws are set to hit both the player and other monsters, because a wolf
+  that joins you has to be able to fight the ones that did not. A tamed wolf's
+  jaws are narrowed the moment it changes sides, so a familiar cannot bite its
+  owner — but two familiars can still catch each other in a scrum.
+- **No animation.** Everything is primitives, and the attack "animation" is a
+  hitbox switching on. The telegraph is legible only because the leader has a
+  crest and every wolf has a pale snout showing which way it faces.
+- **Names do not survive a restart.** Nothing is saved yet.
 
 ## How this is meant to feel, and why
 
@@ -117,20 +131,17 @@ and what to fight; the creature's own brain still decides how. A named Minotaur
 should feel nothing like a large wolf, and that is enforced by the split rather
 than by remembering to be careful.
 
-### Scene setup for it
+### If you are wiring it by hand
 
-**Player** — add `FamilyRoster` and `NamingInteractor`.
+The builder does all of this, but for a scene of your own: the **Player** needs
+`FamilyRoster` and `NamingInteractor`; a **creature** needs `MonsterIdentity` and
+`Subduable`, with its AI component dragged into `Subduable → Brain`. Set the
+creature's layer in `NamingInteractor → Monster Layers`, and set
+`Familiar → Hostile Layers` to what it should fight for you — **not** the player's
+layer, or your own wolf will pick a fight with you.
 
-**Wolf** — add `MonsterIdentity` and `Subduable`. On `Subduable`, drag the
-`WolfAI` component into **Brain**. Set the wolf's layer in
-`NamingInteractor → Monster Layers` and `Familiar → Hostile Layers`.
-
-Hostile Layers on a familiar must **not** include the player or the family, or
-your own wolf will pick a fight with you.
-
-`pendingName` on `NamingInteractor` is a placeholder for a text field — whatever
-is typed there is the name given. `Prompt` is a string the HUD can display; there
-is deliberately no UI yet.
+A `Familiar` component can sit on a wild creature to hold those settings; it does
+nothing until the creature is actually named.
 
 ### Orders
 
@@ -166,8 +177,8 @@ leave, and standing there admiring your work does not.
 
 ### Scene setup for a pack
 
-Put the leader and its members under one parent object and add **`MonsterPack`**
-to the parent. Leave **Leader** and **Members** empty and it takes the first
+The test scene builds one already. For a scene of your own: put the leader and
+its members under one parent object and add **`MonsterPack`** to the parent. Leave **Leader** and **Members** empty and it takes the first
 child `MonsterIdentity` marked **Is Leader** and everything else beneath it.
 
 On the leader's `MonsterIdentity`, tick **Is Leader** and raise **Naming Cost** —

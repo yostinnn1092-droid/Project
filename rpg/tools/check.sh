@@ -15,7 +15,9 @@
 #   * API differences between the reference assemblies below and your Unity
 #     version. These are 2021.3 assemblies because that is the only version
 #     Unity publishes to NuGet; the APIs used here are long-stable, but a green
-#     build is not a promise about Unity 6 specifically.
+#     build is not a promise about Unity 6 specifically. UnityEditor.dll is
+#     older still (2020.2, a third-party repack) and is here only so the scene
+#     builder is compiled rather than shipped blind.
 #
 # First run downloads the SDK and the assemblies (a few hundred MB) and takes a
 # while. After that it is a couple of seconds.
@@ -23,10 +25,13 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS="$(dirname "$HERE")/Assets/Scripts"
+EDITOR_SCRIPTS="$(dirname "$HERE")/Assets/Editor"
 DOTNET_DIR="${DOTNET_ROOT:-/opt/dotnet}"
 WORK="${RPG_CHECK_DIR:-/tmp/rpg-check}"
 UNITY_VER="2021.3.33"
+EDITOR_VER="2020.2.2.1"
 PKG="$HOME/.nuget/packages/unityengine.modules/$UNITY_VER/lib/net45"
+EDPKG="$HOME/.nuget/packages/unitytechnologies.unityeditor/$EDITOR_VER/lib"
 
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 
@@ -47,6 +52,10 @@ if [ ! -d "$WORK" ]; then
   # below, because they ship as net45 libs and a netstandard project will not
   # pick them up on its own.
   ( cd "$WORK/Check" && dotnet add package UnityEngine.Modules --version "$UNITY_VER" >/dev/null )
+  # UnityEditor.dll, so the scene builder under Assets/Editor is compiled too.
+  # A builder is the one script that CANNOT be checked by playing the game — if
+  # it is broken there is no scene, so there is nothing to play.
+  ( cd "$WORK/Check" && dotnet add package UnityTechnologies.UnityEditor --version "$EDITOR_VER" >/dev/null )
 fi
 
 cat > "$WORK/Check/Check.csproj" <<EOF
@@ -61,6 +70,7 @@ cat > "$WORK/Check/Check.csproj" <<EOF
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$SCRIPTS/**/*.cs" />
+    <Compile Include="$EDITOR_SCRIPTS/**/*.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="UnityEngine"><HintPath>$PKG/UnityEngine.dll</HintPath></Reference>
@@ -70,6 +80,11 @@ cat > "$WORK/Check/Check.csproj" <<EOF
     <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$PKG/UnityEngine.InputLegacyModule.dll</HintPath></Reference>
     <Reference Include="UnityEngine.AIModule"><HintPath>$PKG/UnityEngine.AIModule.dll</HintPath></Reference>
     <Reference Include="UnityEngine.UI"><HintPath>$PKG/UnityEngine.UI.dll</HintPath></Reference>
+    <Reference Include="UnityEngine.AudioModule"><HintPath>$PKG/UnityEngine.AudioModule.dll</HintPath></Reference>
+    <Reference Include="UnityEngine.IMGUIModule"><HintPath>$PKG/UnityEngine.IMGUIModule.dll</HintPath></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$PKG/UnityEngine.TextRenderingModule.dll</HintPath></Reference>
+    <Reference Include="UnityEngine.TerrainPhysicsModule"><HintPath>$PKG/UnityEngine.TerrainPhysicsModule.dll</HintPath></Reference>
+    <Reference Include="UnityEditor"><HintPath>$EDPKG/UnityEditor.dll</HintPath></Reference>
   </ItemGroup>
 </Project>
 EOF
