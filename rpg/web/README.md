@@ -69,6 +69,8 @@ changed the design.
 | How fast can the player answer? | 46 dps; the pack is 590 health |
 | Is the naming window winnable? | Reached from 6m in 0.6s, 5.4s to spare |
 | Does the next territory land where you can go to it? | 30-42m out, never underfoot |
+| Does the stick go where you push it? | measured against the camera's own basis, at four angles |
+| What does a frame cost? | 0.019ms of simulation, 125 draw calls, 62k triangles |
 
 The one that changed the design: with no limit on how many wolves could commit
 at once, a standing player died in **7 seconds** while needing **15 seconds** of
@@ -79,11 +81,31 @@ from two directions is a promise it cannot keep. Now the pack is a rhythm: one
 commits, you roll, you punish, the next steps up, and the others stop being
 damage and start being the thing that stops you running away.
 
+## The look
+
+Overcast late afternoon on a northern moor — committed to one time of day on
+purpose, because a scene lit for "any time" is lit for none, and a long low sun
+is what gives primitives a readable silhouette and a shadow you can judge
+distance by.
+
+Everything is generated, because the whole game has to stay one file with
+nothing to fetch: a gradient sky dome, a ground texture mottled at two scales
+(coarse patches to measure distance against, fine grain so it does not band up
+close), and instanced tussocks, rock and trees — one draw call each, however
+many there are. Scatter is not decoration here: on a bare plane a sprint reads
+as standing still.
+
+Two passes of it were wrong in ways only rendering could show. The first used a
+sand-coloured haze, and since everything at distance lerps toward the fog
+colour, the entire frame came out sepia. The second scattered grass evenly at
+one tuft per ten metres, which reads as pins stuck in a lawn — grass grows in
+patches, and the fix was clumping rather than more of it.
+
 ## Building and testing
 
 ```bash
 node build.mjs arena.html      # concatenate src/*.js and inline three.js
-node test/run.mjs              # 20 regression cases
+node test/run.mjs              # 21 regression cases
 node test/run.mjs pack         # substring filter, not a regex
 node test/measure.mjs          # the balance numbers above
 node test/shot.mjs             # render stills to /tmp

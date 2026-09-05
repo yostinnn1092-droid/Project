@@ -48,6 +48,17 @@ window.__rpg = {
     if (what === 'name') naming.confirm();
   },
   setMove(x, z, run = false) { input.moveX = x; input.moveZ = z; input.run = run; },
+  /** Push the stick, in screen terms: right/forward, each -1..1. */
+  stick(right, forward) { cameraRelative(right, forward); },
+  rawInput() { return { moveX: input.moveX, moveZ: input.moveZ }; },
+  setCameraYaw(y) { cam.yaw = y; },
+  renderOnce() { renderer.render(scene, camera); },
+  /** The camera's own right and forward, for checking which way is which. */
+  cameraBasis() {
+    camera.updateMatrixWorld(true);
+    const e = camera.matrixWorld.elements;
+    return { rightX: e[0], rightZ: e[2], fwdX: -e[8], fwdZ: -e[10] };
+  },
   place(actor, x, z) { actor.pos.x = x; actor.pos.z = z; actor.syncMesh(); },
   pause() { running = false; },
   // Reached through the world so a test never has to guess at scope.

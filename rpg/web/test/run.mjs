@@ -509,6 +509,60 @@ test('messages: a payoff line is not overwritten by housekeeping behind it', () 
    `three messages sent at once came out as ${JSON.stringify(r.burst)} — they must all be shown, in order`],
 ]);
 
+test('controls: the stick moves you the way you pushed it, at any camera angle', () => {
+  const R = window.__rpg;
+  R.run(0.2);
+
+  const probe = (right, forward) => {
+    R.place(R.player, 0, 0);
+    R.run(0.1);
+    // The camera's OWN basis, out of its world matrix. Deriving "screen right"
+    // by hand here would just be a second chance to make the same sign error
+    // the game made.
+    const b = R.cameraBasis();
+    const bx = R.player.pos.x, bz = R.player.pos.z;
+    R.stick(right, forward);
+    R.run(0.6);
+    R.setMove(0, 0);
+    const dx = R.player.pos.x - bx, dz = R.player.pos.z - bz;
+    return {
+      right: +(dx * b.rightX + dz * b.rightZ).toFixed(2),
+      fwd: +(dx * b.fwdX + dz * b.fwdZ).toFixed(2),
+    };
+  };
+
+  const out = {};
+  // Not only at the default angle: the bug being guarded against is a sign
+  // error in a rotation, and a rotation is exactly what a single fixed yaw
+  // cannot detect.
+  for (const yaw of [Math.PI, Math.PI * 0.5, -Math.PI * 0.25, 2.4]) {
+    R.setCameraYaw(yaw);
+    R.run(0.2);
+    const tag = 'yaw' + yaw.toFixed(2);
+    out[tag] = {
+      right: probe(1, 0), left: probe(-1, 0),
+      up: probe(0, 1), down: probe(0, -1),
+    };
+  }
+  return out;
+}, r => {
+  const checks = [];
+  for (const [tag, m] of Object.entries(r)) {
+    checks.push([m.right.right > 0.8,
+      `${tag}: pushing RIGHT moved ${m.right.right} along the camera's right — the strafe axis is inverted`]);
+    checks.push([m.left.right < -0.8,
+      `${tag}: pushing LEFT moved ${m.left.right} along the camera's right`]);
+    checks.push([m.up.fwd > 0.8,
+      `${tag}: pushing UP moved ${m.up.fwd} forward — the forward axis is inverted`]);
+    checks.push([m.down.fwd < -0.8,
+      `${tag}: pushing DOWN moved ${m.down.fwd} forward`]);
+    // A pure sideways push must not drift forward, or the two axes are mixed.
+    checks.push([Math.abs(m.right.fwd) < 0.35,
+      `${tag}: pushing RIGHT also moved ${m.right.fwd} forward — the axes are crossed`]);
+  }
+  return checks;
+});
+
 // ── runner ────────────────────────────────────────────────────────────────
 const browser = await chromium.launch({
   executablePath: CHROME,

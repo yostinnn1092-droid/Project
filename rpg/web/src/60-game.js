@@ -10,6 +10,9 @@ const world = {
   // nothing in the game itself should be reaching for them.
   get __progression() { return progression; },
   get __spawnPack() { return spawnPack; },
+  get __camera() { return camera; },
+  get __renderer() { return renderer; },
+  get __cam() { return cam; },
 
   /**
    * Ask permission to commit to an attack. Self-pruning rather than requiring

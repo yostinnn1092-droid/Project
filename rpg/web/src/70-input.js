@@ -5,6 +5,28 @@
 const input = { moveX: 0, moveZ: 0, run: false };
 const el = id => document.getElementById(id);
 
+/**
+ * Turn a stick push or a key press into world motion, relative to where the
+ * camera is looking. `right` and `forward` are each -1..1 in SCREEN terms:
+ * push the stick right, `right` is +1.
+ *
+ * Written as two named basis vectors rather than one collapsed expression.
+ * The collapsed version had the strafe axis inverted — push right, walk left —
+ * and it survived review because there is nothing in `-(x*c + z*s)` that a
+ * reader can check against. Measured rather than re-derived: pushing right
+ * moved the player -1.31 metres along the camera's own right vector.
+ */
+function cameraRelative(right, forward) {
+  const y = cam.yaw;
+  // The camera sits at `at + dir*dist` and looks back at `at`, so the player's
+  // forward — away from the camera — is the negative of that direction.
+  const fx = -Math.sin(y), fz = -Math.cos(y);
+  // Screen-right for that view: forward x up, in three.js's right-handed world.
+  const rx = -fz, rz = fx;
+  input.moveX = forward * fx + right * rx;
+  input.moveZ = forward * fz + right * rz;
+}
+
 // ───────────────────────────────────────────────────────────── keyboard
 const keys = new Set();
 addEventListener('keydown', e => {
@@ -28,9 +50,7 @@ function readKeyboard() {
   input.run = keys.has('ShiftLeft') || keys.has('ShiftRight');
   // Camera-relative, so "up" always means away from the camera. Anything else
   // and a third-person game becomes a puzzle about which way you are facing.
-  const c = Math.cos(cam.yaw), s = Math.sin(cam.yaw);
-  input.moveX = -(x * c + z * s);
-  input.moveZ = -(-x * s + z * c);
+  cameraRelative(x, z);
 }
 
 canvas.addEventListener('mousedown', e => {
@@ -77,9 +97,8 @@ let touchActive = false;
     const k = d > MAX ? MAX / d : 1;
     knob.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
     const nx = (dx * k) / MAX, ny = (dy * k) / MAX;
-    const c = Math.cos(cam.yaw), s = Math.sin(cam.yaw);
-    input.moveX = -(nx * c + -ny * s);
-    input.moveZ = -(-nx * s + -ny * c);
+    // Screen y grows downward, so up on the pad is negative — hence -ny.
+    cameraRelative(nx, -ny);
     // Push past three quarters and you are running. One control, two speeds —
     // a separate sprint button is a thumb the player does not have.
     input.run = Math.hypot(nx, ny) > 0.75;
