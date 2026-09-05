@@ -1,4 +1,4 @@
-<title>The Naming — combat slice</title>
+<title>The Naming</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#0d1014">
 <style>
@@ -146,6 +146,48 @@
   /* On a touch screen the on-screen buttons ARE the legend. */
   @media (pointer: coarse) { #keys { display: none; } }
   @media (pointer: fine) { #touch { display: none; } }
+
+  /* ── the first thirty seconds ─────────────────────────────────────────
+     Someone opening this cold is standing in a field with a sword and no
+     idea that a wolf can be taken alive — which is the entire point of the
+     thing. Four lines, then out of the way for good. */
+  #intro {
+    position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+    padding: 24px; background: rgba(8,10,13,.82); backdrop-filter: blur(3px);
+    transition: opacity .45s ease;
+  }
+  #intro.gone { opacity: 0; pointer-events: none; }
+  #introCard {
+    width: min(430px, 100%); background: #14181d;
+    border: 1px solid rgba(233,230,223,.16); border-radius: 8px;
+    padding: 22px 24px 20px; box-shadow: 0 18px 50px rgba(0,0,0,.6);
+  }
+  #introCard h1 {
+    font-size: 25px; font-weight: 600; letter-spacing: -.01em; margin-bottom: 3px;
+  }
+  #introCard .sub {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .19em;
+    text-transform: uppercase; color: var(--dim); margin-bottom: 17px;
+  }
+  #introCard ol { list-style: none; display: flex; flex-direction: column; gap: 11px; }
+  #introCard li { display: flex; gap: 11px; font-size: 13.5px; line-height: 1.45; }
+  /* Numbered because these ARE a sequence: each step only makes sense once
+     you have felt the one before it. */
+  #introCard li em {
+    flex: none; width: 19px; height: 19px; border-radius: 50%;
+    background: rgba(240,184,41,.14); border: 1px solid rgba(240,184,41,.4);
+    color: var(--gold); font-family: var(--mono); font-size: 9.5px; font-style: normal;
+    display: grid; place-items: center; margin-top: 1px;
+  }
+  #introCard b { color: var(--gold); font-weight: 600; }
+  #begin {
+    margin-top: 20px; width: 100%; padding: 12px; border-radius: 5px; cursor: pointer;
+    border: 1px solid rgba(240,184,41,.5); background: rgba(240,184,41,.14);
+    color: var(--ink); font-family: var(--mono); font-size: 11px;
+    letter-spacing: .19em; text-transform: uppercase;
+  }
+  #begin:hover, #begin:focus-visible { background: rgba(240,184,41,.24); outline: none; }
+  @media (prefers-reduced-motion: reduce) { #intro { transition: none; } }
 </style>
 
 <canvas id="gl"></canvas>
@@ -175,6 +217,20 @@
     <div class="btn" id="bDodge">Dodge</div>
     <div class="btn" id="bName">Name</div>
     <div class="btn" id="bCycle">Other</div>
+  </div>
+</div>
+
+<div id="intro">
+  <div id="introCard">
+    <h1>The Naming</h1>
+    <div class="sub">Combat slice · unfinished</div>
+    <ol>
+      <li><em>1</em><span>Hit the <b>training dummy</b> ahead. Three taps chain; the third is heavy. Attacks <b>commit</b> — you cannot call one back.</span></li>
+      <li><em>2</em><span>Walk north to the <b>wolf pack</b>. Watch for the crouch before a lunge. That tell is a promise: see it, and you have time to roll.</span></li>
+      <li><em>3</em><span>Worn down, a wolf <b>collapses instead of dying</b>. Stop hitting it, walk over, press <b>NAME</b>. Stopping is the hard part.</span></li>
+      <li><em>4</em><span>The big one with the <b>gold crest</b> leads them. Name it and the whole pack comes with it.</span></li>
+    </ol>
+    <button id="begin" type="button">Begin</button>
   </div>
 </div>
 
@@ -7222,6 +7278,22 @@ function tap(id, fn) {
   b.addEventListener('pointercancel', off);
   b.addEventListener('pointerleave', off);
 }
+
+// The intro card. Dismissed for good on the first press — it is instruction,
+// not a menu, and nobody wants to read it twice.
+(() => {
+  const intro = el('intro'), begin = el('begin');
+  if (!intro) return;
+  const dismiss = () => {
+    intro.classList.add('gone');
+    setTimeout(() => intro.remove(), 500);
+  };
+  begin.addEventListener('click', dismiss);
+  intro.addEventListener('pointerdown', e => { if (e.target === intro) dismiss(); });
+  addEventListener('keydown', e => {
+    if (intro.isConnected && (e.code === 'Space' || e.code === 'Enter')) dismiss();
+  });
+})();
 
 tap('bAttack', () => world.player.requestAttack());
 tap('bDodge', () => world.player.requestDodge(input.moveX, input.moveZ));

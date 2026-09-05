@@ -108,6 +108,22 @@ function tap(id, fn) {
   b.addEventListener('pointerleave', off);
 }
 
+// The intro card. Dismissed for good on the first press — it is instruction,
+// not a menu, and nobody wants to read it twice.
+(() => {
+  const intro = el('intro'), begin = el('begin');
+  if (!intro) return;
+  const dismiss = () => {
+    intro.classList.add('gone');
+    setTimeout(() => intro.remove(), 500);
+  };
+  begin.addEventListener('click', dismiss);
+  intro.addEventListener('pointerdown', e => { if (e.target === intro) dismiss(); });
+  addEventListener('keydown', e => {
+    if (intro.isConnected && (e.code === 'Space' || e.code === 'Enter')) dismiss();
+  });
+})();
+
 tap('bAttack', () => world.player.requestAttack());
 tap('bDodge', () => world.player.requestDodge(input.moveX, input.moveZ));
 tap('bName', () => naming.confirm());
