@@ -12,10 +12,15 @@ const hud = {
   pending: el('pending'),
   flash: el('flash'),
   dead: el('dead'),
+  hurt: el('hurt'),
   bName: el('bName'),
+  bOrder: el('bOrder'),
 };
 
 let lastFamilySig = '';
+// A red edge when you are hit. On a phone the health bar is in the corner
+// furthest from where the eye is, so a number alone is a hit you do not notice.
+let hurtFlash = 0;
 
 function drawHud() {
   const p = world.player;
@@ -32,7 +37,8 @@ function drawHud() {
   // Rebuilt only when it changes: this runs every frame, and thrashing the DOM
   // for a list that is identical 99% of the time is a real cost on a phone.
   const sig = r.family.map(f =>
-    `${f.identity.display}:${Math.ceil(f.health.health)}`).join('|') + `/${r.capacity}`;
+    `${f.identity.display}:${Math.ceil(f.health.health)}`).join('|') +
+    `/${r.capacity}/${r.order}/${progression.territory}`;
   if (sig !== lastFamilySig) {
     lastFamilySig = sig;
     const rows = r.family.map(f => {
@@ -42,8 +48,13 @@ function drawHud() {
              `<i style="width:${pct}%"></i></div>`;
     }).join('');
     const spare = r.capacity - r.family.length;
+    const orderLabel = { follow: 'heeling', hold: 'holding', attack: 'attacking', wait: 'waiting' };
+    // Two short lines rather than one long one: at 230px the single line wrapped
+    // into itself and overlapped the roster underneath it.
     hud.family.innerHTML =
-      `<div class="famHead">Family ${r.family.length} / ${r.capacity}</div>` + rows +
+      `<div class="famHead"><span>Territory ${progression.territory}</span>` +
+      `<span>${r.family.length} / ${r.capacity}` +
+      (r.family.length ? ` · <b>${orderLabel[r.order] || r.order}</b>` : '') + `</span></div>` + rows +
       (spare > 0 ? `<div class="fam dimmed"><span>${spare} place${spare > 1 ? 's' : ''} free</span></div>` : '');
   }
 
@@ -61,4 +72,11 @@ function drawHud() {
   hud.flash.classList.toggle('on', flashing);
 
   hud.dead.classList.toggle('on', p.health.dead);
+  // The order button is dead weight with nobody to order.
+  hud.bOrder.classList.toggle('live', r.family.length > 0);
+
+
+
+  if (hurtFlash > 0) hurtFlash = Math.max(0, hurtFlash - 0.016);
+  hud.hurt.style.opacity = (hurtFlash / 0.35) * 0.55;
 }

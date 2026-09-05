@@ -31,6 +31,11 @@ class Player extends Actor {
     this.roster = new Roster(this);
     this.swing.targets = 'monster';
 
+    this.health.onHit.push(blow => {
+      cam.kick(0.16 + Math.min(0.2, (blow.impact || 0) / 90));
+      hurtFlash = 0.35;
+    });
+
     this.health.onStagger.push(() => {
       // Being staggered drops whatever you were doing. Anything else and poise
       // would be a number with no consequence.
@@ -217,7 +222,15 @@ class OrbitCamera {
     this.yaw = Math.PI;
     this.pitch = 0.30;
     this.at = new T.Vector3(target.pos.x, CFG.camera.height, target.pos.z);
+    this.shake = 0;
   }
+
+  /**
+   * Hitstop stops the world; this moves the frame. Between them a blow has
+   * both weight and force — hitstop alone reads as the game hitching, and
+   * shake alone reads as a rumble with nothing behind it.
+   */
+  kick(amount) { this.shake = Math.min(0.5, this.shake + amount); }
 
   turn(dx, dy) {
     this.yaw -= dx * CFG.camera.sensitivity;
@@ -248,9 +261,19 @@ class OrbitCamera {
     const side = new T.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
       .multiplyScalar(CFG.camera.shoulder);
 
+    let sx = 0, sy = 0;
+    if (this.shake > 0) {
+      // Decays fast and unscaled, so a freeze does not stretch the shake out
+      // into a wobble.
+      this.shake = Math.max(0, this.shake - dt * 2.6);
+      const a = world.time * 46;
+      sx = Math.sin(a) * this.shake * 0.30;
+      sy = Math.cos(a * 1.37) * this.shake * 0.22;
+    }
+
     camera.position.set(
-      this.at.x + dir.x * dist + side.x,
-      Math.max(0.6, this.at.y + dir.y * dist),
+      this.at.x + dir.x * dist + side.x + sx,
+      Math.max(0.6, this.at.y + dir.y * dist + sy),
       this.at.z + dir.z * dist + side.z);
     camera.lookAt(this.at.x + side.x * 0.5, this.at.y + 0.25, this.at.z + side.z * 0.5);
 

@@ -19,6 +19,7 @@ Open `arena.html`. That is the whole thing: one file, no server, no install.
 | Dodge | **DODGE** | `Space` |
 | Name a downed beast | **NAME** (lights up when one is down) | `F` |
 | Pick a different name | **OTHER** | `Tab` |
+| Order the family | **ORDER** (heel / send / hold) | `Q` |
 
 ## What to try, in order
 
@@ -34,7 +35,26 @@ Open `arena.html`. That is the whole thing: one file, no server, no install.
    and press NAME. The hard part is *stopping* — attacks commit, so the greedy
    third swing is exactly how you lose the wolf you wanted.
 5. **Then go for the leader.** Name it and the whole pack comes with it, for one
-   place on the roster.
+   place on the roster. Then **ORDER** them — heel, send them at something, or
+   hold ground.
+6. **Clear the territory and another appears**, further out and tougher. Every
+   second one widens the roster, so the late game is a question of who is worth
+   a place rather than whether you can afford one.
+
+Death is a full restart, and everything you named is lost with you. That is the
+only thing that makes spending will on a name a risk.
+
+## Reading a creature
+
+Each wolf wears a thin bar with a **gold tick** on it. The tick marks where that
+creature *collapses instead of dying* — everything left of it is a wolf you can
+still take alive. The fill turns gold as it enters that window, and the animal
+itself sinks and drops its head as it fails.
+
+This is not decoration. The whole mechanic asks the player to notice a creature
+is about to break and to stop swinging; without a reading of how close it is,
+that is not a decision, it is luck. The first build shipped without it and the
+collapse was a surprise that happened to you.
 
 ## What was measured, and what it changed
 
@@ -48,6 +68,7 @@ changed the design.
 | How long does a standing player last? | 10.5s against the pack |
 | How fast can the player answer? | 46 dps; the pack is 590 health |
 | Is the naming window winnable? | Reached from 6m in 0.6s, 5.4s to spare |
+| Does the next territory land where you can go to it? | 30-42m out, never underfoot |
 
 The one that changed the design: with no limit on how many wolves could commit
 at once, a standing player died in **7 seconds** while needing **15 seconds** of
@@ -62,7 +83,7 @@ damage and start being the thing that stops you running away.
 
 ```bash
 node build.mjs arena.html      # concatenate src/*.js and inline three.js
-node test/run.mjs              # 15 regression cases
+node test/run.mjs              # 20 regression cases
 node test/run.mjs pack         # substring filter, not a regex
 node test/measure.mjs          # the balance numbers above
 node test/shot.mjs             # render stills to /tmp
@@ -91,3 +112,15 @@ nothing at all —
   never consults the death guard the case existed to check.
 
 A green suite nobody has watched fail is decoration.
+
+Later rounds found four more of the same kind — a case that sampled the family's
+target *after* cycling back to Follow, which clears it, so "the family was not
+sent at its master" was true because there was no target at all; and a
+message-queue case that could not tell a queue from a single slot, because the
+message on screen has already left the queue either way. Both were rewritten
+until a deliberate break made them fail.
+
+The mutation harness itself has been wrong three times now, and each time it
+reported healthy code as untested. It is checked the same way as everything
+else: if breaking the behaviour does not turn the suite red, the harness is the
+first suspect, not the last.

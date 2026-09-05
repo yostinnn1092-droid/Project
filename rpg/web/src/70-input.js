@@ -13,6 +13,8 @@ addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); world.player.requestDodge(input.moveX, input.moveZ); }
   if (e.code === 'KeyF') { e.preventDefault(); naming.confirm(); }
   if (e.code === 'Tab') { e.preventDefault(); naming.cycle(); }
+  if (e.code === 'KeyQ') { e.preventDefault(); orderFamily(); }
+  if (e.code === 'KeyR' && world.player.health.dead) location.reload();
 });
 addEventListener('keyup', e => keys.delete(e.code));
 
@@ -128,6 +130,21 @@ tap('bAttack', () => world.player.requestAttack());
 tap('bDodge', () => world.player.requestDodge(input.moveX, input.moveZ));
 tap('bName', () => naming.confirm());
 tap('bCycle', () => naming.cycle());
+tap('bOrder', () => orderFamily());
+
+/**
+ * Death is a full restart rather than a respawn. Everything named is lost with
+ * you, which is the only thing that makes spending will on a name a risk.
+ */
+el('restart').addEventListener('click', () => location.reload());
+
+function orderFamily() {
+  const r = world.player.roster;
+  if (r.family.length === 0) return;
+  const order = r.cycleOrder();
+  const said = { follow: 'Heel.', hold: 'Hold this ground.', attack: 'Take it.' };
+  naming.say(said[order] || order);
+}
 
 // Camera drag anywhere on the right of the screen that is not a button. Giving
 // the camera a dedicated pad would cost a third thumb.

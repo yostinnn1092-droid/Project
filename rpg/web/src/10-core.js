@@ -196,6 +196,7 @@ class Swing {
       if (Math.abs(side) > this.halfWidth + r) continue;
 
       this.hit.add(target);
+      if (o.team === 'player') cam.kick(0.10 + (this.blow.impact || 0) / 260);
       const len = Math.hypot(dx, dz) || 1;
       target.health.takeHit({
         ...this.blow,

@@ -353,6 +353,162 @@ test('combat: the chain escalates and attacks commit', () => {
   [r.commitsLonger, 'the heavy swing does not commit longer than the light one'],
 ]);
 
+test('progression: clearing a territory brings another one, further out and bigger', () => {
+  const R = window.__rpg;
+  const first = R.wolves.length;
+  R.place(R.player, 0, 0);
+  for (const w of R.wolves) w.health.kill();
+  const capBefore = R.player.roster.capacity;
+  R.run(6);                                   // past the quiet beat
+  const fresh = R.wolves.filter(w => !w.health.dead);
+  const far = fresh.map(w => Math.hypot(w.pos.x - R.player.pos.x, w.pos.z - R.player.pos.z));
+  R.run(0.1);
+  // And again, to check capacity grows on the even territory.
+  for (const w of fresh) w.health.kill();
+  R.run(6);
+  return {
+    first, territory: R.world.__progression.territory,
+    spawned: fresh.length,
+    nearest: +Math.min(...far).toFixed(1),
+    capBefore, capAfter: R.player.roster.capacity,
+    third: R.wolves.filter(w => !w.health.dead).length,
+  };
+}, r => [
+  [r.spawned > 0, 'clearing the field left an empty world — there is nothing to do next'],
+  [r.nearest > 18, `the next pack spawned ${r.nearest}m away — close enough to be an ambush rather than somewhere to go`],
+  [r.territory >= 2, `still on territory ${r.territory} after clearing one`],
+  [r.capAfter > r.capBefore, 'the roster never grew, so naming stays capped at the opening limit forever'],
+  [r.third > 0, 'the third territory never arrived'],
+]);
+
+test('progression: a NAMED pack does not count as territory left to clear', () => {
+  const R = window.__rpg;
+  const leader = R.leader;
+  R.place(R.player, leader.pos.x, leader.pos.z - 1.4);
+  leader.health.health = leader.health.maxHealth * 0.2;
+  leader.health.takeHit({ damage: leader.health.maxHealth * 0.1, impact: 0, knockback: 0, dirX: 0, dirZ: 1 });
+  R.run(0.05); R.press('name'); R.run(0.05);
+  const named = leader.identity.named;
+  const wildLeft = R.world.__progression.wildLeft();
+  R.run(6);
+  return { named, wildLeft, territory: R.world.__progression.territory };
+}, r => [
+  [r.named, 'the leader was not named, so the case measured nothing'],
+  // Taking a pack alive has to count as clearing it, or naming the leader
+  // strands the player in a territory that can never be finished.
+  [r.wildLeft === 0, `${r.wildLeft} wolves still count as wild after the whole pack changed hands`],
+  [r.territory >= 2, 'naming the pack did not clear the territory — the game deadlocks'],
+]);
+
+test('orders: the family can be sent, held and recalled', () => {
+  const R = window.__rpg;
+  const leader = R.leader;
+  R.place(R.player, leader.pos.x, leader.pos.z - 1.4);
+  leader.health.health = leader.health.maxHealth * 0.2;
+  leader.health.takeHit({ damage: leader.health.maxHealth * 0.1, impact: 0, knockback: 0, dirX: 0, dirZ: 1 });
+  R.run(0.05); R.press('name'); R.run(0.05);
+  const roster = R.player.roster;
+  // Something wild to be sent at, well clear of the family.
+  R.world.__spawnPack(leader.pos.x + 16, leader.pos.z + 6, 1, 1);
+  R.run(0.1);
+
+  // Sampled AFTER EACH order, not at the end. An earlier version cycled three
+  // times and then looked: the third cycle returns to Follow, which clears the
+  // target, so "the family was not sent at its master" was true because there
+  // was no target left at all.
+  const seen = [], targets = [];
+  for (let i = 0; i < 3; i++) {
+    seen.push(roster.cycleOrder());
+    R.run(0.1);
+    const t = roster.family[0].target;
+    targets.push(t === R.player ? 'MASTER'
+      : !t ? null
+      : t.familiar && t.familiar.bound ? 'FAMILY' : 'wild');
+  }
+  const attackAt = seen.indexOf(R.Order.Attack);
+  return {
+    family: roster.family.length, seen, targets,
+    sentAtOnAttack: attackAt >= 0 ? targets[attackAt] : 'never ordered to attack',
+  };
+}, r => [
+  [r.family > 0, 'nothing was named, so the case measured nothing'],
+  [new Set(r.seen).size === 3, `cycling gave ${JSON.stringify(r.seen)} — the order control does not actually change anything`],
+  [r.sentAtOnAttack === 'wild',
+   `ordered to attack, the family went for ${r.sentAtOnAttack} — it must pick something wild, never the master and never its own`],
+]);
+
+test('condition: the bar reads the creature, and marks where it can be taken alive', () => {
+  const R = window.__rpg;
+  const w = R.wolves.find(x => !x.alpha);
+  const read = () => ({
+    shown: w.bar.visible,
+    fill: +w.bar.userData.fill.scale.x.toFixed(3),
+    tick: +w.bar.userData.tick.position.x.toFixed(3),
+  });
+  R.run(0.05);
+  const full = read();
+  w.health.health = w.health.maxHealth * 0.5;
+  R.run(0.05);
+  const half = read();
+  w.health.health = w.health.maxHealth * 0.2;
+  R.run(0.05);
+  const low = read();
+  return { full, half, low, collapseAt: R.CFG.subdue.collapseAt };
+}, r => [
+  [!r.full.shown, 'an untouched wolf is already wearing a health bar'],
+  [r.half.shown && Math.abs(r.half.fill - 0.5) < 0.02, `at half health the bar read ${r.half.fill}`],
+  [r.low.fill < r.half.fill, 'the bar did not shrink as the wolf was worn down'],
+  // The tick is the whole point: it marks where the creature collapses instead
+  // of dying, which is the only warning the player gets to stop swinging.
+  [Math.abs(r.low.tick - (-0.5 + r.collapseAt)) < 0.02,
+   `the collapse tick sits at ${r.low.tick}, not at the threshold (${(-0.5 + r.collapseAt).toFixed(3)})`],
+]);
+
+test('messages: a payoff line is not overwritten by housekeeping behind it', () => {
+  const R = window.__rpg;
+  const leader = R.leader;
+  R.place(R.player, leader.pos.x, leader.pos.z - 1.4);
+  leader.health.health = leader.health.maxHealth * 0.2;
+  leader.health.takeHit({ damage: leader.health.maxHealth * 0.1, impact: 0, knockback: 0, dirX: 0, dirZ: 1 });
+  R.run(0.05);
+  R.press('name');
+
+  // Naming the leader also clears the territory, so both messages fire within
+  // half a second. Both must be SEEN, in order.
+  const seen = [];
+  for (let i = 0; i < 60 * 14; i++) {
+    R.step(1 / 60);
+    const f = R.naming.flash;
+    if (f && seen[seen.length - 1] !== f) seen.push(f);
+  }
+  // And the queue's actual depth. The scenario above cannot test it: the
+  // displayed message has already left the queue, so even a one-deep queue
+  // shows both. Three at once is what separates a queue from a slot.
+  R.naming.messages.length = 0;
+  R.naming.flashUntil = 0;
+  R.naming.say('alpha', 0.4);
+  R.naming.say('beta', 0.4);
+  R.naming.say('gamma', 0.4);
+  const burst = [];
+  for (let i = 0; i < 60 * 6; i++) {
+    R.step(1 / 60);
+    const f = R.naming.flash;
+    if (f && burst[burst.length - 1] !== f) burst.push(f);
+  }
+
+  return {
+    seen, burst,
+    packLine: seen.some(t => /pack comes with it/.test(t)),
+    territoryLine: seen.some(t => /Territory/.test(t)),
+  };
+}, r => [
+  [r.packLine, `the naming payoff line never appeared: ${JSON.stringify(r.seen)}`],
+  [r.territoryLine, `the territory line never appeared: ${JSON.stringify(r.seen)}`],
+  [r.seen.length >= 2, `only ${r.seen.length} message(s) were shown — one overwrote the other`],
+  [JSON.stringify(r.burst) === '["alpha","beta","gamma"]',
+   `three messages sent at once came out as ${JSON.stringify(r.burst)} — they must all be shown, in order`],
+]);
+
 // ── runner ────────────────────────────────────────────────────────────────
 const browser = await chromium.launch({
   executablePath: CHROME,

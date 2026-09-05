@@ -45,9 +45,11 @@
 
   #family { margin-top: 8px; }
   .famHead {
+    display: flex; justify-content: space-between; gap: 8px;
     font-family: var(--mono); font-size: 8px; letter-spacing: .18em;
     text-transform: uppercase; color: var(--dim); margin-bottom: 4px;
   }
+  .famHead b { color: var(--will); font-weight: 400; }
   .fam {
     position: relative; background: var(--panel); border: 1px solid var(--edge);
     border-radius: 3px; padding: 3px 6px; margin-bottom: 3px;
@@ -67,22 +69,43 @@
     text-align: center; opacity: 0; transition: opacity .16s ease;
     text-shadow: 0 2px 8px rgba(0,0,0,.95); white-space: nowrap;
   }
+  /* Below the vitals column at its tallest, and above the character, so a
+     message never covers either the roster or the fight. */
+  #flash {
+    max-width: min(88vw, 460px); white-space: normal; text-wrap: balance;
+  }
   #prompt {
     bottom: 132px; font-size: clamp(13px, 3.6vw, 19px); font-weight: 600;
     background: var(--panel); border: 1px solid var(--edge); border-radius: 5px;
     padding: 7px 16px; backdrop-filter: blur(7px);
   }
   #pending { bottom: 108px; font-size: clamp(11px, 3vw, 15px); color: var(--gold); }
-  #flash   { top: 16%; font-size: clamp(13px, 3.6vw, 20px); font-weight: 600; color: var(--gold); }
+  #flash   { top: 30%; font-size: clamp(13px, 3.6vw, 19px); font-weight: 600; color: var(--gold); }
   #prompt.on, #pending.on, #flash.on { opacity: 1; }
 
+  #hurt {
+    position: absolute; inset: 0; opacity: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 42%, rgba(184,53,44,.9));
+    transition: opacity .09s linear;
+  }
   #dead {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-size: clamp(24px, 8vw, 54px); font-weight: 700; letter-spacing: .06em;
-    color: var(--blood); background: rgba(10,6,6,.5);
-    opacity: 0; transition: opacity .5s ease;
+    text-align: center; background: rgba(10,6,6,.72);
+    opacity: 0; pointer-events: none; transition: opacity .6s ease;
   }
-  #dead.on { opacity: 1; }
+  #dead.on { opacity: 1; pointer-events: auto; }
+  #dead p {
+    font-size: clamp(26px, 8vw, 52px); font-weight: 700; letter-spacing: .04em;
+    color: var(--blood); margin-bottom: 6px;
+  }
+  #dead small { display: block; color: var(--dim); font-size: 12.5px; margin-bottom: 20px; }
+  #restart {
+    padding: 11px 30px; border-radius: 5px; cursor: pointer;
+    border: 1px solid rgba(233,230,223,.32); background: rgba(233,230,223,.1);
+    color: var(--ink); font-family: var(--mono); font-size: 11px;
+    letter-spacing: .19em; text-transform: uppercase;
+  }
+  #restart:hover, #restart:focus-visible { background: rgba(233,230,223,.2); outline: none; }
 
   /* ── touch controls ───────────────────────────────────────────────── */
   #touch { position: absolute; inset: 0; pointer-events: none; }
@@ -135,6 +158,15 @@
     bottom: max(170px, calc(env(safe-area-inset-bottom) + 154px));
     width: 48px; height: 48px; font-size: 8px; opacity: .55;
   }
+  /* Left side, above the stick: the family is a thing you steer, so its
+     control belongs with the hand that steers. */
+  #bOrder {
+    left: max(18px, env(safe-area-inset-left));
+    bottom: max(146px, calc(env(safe-area-inset-bottom) + 130px));
+    width: 58px; height: 58px; font-size: 8.5px; opacity: .3;
+  }
+  #bOrder.live { opacity: 1; border-color: rgba(90,127,208,.7); background: rgba(90,127,208,.2); }
+
 
   #keys {
     position: absolute; top: 12px; right: 12px; text-align: right;
@@ -203,13 +235,21 @@
     <b>WASD</b> move · <b>Shift</b> run<br>
     <b>Drag</b> look · <b>Click</b> attack<br>
     <b>Space</b> dodge<br>
-    <b>F</b> name · <b>Tab</b> other name
+    <b>F</b> name · <b>Tab</b> other name<br>
+    <b>Q</b> order the family
   </div>
 
+  <div id="hurt"></div>
   <div id="prompt"></div>
   <div id="pending"></div>
   <div id="flash"></div>
-  <div id="dead">You died.</div>
+  <div id="dead">
+    <div>
+      <p>You died.</p>
+      <small>Everything you named is lost with you.</small>
+      <button id="restart" type="button">Begin again</button>
+    </div>
+  </div>
 
   <div id="touch">
     <div id="stick"><div id="knob"></div></div>
@@ -217,6 +257,7 @@
     <div class="btn" id="bDodge">Dodge</div>
     <div class="btn" id="bName">Name</div>
     <div class="btn" id="bCycle">Other</div>
+    <div class="btn" id="bOrder">Order</div>
   </div>
 </div>
 
@@ -228,7 +269,7 @@
       <li><em>1</em><span>Hit the <b>training dummy</b> ahead. Three taps chain; the third is heavy. Attacks <b>commit</b> — you cannot call one back.</span></li>
       <li><em>2</em><span>Walk north to the <b>wolf pack</b>. Watch for the crouch before a lunge. That tell is a promise: see it, and you have time to roll.</span></li>
       <li><em>3</em><span>Worn down, a wolf <b>collapses instead of dying</b>. Stop hitting it, walk over, press <b>NAME</b>. Stopping is the hard part.</span></li>
-      <li><em>4</em><span>The big one with the <b>gold crest</b> leads them. Name it and the whole pack comes with it.</span></li>
+      <li><em>4</em><span>The big one with the <b>gold crest</b> leads them. Name it and the whole pack comes with it — then <b>ORDER</b> them.</span></li>
     </ol>
     <button id="begin" type="button">Begin</button>
   </div>
@@ -5727,6 +5768,7 @@ class Swing {
       if (Math.abs(side) > this.halfWidth + r) continue;
 
       this.hit.add(target);
+      if (o.team === 'player') cam.kick(0.10 + (this.blow.impact || 0) / 260);
       const len = Math.hypot(dx, dz) || 1;
       target.health.takeHit({
         ...this.blow,
@@ -6033,6 +6075,8 @@ function buildWolfMesh(alpha) {
 
   g.userData.body = body;
   g.userData.legs = legs;
+  g.userData.coat = coat;      // one material per wolf, so a flash is its own
+  g.userData.baseCoat = coat.color.clone();
   return g;
 }
 
@@ -6046,6 +6090,66 @@ function buildDummyMesh() {
   arms.position.y = 1.42;
   g.add(post, torso, arms);
   return g;
+}
+
+// ───────────────────────────────────────────────────── the condition bar
+//
+// The naming system asks the player to notice a creature is about to break and
+// to STOP HITTING IT. Without a reading of how close it is, that is not a
+// decision — it is luck, and the mechanic the whole design is built on becomes
+// a surprise that happens to you.
+//
+// The gold tick is the point of the whole thing: it marks where the creature
+// collapses instead of dying. Everything left of it is a wolf you can still
+// take alive.
+function buildConditionBar() {
+  const g = new T.Group();
+  const plane = (color, opacity) => {
+    const m = new T.Sprite(new T.SpriteMaterial({
+      color, transparent: true, opacity, depthTest: false, sizeAttenuation: true,
+    }));
+    // Anchored left so the fill shrinks from the right, the way a wound reads.
+    m.center.set(0, 0.5);
+    return m;
+  };
+
+  const back = plane(0x14181d, 0.72);
+  back.scale.set(1.0, 0.10, 1);
+  back.position.x = -0.5;
+
+  const fill = plane(0xb8352c, 0.95);
+  fill.scale.set(1.0, 0.10, 1);
+  fill.position.set(-0.5, 0, 0);
+  fill.renderOrder = 2;
+
+  const tick = plane(0xf0b829, 1);
+  tick.scale.set(0.035, 0.17, 1);
+  tick.renderOrder = 3;
+
+  back.renderOrder = 1;
+  g.add(back, fill, tick);
+  g.userData = { back, fill, tick };
+  g.visible = false;
+  return g;
+}
+
+/**
+ * Drives one bar. Hidden at full health so an untouched wolf carries no UI, and
+ * held visible once hurt — a bar that faded out mid-fight would hide exactly
+ * the information the fight is about.
+ */
+function updateConditionBar(bar, health, collapseAt, down) {
+  const pct = Math.max(0, health.health / health.maxHealth);
+  if (pct >= 0.999 && !down) { bar.visible = false; return; }
+  bar.visible = true;
+
+  const width = 1.0;
+  const { fill, tick } = bar.userData;
+  fill.scale.x = Math.max(0.001, width * pct);
+  // Turns gold as it enters the window, so the moment to stop is a colour
+  // change and not a number anybody has to read mid-fight.
+  fill.material.color.setHex(down ? 0xf0b829 : pct <= collapseAt * 1.6 ? 0xd98324 : 0xb8352c);
+  tick.position.x = -0.5 + width * collapseAt;
 }
 
 
@@ -6082,6 +6186,11 @@ class Player extends Actor {
     this.dodgeDir = { x: 0, z: 1 };
     this.roster = new Roster(this);
     this.swing.targets = 'monster';
+
+    this.health.onHit.push(blow => {
+      cam.kick(0.16 + Math.min(0.2, (blow.impact || 0) / 90));
+      hurtFlash = 0.35;
+    });
 
     this.health.onStagger.push(() => {
       // Being staggered drops whatever you were doing. Anything else and poise
@@ -6269,7 +6378,15 @@ class OrbitCamera {
     this.yaw = Math.PI;
     this.pitch = 0.30;
     this.at = new T.Vector3(target.pos.x, CFG.camera.height, target.pos.z);
+    this.shake = 0;
   }
+
+  /**
+   * Hitstop stops the world; this moves the frame. Between them a blow has
+   * both weight and force — hitstop alone reads as the game hitching, and
+   * shake alone reads as a rumble with nothing behind it.
+   */
+  kick(amount) { this.shake = Math.min(0.5, this.shake + amount); }
 
   turn(dx, dy) {
     this.yaw -= dx * CFG.camera.sensitivity;
@@ -6300,9 +6417,19 @@ class OrbitCamera {
     const side = new T.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
       .multiplyScalar(CFG.camera.shoulder);
 
+    let sx = 0, sy = 0;
+    if (this.shake > 0) {
+      // Decays fast and unscaled, so a freeze does not stretch the shake out
+      // into a wobble.
+      this.shake = Math.max(0, this.shake - dt * 2.6);
+      const a = world.time * 46;
+      sx = Math.sin(a) * this.shake * 0.30;
+      sy = Math.cos(a * 1.37) * this.shake * 0.22;
+    }
+
     camera.position.set(
-      this.at.x + dir.x * dist + side.x,
-      Math.max(0.6, this.at.y + dir.y * dist),
+      this.at.x + dir.x * dist + side.x + sx,
+      Math.max(0.6, this.at.y + dir.y * dist + sy),
       this.at.z + dir.z * dist + side.z);
     camera.lookAt(this.at.x + side.x * 0.5, this.at.y + 0.25, this.at.z + side.z * 0.5);
 
@@ -6366,14 +6493,29 @@ class Wolf extends Actor {
     this.nextLookAt = 0;
     this.lungeHeading = { x: 0, z: 1 };
 
+    // Sits above the shoulders and turns gold as it enters the naming window.
+    this.bar = buildConditionBar();
+    this.bar.position.y = alpha ? 1.20 : 1.05;
+    // Measured by rendering: at 0.92 the bar was wider than the animal wearing
+    // it and drew across the player's sword.
+    this.bar.scale.setScalar(alpha ? 0.52 : 0.42);
+    this.mesh.add(this.bar);
+    this.flash = 0;
+
     this.identity = new Identity(this, alpha);
     this.subdue = new Subduable(this);
     this.familiar = new Familiar(this);
+
+    // A hit that does not visibly land on the BODY reads as a number changing
+    // somewhere. The flash is what connects the swing to the creature.
+    this.health.onHit.push(() => { this.flash = 0.12; });
 
     this.health.onStagger.push(() => this.enterStagger());
     this.health.onDeath.push(() => {
       this.state = WolfState.Dead;
       this.swing.close();
+      this.bar.visible = false;
+      this.bar.parent && this.bar.parent.remove(this.bar);
       this.mesh.rotation.z = 1.45;      // rolls onto its side
       this.mesh.position.y = 0.1;
     });
@@ -6434,11 +6576,44 @@ class Wolf extends Actor {
     }
 
     this.syncMesh();
-    // The crouch, drawn rather than described. A tell you cannot see is not one.
+    this.drawCondition(dt);
+  }
+
+  /**
+   * Everything the player reads off the animal itself. The crouch is the
+   * contract — a tell you cannot see is not one — and the faltering is the
+   * other half of it: a wolf near collapse should LOOK nearly finished, so the
+   * decision to stop swinging is one the player can see coming rather than
+   * discover afterwards.
+   */
+  drawCondition(dt) {
+    const h = this.health;
+    const pct = h.health / h.maxHealth;
+    const nearly = clamp((pct - CFG.subdue.collapseAt) /
+                         Math.max(0.01, CFG.subdue.collapseAt * 2.2), 0, 1);
+
     const crouch = this.state === WolfState.Telegraph
       ? -0.22 * Math.min(1, this.phase / Math.max(0.01, this.telegraphFor)) : 0;
-    this.mesh.position.y = this.pos.y + crouch;
-    this.mesh.rotation.x = crouch * 0.9;
+    // Sinks and drops its head as it fails, on top of whatever it is doing.
+    const failing = this.subdue.isDown ? 0 : (1 - nearly) * 0.13;
+    this.mesh.position.y = this.pos.y + crouch - failing;
+    this.mesh.rotation.x = crouch * 0.9 + failing * 1.1;
+
+    const coat = this.mesh.userData.coat, base = this.mesh.userData.baseCoat;
+    if (coat) {
+      if (this.flash > 0) {
+        this.flash -= dt;
+        coat.color.copy(base).lerp(new T.Color(0xffffff), 0.75);
+      } else {
+        // Darkens as it weakens, so condition is legible at a glance even
+        // with the bar off-screen behind another body.
+        coat.color.copy(base).multiplyScalar(0.55 + 0.45 * (0.35 + 0.65 * nearly));
+      }
+    }
+
+    updateConditionBar(this.bar, h, CFG.subdue.collapseAt, this.subdue.isDown);
+    // A named creature is family; its bar reads as an ally's, not a target's.
+    if (this.familiar.bound) this.bar.userData.fill.material.color.setHex(0x5a7fd0);
   }
 
   tickFree(dt) {
@@ -6872,6 +7047,7 @@ class Roster {
     this.capacity = CFG.roster.capacity;
     this.will = CFG.roster.maxWill;
     this.family = [];
+    this.order = Order.Follow;
 
     // Named creatures turn on whatever hurts their master. This is the "they
     // defend us" half of the promise, and it should not need an order.
@@ -6937,6 +7113,36 @@ class Roster {
 
   orderAll(order, target = null) {
     for (const f of this.family) f.familiar.command(order, target);
+  }
+
+  /**
+   * The three orders a player actually gives, on one control. Naming a wolf is
+   * the whole point of the game and until now the only thing you could do with
+   * one was watch it — Follow, Hold and Attack existed as an API nobody could
+   * reach from the screen.
+   *
+   * Attack sends the family at the nearest wild thing, because "pick a target"
+   * needs a cursor and a phone has a thumb.
+   */
+  cycleOrder() {
+    const ring = [Order.Follow, Order.Attack, Order.Hold];
+    const at = ring.indexOf(this.order || Order.Follow);
+    this.order = ring[(at + 1) % ring.length];
+
+    if (this.order !== Order.Attack) { this.orderAll(this.order); return this.order; }
+
+    let best = null, bestD = Infinity;
+    for (const a of world.actors) {
+      if (a === this.owner || a.health.dead || a.team !== 'monster') continue;
+      if (a.familiar && a.familiar.bound) continue;
+      if (a.isDummy) continue;
+      const d = dist2(a.pos, this.owner.pos);
+      if (d < bestD) { bestD = d; best = a; }
+    }
+    // Nothing to send them at is not a broken order, it is a Follow.
+    if (!best) { this.order = Order.Follow; this.orderAll(Order.Follow); return this.order; }
+    this.orderAll(Order.Attack, best);
+    return this.order;
   }
 }
 
@@ -7019,6 +7225,10 @@ const world = {
   packs: [],
   seed: 20260905 >>> 0,
   committed: new Set(),
+  // Test handles. Named with the underscore so it is obvious at a glance that
+  // nothing in the game itself should be reaching for them.
+  get __progression() { return progression; },
+  get __spawnPack() { return spawnPack; },
 
   /**
    * Ask permission to commit to an attack. Self-pruning rather than requiring
@@ -7068,22 +7278,40 @@ function spawnWorld() {
   scene.add(dummy.mesh);
 
   const [px, pz] = CFG.world.packAt;
+  world.leader = spawnPack(px, pz, 3).leader;
+}
+
+/**
+ * A leader and its escort, dropped somewhere in the field. Shared by the
+ * opening pack and every one after it, so the first fight is not a special
+ * case that quietly drifts away from the rest of the game.
+ */
+function spawnPack(px, pz, count, strength = 1) {
   const leader = new Wolf(px, pz, true, world);
-  // Three, not four. This is the first fight in the game and the one the
-  // player learns on; it should not also be the hardest thing in the slice.
-  const offsets = [[-3.2, 1.1], [3.0, 0.4], [-0.6, 3.2]];
-  const members = offsets.map(([ox, oz]) => new Wolf(px + ox, pz + oz, false, world));
+  const members = [];
+  for (let i = 0; i < count; i++) {
+    // Spread around the leader rather than in a line, so a pack reads as a
+    // group with a centre rather than a queue.
+    const a = (i / count) * Math.PI * 2 + 0.6;
+    members.push(new Wolf(px + Math.cos(a) * 3.2, pz + Math.sin(a) * 3.0, false, world));
+  }
 
   for (const w of [leader, ...members]) {
+    if (strength !== 1) {
+      w.health.maxHealth *= strength;
+      w.health.health = w.health.maxHealth;
+      w.damage *= Math.min(1.5, strength);   // capped: a fight must stay readable
+    }
     world.actors.push(w);
     scene.add(w.mesh);
-    // Facing the player, so the first thing you see is a pack looking back.
-    w.yaw = Math.atan2(player.pos.x - w.pos.x, player.pos.z - w.pos.z);
-    w.setTarget(player);
+    w.yaw = Math.atan2(world.player.pos.x - w.pos.x, world.player.pos.z - w.pos.z);
+    w.setTarget(world.player);
     w.state = WolfState.Idle;
   }
-  world.packs.push(new Pack(leader, members));
-  world.leader = leader;
+
+  const pack = new Pack(leader, members);
+  world.packs.push(pack);
+  return pack;
 }
 
 // ───────────────────────────────────────────────────────── naming in reach
@@ -7096,6 +7324,11 @@ const naming = {
   // would walk you off the body and the "f" would confirm it half-spelled.
   names: ['Fenrir', 'Garm', 'Skoll', 'Hati', 'Vargr', 'Amarok', 'Sif', 'Bran'],
   index: 0,
+  // A QUEUE, not a slot. Naming a pack's leader also clears the territory, so
+  // the two messages fire within half a second of each other — and with a
+  // single slot the housekeeping line overwrote the payoff line, which is the
+  // one moment the whole game is built around.
+  messages: [],
   flash: '',
   flashUntil: 0,
 
@@ -7138,7 +7371,25 @@ const naming = {
     }
   },
 
-  say(text) { this.flash = text; this.flashUntil = world.time + 3.2; },
+  say(text, seconds = 3.2) {
+    if (!text) return;
+    // Never say the same thing twice in a row; a repeated line reads as a bug.
+    const last = this.messages[this.messages.length - 1];
+    if (last && last.text === text) return;
+    if (this.messages.length >= 4) this.messages.shift();
+    this.messages.push({ text, seconds });
+  },
+
+  pumpMessages() {
+    if (world.time < this.flashUntil) return;
+    // A short gap between messages, so two in a row read as two rather than as
+    // one line changing under the eye.
+    if (this.flash && world.time < this.flashUntil + 0.28) return;
+    const next = this.messages.shift();
+    if (!next) { this.flash = ''; return; }
+    this.flash = next.text;
+    this.flashUntil = world.time + next.seconds;
+  },
 };
 
 // ───────────────────────────────────────────────────────────── the tick
@@ -7164,7 +7415,96 @@ function step(dt) {
   for (const a of world.actors) a.syncMesh();
 
   naming.refresh();
+  naming.pumpMessages();
+  progression.tick(dt);
   cam.tick(dt);
+}
+
+
+// ─────────────────────────────────── 65-progression.js
+// What happens after the first pack.
+//
+// Without this the game ends in three minutes: beat one pack and stand in an
+// empty field. The loop it adds is the smallest one the design can support and
+// still be about something — hunt, choose whether to kill or to name, and face
+// something bigger having spent will on that choice.
+//
+// Territories rather than waves, deliberately. A wave arrives at you and is
+// survived; a territory sits somewhere and is GONE INTO, which is the posture
+// the naming system needs — you go looking for a leader worth the risk.
+const progression = {
+  territory: 1,
+  clearedAt: 0,
+  pending: false,
+
+  /** Wild means unbound and alive: a named pack is yours, not an obstacle. */
+  wildLeft() {
+    return world.actors.filter(a =>
+      a instanceof Wolf && !a.health.dead && !a.familiar.bound).length;
+  },
+
+  tick(dt) {
+    if (world.player.health.dead) return;
+    const wild = this.wildLeft();
+
+    if (!this.pending && wild === 0) {
+      this.pending = true;
+      // A beat before the next one, so clearing a territory has a moment of
+      // quiet in it. Arriving instantly would make the field feel like a
+      // spawner rather than a place.
+      this.clearedAt = world.time + 4.0;
+      this.say(`Territory ${this.territory} is yours.`);
+      return;
+    }
+    if (!this.pending || world.time < this.clearedAt) return;
+
+    this.pending = false;
+    this.territory++;
+    this.advance();
+  },
+
+  advance() {
+    const t = this.territory;
+    // Grows slowly. The interesting escalation is the leader being worth more
+    // than the pack, not the pack being bigger.
+    const count = Math.min(6, 2 + Math.floor(t / 2));
+    const strength = 1 + (t - 1) * 0.22;
+
+    // Placed away from wherever the player is standing, far enough that they
+    // walk INTO it rather than being ambushed at the moment of arrival.
+    const a = world.rnd() * Math.PI * 2;
+    const away = 30 + world.rnd() * 12;
+    let px = world.player.pos.x + Math.cos(a) * away;
+    let pz = world.player.pos.z + Math.sin(a) * away;
+    const edge = CFG.world.groundRadius - 12;
+    const d = Math.hypot(px, pz);
+    if (d > edge) { px *= edge / d; pz *= edge / d; }
+
+    spawnPack(px, pz, count, strength);
+
+    // Naming gets easier to afford as the roster grows, so the late game is a
+    // question of WHO is worth a place rather than whether one can be paid for.
+    if (t % 2 === 0) world.player.roster.capacity++;
+
+    const dir = compass(px - world.player.pos.x, pz - world.player.pos.z);
+    this.say(`Territory ${t}: a pack to the ${dir}.`);
+  },
+
+  // Routed through the same channel as everything else. Two independent
+  // message slots is two messages on screen at once, and they landed on top of
+  // each other and on the family panel underneath.
+  say(text) { naming.say(text, 5.0); },
+};
+
+/**
+ * Which way to walk. A message that says "a pack appeared" and leaves the
+ * player turning on the spot to find it is a message that has not been sent.
+ */
+function compass(dx, dz) {
+  const a = Math.atan2(dx, dz);
+  const names = ['north', 'north-east', 'east', 'south-east',
+                 'south', 'south-west', 'west', 'north-west'];
+  return names[(Math.round(a / (Math.PI / 4)) + 8) % 8];
 }
 
 
@@ -7184,6 +7524,8 @@ addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); world.player.requestDodge(input.moveX, input.moveZ); }
   if (e.code === 'KeyF') { e.preventDefault(); naming.confirm(); }
   if (e.code === 'Tab') { e.preventDefault(); naming.cycle(); }
+  if (e.code === 'KeyQ') { e.preventDefault(); orderFamily(); }
+  if (e.code === 'KeyR' && world.player.health.dead) location.reload();
 });
 addEventListener('keyup', e => keys.delete(e.code));
 
@@ -7299,6 +7641,21 @@ tap('bAttack', () => world.player.requestAttack());
 tap('bDodge', () => world.player.requestDodge(input.moveX, input.moveZ));
 tap('bName', () => naming.confirm());
 tap('bCycle', () => naming.cycle());
+tap('bOrder', () => orderFamily());
+
+/**
+ * Death is a full restart rather than a respawn. Everything named is lost with
+ * you, which is the only thing that makes spending will on a name a risk.
+ */
+el('restart').addEventListener('click', () => location.reload());
+
+function orderFamily() {
+  const r = world.player.roster;
+  if (r.family.length === 0) return;
+  const order = r.cycleOrder();
+  const said = { follow: 'Heel.', hold: 'Hold this ground.', attack: 'Take it.' };
+  naming.say(said[order] || order);
+}
 
 // Camera drag anywhere on the right of the screen that is not a button. Giving
 // the camera a dedicated pad would cost a third thumb.
@@ -7336,10 +7693,15 @@ const hud = {
   pending: el('pending'),
   flash: el('flash'),
   dead: el('dead'),
+  hurt: el('hurt'),
   bName: el('bName'),
+  bOrder: el('bOrder'),
 };
 
 let lastFamilySig = '';
+// A red edge when you are hit. On a phone the health bar is in the corner
+// furthest from where the eye is, so a number alone is a hit you do not notice.
+let hurtFlash = 0;
 
 function drawHud() {
   const p = world.player;
@@ -7356,7 +7718,8 @@ function drawHud() {
   // Rebuilt only when it changes: this runs every frame, and thrashing the DOM
   // for a list that is identical 99% of the time is a real cost on a phone.
   const sig = r.family.map(f =>
-    `${f.identity.display}:${Math.ceil(f.health.health)}`).join('|') + `/${r.capacity}`;
+    `${f.identity.display}:${Math.ceil(f.health.health)}`).join('|') +
+    `/${r.capacity}/${r.order}/${progression.territory}`;
   if (sig !== lastFamilySig) {
     lastFamilySig = sig;
     const rows = r.family.map(f => {
@@ -7366,8 +7729,13 @@ function drawHud() {
              `<i style="width:${pct}%"></i></div>`;
     }).join('');
     const spare = r.capacity - r.family.length;
+    const orderLabel = { follow: 'heeling', hold: 'holding', attack: 'attacking', wait: 'waiting' };
+    // Two short lines rather than one long one: at 230px the single line wrapped
+    // into itself and overlapped the roster underneath it.
     hud.family.innerHTML =
-      `<div class="famHead">Family ${r.family.length} / ${r.capacity}</div>` + rows +
+      `<div class="famHead"><span>Territory ${progression.territory}</span>` +
+      `<span>${r.family.length} / ${r.capacity}` +
+      (r.family.length ? ` · <b>${orderLabel[r.order] || r.order}</b>` : '') + `</span></div>` + rows +
       (spare > 0 ? `<div class="fam dimmed"><span>${spare} place${spare > 1 ? 's' : ''} free</span></div>` : '');
   }
 
@@ -7385,6 +7753,13 @@ function drawHud() {
   hud.flash.classList.toggle('on', flashing);
 
   hud.dead.classList.toggle('on', p.health.dead);
+  // The order button is dead weight with nobody to order.
+  hud.bOrder.classList.toggle('live', r.family.length > 0);
+
+
+
+  if (hurtFlash > 0) hurtFlash = Math.max(0, hurtFlash - 0.016);
+  hud.hurt.style.opacity = (hurtFlash / 0.35) * 0.55;
 }
 
 
@@ -7441,6 +7816,8 @@ window.__rpg = {
   setMove(x, z, run = false) { input.moveX = x; input.moveZ = z; input.run = run; },
   place(actor, x, z) { actor.pos.x = x; actor.pos.z = z; actor.syncMesh(); },
   pause() { running = false; },
+  // Reached through the world so a test never has to guess at scope.
+  get progression() { return progression; },
 };
 
 })();</script>

@@ -189,6 +189,8 @@ function buildWolfMesh(alpha) {
 
   g.userData.body = body;
   g.userData.legs = legs;
+  g.userData.coat = coat;      // one material per wolf, so a flash is its own
+  g.userData.baseCoat = coat.color.clone();
   return g;
 }
 
@@ -202,4 +204,64 @@ function buildDummyMesh() {
   arms.position.y = 1.42;
   g.add(post, torso, arms);
   return g;
+}
+
+// ───────────────────────────────────────────────────── the condition bar
+//
+// The naming system asks the player to notice a creature is about to break and
+// to STOP HITTING IT. Without a reading of how close it is, that is not a
+// decision — it is luck, and the mechanic the whole design is built on becomes
+// a surprise that happens to you.
+//
+// The gold tick is the point of the whole thing: it marks where the creature
+// collapses instead of dying. Everything left of it is a wolf you can still
+// take alive.
+function buildConditionBar() {
+  const g = new T.Group();
+  const plane = (color, opacity) => {
+    const m = new T.Sprite(new T.SpriteMaterial({
+      color, transparent: true, opacity, depthTest: false, sizeAttenuation: true,
+    }));
+    // Anchored left so the fill shrinks from the right, the way a wound reads.
+    m.center.set(0, 0.5);
+    return m;
+  };
+
+  const back = plane(0x14181d, 0.72);
+  back.scale.set(1.0, 0.10, 1);
+  back.position.x = -0.5;
+
+  const fill = plane(0xb8352c, 0.95);
+  fill.scale.set(1.0, 0.10, 1);
+  fill.position.set(-0.5, 0, 0);
+  fill.renderOrder = 2;
+
+  const tick = plane(0xf0b829, 1);
+  tick.scale.set(0.035, 0.17, 1);
+  tick.renderOrder = 3;
+
+  back.renderOrder = 1;
+  g.add(back, fill, tick);
+  g.userData = { back, fill, tick };
+  g.visible = false;
+  return g;
+}
+
+/**
+ * Drives one bar. Hidden at full health so an untouched wolf carries no UI, and
+ * held visible once hurt — a bar that faded out mid-fight would hide exactly
+ * the information the fight is about.
+ */
+function updateConditionBar(bar, health, collapseAt, down) {
+  const pct = Math.max(0, health.health / health.maxHealth);
+  if (pct >= 0.999 && !down) { bar.visible = false; return; }
+  bar.visible = true;
+
+  const width = 1.0;
+  const { fill, tick } = bar.userData;
+  fill.scale.x = Math.max(0.001, width * pct);
+  // Turns gold as it enters the window, so the moment to stop is a colour
+  // change and not a number anybody has to read mid-fight.
+  fill.material.color.setHex(down ? 0xf0b829 : pct <= collapseAt * 1.6 ? 0xd98324 : 0xb8352c);
+  tick.position.x = -0.5 + width * collapseAt;
 }

@@ -12,6 +12,7 @@ class Roster {
     this.capacity = CFG.roster.capacity;
     this.will = CFG.roster.maxWill;
     this.family = [];
+    this.order = Order.Follow;
 
     // Named creatures turn on whatever hurts their master. This is the "they
     // defend us" half of the promise, and it should not need an order.
@@ -77,6 +78,36 @@ class Roster {
 
   orderAll(order, target = null) {
     for (const f of this.family) f.familiar.command(order, target);
+  }
+
+  /**
+   * The three orders a player actually gives, on one control. Naming a wolf is
+   * the whole point of the game and until now the only thing you could do with
+   * one was watch it — Follow, Hold and Attack existed as an API nobody could
+   * reach from the screen.
+   *
+   * Attack sends the family at the nearest wild thing, because "pick a target"
+   * needs a cursor and a phone has a thumb.
+   */
+  cycleOrder() {
+    const ring = [Order.Follow, Order.Attack, Order.Hold];
+    const at = ring.indexOf(this.order || Order.Follow);
+    this.order = ring[(at + 1) % ring.length];
+
+    if (this.order !== Order.Attack) { this.orderAll(this.order); return this.order; }
+
+    let best = null, bestD = Infinity;
+    for (const a of world.actors) {
+      if (a === this.owner || a.health.dead || a.team !== 'monster') continue;
+      if (a.familiar && a.familiar.bound) continue;
+      if (a.isDummy) continue;
+      const d = dist2(a.pos, this.owner.pos);
+      if (d < bestD) { bestD = d; best = a; }
+    }
+    // Nothing to send them at is not a broken order, it is a Follow.
+    if (!best) { this.order = Order.Follow; this.orderAll(Order.Follow); return this.order; }
+    this.orderAll(Order.Attack, best);
+    return this.order;
   }
 }
 

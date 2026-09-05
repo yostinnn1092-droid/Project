@@ -50,4 +50,6 @@ window.__rpg = {
   setMove(x, z, run = false) { input.moveX = x; input.moveZ = z; input.run = run; },
   place(actor, x, z) { actor.pos.x = x; actor.pos.z = z; actor.syncMesh(); },
   pause() { running = false; },
+  // Reached through the world so a test never has to guess at scope.
+  get progression() { return progression; },
 };

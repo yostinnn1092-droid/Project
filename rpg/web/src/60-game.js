@@ -6,6 +6,10 @@ const world = {
   packs: [],
   seed: 20260905 >>> 0,
   committed: new Set(),
+  // Test handles. Named with the underscore so it is obvious at a glance that
+  // nothing in the game itself should be reaching for them.
+  get __progression() { return progression; },
+  get __spawnPack() { return spawnPack; },
 
   /**
    * Ask permission to commit to an attack. Self-pruning rather than requiring
@@ -55,22 +59,40 @@ function spawnWorld() {
   scene.add(dummy.mesh);
 
   const [px, pz] = CFG.world.packAt;
+  world.leader = spawnPack(px, pz, 3).leader;
+}
+
+/**
+ * A leader and its escort, dropped somewhere in the field. Shared by the
+ * opening pack and every one after it, so the first fight is not a special
+ * case that quietly drifts away from the rest of the game.
+ */
+function spawnPack(px, pz, count, strength = 1) {
   const leader = new Wolf(px, pz, true, world);
-  // Three, not four. This is the first fight in the game and the one the
-  // player learns on; it should not also be the hardest thing in the slice.
-  const offsets = [[-3.2, 1.1], [3.0, 0.4], [-0.6, 3.2]];
-  const members = offsets.map(([ox, oz]) => new Wolf(px + ox, pz + oz, false, world));
+  const members = [];
+  for (let i = 0; i < count; i++) {
+    // Spread around the leader rather than in a line, so a pack reads as a
+    // group with a centre rather than a queue.
+    const a = (i / count) * Math.PI * 2 + 0.6;
+    members.push(new Wolf(px + Math.cos(a) * 3.2, pz + Math.sin(a) * 3.0, false, world));
+  }
 
   for (const w of [leader, ...members]) {
+    if (strength !== 1) {
+      w.health.maxHealth *= strength;
+      w.health.health = w.health.maxHealth;
+      w.damage *= Math.min(1.5, strength);   // capped: a fight must stay readable
+    }
     world.actors.push(w);
     scene.add(w.mesh);
-    // Facing the player, so the first thing you see is a pack looking back.
-    w.yaw = Math.atan2(player.pos.x - w.pos.x, player.pos.z - w.pos.z);
-    w.setTarget(player);
+    w.yaw = Math.atan2(world.player.pos.x - w.pos.x, world.player.pos.z - w.pos.z);
+    w.setTarget(world.player);
     w.state = WolfState.Idle;
   }
-  world.packs.push(new Pack(leader, members));
-  world.leader = leader;
+
+  const pack = new Pack(leader, members);
+  world.packs.push(pack);
+  return pack;
 }
 
 // ───────────────────────────────────────────────────────── naming in reach
@@ -83,6 +105,11 @@ const naming = {
   // would walk you off the body and the "f" would confirm it half-spelled.
   names: ['Fenrir', 'Garm', 'Skoll', 'Hati', 'Vargr', 'Amarok', 'Sif', 'Bran'],
   index: 0,
+  // A QUEUE, not a slot. Naming a pack's leader also clears the territory, so
+  // the two messages fire within half a second of each other — and with a
+  // single slot the housekeeping line overwrote the payoff line, which is the
+  // one moment the whole game is built around.
+  messages: [],
   flash: '',
   flashUntil: 0,
 
@@ -125,7 +152,25 @@ const naming = {
     }
   },
 
-  say(text) { this.flash = text; this.flashUntil = world.time + 3.2; },
+  say(text, seconds = 3.2) {
+    if (!text) return;
+    // Never say the same thing twice in a row; a repeated line reads as a bug.
+    const last = this.messages[this.messages.length - 1];
+    if (last && last.text === text) return;
+    if (this.messages.length >= 4) this.messages.shift();
+    this.messages.push({ text, seconds });
+  },
+
+  pumpMessages() {
+    if (world.time < this.flashUntil) return;
+    // A short gap between messages, so two in a row read as two rather than as
+    // one line changing under the eye.
+    if (this.flash && world.time < this.flashUntil + 0.28) return;
+    const next = this.messages.shift();
+    if (!next) { this.flash = ''; return; }
+    this.flash = next.text;
+    this.flashUntil = world.time + next.seconds;
+  },
 };
 
 // ───────────────────────────────────────────────────────────── the tick
@@ -151,5 +196,7 @@ function step(dt) {
   for (const a of world.actors) a.syncMesh();
 
   naming.refresh();
+  naming.pumpMessages();
+  progression.tick(dt);
   cam.tick(dt);
 }

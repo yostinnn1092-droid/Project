@@ -48,14 +48,29 @@ class Wolf extends Actor {
     this.nextLookAt = 0;
     this.lungeHeading = { x: 0, z: 1 };
 
+    // Sits above the shoulders and turns gold as it enters the naming window.
+    this.bar = buildConditionBar();
+    this.bar.position.y = alpha ? 1.20 : 1.05;
+    // Measured by rendering: at 0.92 the bar was wider than the animal wearing
+    // it and drew across the player's sword.
+    this.bar.scale.setScalar(alpha ? 0.52 : 0.42);
+    this.mesh.add(this.bar);
+    this.flash = 0;
+
     this.identity = new Identity(this, alpha);
     this.subdue = new Subduable(this);
     this.familiar = new Familiar(this);
+
+    // A hit that does not visibly land on the BODY reads as a number changing
+    // somewhere. The flash is what connects the swing to the creature.
+    this.health.onHit.push(() => { this.flash = 0.12; });
 
     this.health.onStagger.push(() => this.enterStagger());
     this.health.onDeath.push(() => {
       this.state = WolfState.Dead;
       this.swing.close();
+      this.bar.visible = false;
+      this.bar.parent && this.bar.parent.remove(this.bar);
       this.mesh.rotation.z = 1.45;      // rolls onto its side
       this.mesh.position.y = 0.1;
     });
@@ -116,11 +131,44 @@ class Wolf extends Actor {
     }
 
     this.syncMesh();
-    // The crouch, drawn rather than described. A tell you cannot see is not one.
+    this.drawCondition(dt);
+  }
+
+  /**
+   * Everything the player reads off the animal itself. The crouch is the
+   * contract — a tell you cannot see is not one — and the faltering is the
+   * other half of it: a wolf near collapse should LOOK nearly finished, so the
+   * decision to stop swinging is one the player can see coming rather than
+   * discover afterwards.
+   */
+  drawCondition(dt) {
+    const h = this.health;
+    const pct = h.health / h.maxHealth;
+    const nearly = clamp((pct - CFG.subdue.collapseAt) /
+                         Math.max(0.01, CFG.subdue.collapseAt * 2.2), 0, 1);
+
     const crouch = this.state === WolfState.Telegraph
       ? -0.22 * Math.min(1, this.phase / Math.max(0.01, this.telegraphFor)) : 0;
-    this.mesh.position.y = this.pos.y + crouch;
-    this.mesh.rotation.x = crouch * 0.9;
+    // Sinks and drops its head as it fails, on top of whatever it is doing.
+    const failing = this.subdue.isDown ? 0 : (1 - nearly) * 0.13;
+    this.mesh.position.y = this.pos.y + crouch - failing;
+    this.mesh.rotation.x = crouch * 0.9 + failing * 1.1;
+
+    const coat = this.mesh.userData.coat, base = this.mesh.userData.baseCoat;
+    if (coat) {
+      if (this.flash > 0) {
+        this.flash -= dt;
+        coat.color.copy(base).lerp(new T.Color(0xffffff), 0.75);
+      } else {
+        // Darkens as it weakens, so condition is legible at a glance even
+        // with the bar off-screen behind another body.
+        coat.color.copy(base).multiplyScalar(0.55 + 0.45 * (0.35 + 0.65 * nearly));
+      }
+    }
+
+    updateConditionBar(this.bar, h, CFG.subdue.collapseAt, this.subdue.isDown);
+    // A named creature is family; its bar reads as an ally's, not a target's.
+    if (this.familiar.bound) this.bar.userData.fill.material.color.setHex(0x5a7fd0);
   }
 
   tickFree(dt) {
