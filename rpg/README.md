@@ -14,6 +14,17 @@ is clever, precisely because only half of it can be verified.
 
 ## Playing it
 
+**On a phone, or without Unity: open [`web/arena.html`](web/README.md).** It is
+one self-contained file — the same design, rebuilt to run in a browser, with
+touch controls. It is also the only version that has actually been *played*: the
+balance numbers in its README were measured rather than guessed, and one of them
+changed the design.
+
+The Unity project below is where the realistic look eventually happens. It needs
+a desktop.
+
+### In Unity
+
 You need **Unity 6 LTS** (via Unity Hub) and about ten minutes.
 
 1. **New project → 3D (URP).**
